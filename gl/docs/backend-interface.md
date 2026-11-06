@@ -1,6 +1,6 @@
 # DOS-GL's back-end interface (step B0)
 
-**Status (2026-11-06): B0 v0, for the owner's review with GLOS's phase A.**
+**Status (2026-11-06): B0 v1, reviewed with the owner with GLOS's phase A; their answers written in.**
 
 Step B0 of the software renderer's plan (`docs/backends.md`):
 - every call DOS-GL's GL layer makes into Matrox code today, listed;
@@ -23,7 +23,7 @@ The census is of DOS-GL main 7a277d1: `src/gl` and `src/dgl`, against MGA-Glide 
      - polygon offset, fog's subdivision;
      - the WARP or the CPU setup.
 
-   So the interface keeps today's seam, in clip space (question 1).
+   So the interface keeps today's seam, in clip space (settled at the review).
 2. **Platform services aren't the back end's.** Some of the HAL's headers are DOS and DJGPP services that every
    back end and the GL layer use alike. They stay shared:
    - `sys.h`: time in µs, fault and exit hooks;
@@ -51,7 +51,8 @@ The census is of DOS-GL main 7a277d1: `src/gl` and `src/dgl`, against MGA-Glide 
    - Quake 2: `gl_mesh.c`'s shadows, `have_stencil`;
    - PrBoom-plus: `gl_missingtexture.c` and `gl_detail.c`, `gl_use_stencil`.
 
-   Both run without it, as they do today (question 2).
+   Both run without it, as they do today. The owner chose stencil in B2 from its start all the same
+   ([Stencil in B2](#stencil-in-b2)), for those two programs' sake.
 
 ## The interface
 
@@ -278,22 +279,37 @@ pixels.
 - **The bench:** bench-g400 by the usual checks; the P4 (the silicon tier) once it is set up.
 - **The grep above:** no Matrox header outside the back end.
 
-## Questions, for the owner
+## Settled at the owner's review (2026-11-06)
 
-1. **The seam for drawing: clip space (today's), or screen space (the plan's table)?** `docs/backends.md` said
-   "triangles after clipping and projection", meaning the GL layer would clip and project for every back end.
-
-   The census suggests clip space, as `dgl_sink` is today, for three reasons:
+1. **The seam for drawing is clip space,** as `dgl_sink` is today:
    - B1 changes no pixel by construction, because the Matrox clipping, projection and culling move as they are;
    - each back end projects to its own precision (the Matrox setup's fixed point; the software rasteriser's
      sub-pixel steps), and clips to its own guard band;
    - the Matrox fast path keeps its own transform.
 
-   The shared clipper and helpers keep the duplication small. **Recommended: clip space**, with the plan's table
-   amended.
-2. **Stencil: in B2's first version, or later?** No program needs it (finding 5). In the software renderer it would
-   cost a byte a pixel and a test in the inner loop. Its gains: PrBoom-plus's fix for missing textures, and Quake
-   2's shadows without overlaps.
+   The shared clipper and helpers keep the duplication small. `docs/backends.md`'s table is amended to match.
+2. **Stencil is in the software renderer from B2's start:** 8 bits, beside the depth buffer. What that brings to the
+   interface and the GL layer is in [Stencil in B2](#stencil-in-b2).
 
-   **Recommended: later**, as a step after B2. The interface carries the state and `caps` says 0 bits until then.
-   Stencil on the Matrox cards is a separate question: the HAL has none today.
+## Stencil in B2
+
+- **The program asks:** `DGLConfig` gains `stencil_bits` at its end (0: none, as today; 8). Programs link
+  `libGL.a`, so this is a source-compatible change: a zeroed `DGLConfig` asks for none.
+  - The SDL3 bridge passes `SDL_GL_STENCIL_SIZE` through.
+  - Quake 2 and PrBoom-plus then find stencil bits and use them, as they do on other GLs.
+- **The back end says:** `caps` reports the stencil bits it gave: 8 on the software back end, 0 on the Matrox one.
+  The GL layer stops treating stencil as "always passes" only where `caps` has bits.
+- **The GL layer:**
+  - `glGet(GL_STENCIL_BITS)` comes from `caps`;
+  - `glClear(GL_STENCIL_BUFFER_BIT)` reaches the back end's `clear` with `clear_stencil`;
+  - the stencil state (`dgl_gl`'s `stencil_*`, already tracked) joins the raster dirty group the back end
+    validates.
+- **The software back end:**
+  - a byte a pixel in its own buffer, beside 16- or 32-bit depth;
+  - the test and the three operations in the per-pixel loop, taken out of the loop entirely (a separate inner
+    loop) when the test is off, so programs without stencil pay nothing.
+- **Tests:**
+  - conformance tests for stencil, compared with OSMesa as the others are;
+  - Quake 2's shadows and PrBoom-plus's missing-texture fix as games' frames on the software back end.
+- **The Matrox back end:** stays at 0 bits; whether the G400's hardware can have stencil is a separate question
+  (the HAL has none today).

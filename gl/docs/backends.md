@@ -44,7 +44,7 @@ texture objects and their GL formats. Below one interface, a back end does what 
 | **Surfaces** | Colour and depth buffers: full-screen (VBE or a native mode), or a GLOS window's pixels; resize; present (swap, or copy to a window) |
 | **State** | Blend, depth test and write, alpha test, fog, scissor, colour mask, shading, texture environment and combiners, as a validated block, not registers |
 | **Textures** | Allocate, upload (sub-images too), free; its own memory and formats (VRAM for a card, system memory for software) |
-| **Drawing** | Triangles after clipping and projection, with their attributes (colour, texture coordinates, fog, depth); clear; finish and flush |
+| **Drawing** | Triangles in clip space, as DOS-GL's sink has them today: each back end clips (with a shared clipper and its own guard band) and projects to its own precision (B0, settled at the review); clear; finish and flush |
 | **Reading** | Read pixels; snapshots and crash dumps (`snap.c`, `crash.c`) |
 | **Selection** | Found and chosen at `dglInit`: `DGL_DEVICE=mga` / `soft` / later `tnt2`, or the first that works |
 
@@ -70,7 +70,7 @@ include the WARP, AGP, dual texture, the HAL's 2D engine and GLOS's GPU lock. Th
   - **Textures:** nearest and bilinear, mipmaps, the GL 1.1 environments (replace, modulate, decal, blend), and the
     multitexture DOS-GL already offers (two units).
   - **Per-pixel work:** depth (16 bits, 32 where asked), alpha test, blend, fog (per vertex and per pixel as GL
-    allows), scissor, colour mask; stencil if B0 finds a user.
+    allows), scissor, colour mask; 8-bit stencil (the owner's answer at B0's review).
   - **Colour formats:** 16 bits (RGB565, GLOS's windowed format), 32 bits, and 8 bits with a fixed palette, for
     VBE cards whose useful modes are 8-bit (the owner's answer).
   - **Speed:**
@@ -126,4 +126,5 @@ include the WARP, AGP, dual texture, the HAL's 2D engine and GLOS's GPU lock. Th
 3. **MMX from the start,** with plain loops for other CPUs.
 4. **The plan approved as it stands.** Merges and pushes stay with the owner's approval.
 
-Still to settle in B0: stencil in the software renderer from the start, or only when a program needs it.
+B0's review (2026-11-06): the back-end interface in clip space; stencil (8 bits) in the software renderer from B2's
+start. B0 is `docs/backend-interface.md`.
