@@ -127,7 +127,7 @@ hand-over still waits for any WARPs (`engine_take`, below).
 
 ## Glide (W5)
 
-MGA-Glide sets every triangle up through the WARP (`src/glide/draw.c`, `warp_tri`), a band of levels as the whole
+MGA-Glide sets every triangle up through the WARP (`glide/src/glide/draw.c`, `warp_tri`), a band of levels as the whole
 triangle under the clip narrowed to its rows. A surface's passes must never mix the WARP's setup and the CPU's: their
 depths and edges differ slightly, so on bench-g400 the Arena's lightmap pass flickered and triangle edges showed
 through where they mixed. Bands with their own fog fit stay on the CPU (their vertices' factors leave 0..255, which a

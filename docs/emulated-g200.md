@@ -8,7 +8,7 @@ and cuda6 checks (PRD WP-3, milestone M5). Like every 86Box change in this
 project it is local and never upstreamed (PRD D4).
 
 Select it with `--card g200` (or `MGA_CARD=g200`) in `tools/loopa/run.py`
-and `tools/conform/run.py`.
+and `glide/tools/conform/run.py`.
 
 ## What it adds to the G100 model
 

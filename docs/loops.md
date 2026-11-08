@@ -241,13 +241,13 @@ It found six places where 86Box differed, and GLOS's tests found more. Local pat
 It is empty; the RTC firing with register C unread and PGE having no effect
 are recorded as INFO.
 
-### Conformance (`tools/conform/run.py`)
+### Conformance (`glide/tools/conform/run.py`)
 
 `ref` runs a test on the retail runtime and the emulated Voodoo and stores
-its frames in `tests/conform/ref/voodoo/<test>/`; `check` runs it on
+its frames in `glide/tests/conform/ref/voodoo/<test>/`; `check` runs it on
 MGA-Glide and the emulated G100 and compares (`tools/imgcmp.py`: 565
 quantisation, per-channel tolerance, fraction of pixels allowed beyond it,
-edge masking). `tests/conform/manifest.json` holds per-test and per-frame
+edge masking). `glide/tests/conform/manifest.json` holds per-test and per-frame
 tolerances, box filtering for G100 stipple, `ignore` rectangles for
 documented reference-card gaps, and per-cell gating for the combine grid.
 
@@ -257,7 +257,7 @@ documented reference-card gaps, and per-cell gating for the combine grid.
 with keys and screenshots on a timetable. `SET MGAGLIDE=...` in `--pre`
 sets runtime options (for example `exit_after`, `stats`, `census`,
 `trace`). Call traces replayed with GLPLAY on both paths give the REPLAY
-comparison (`tools/games/replay.py`, see `docs/trace.md`).
+comparison (`tools/games/replay.py`, see `glide/docs/trace.md`).
 
 ## Loop B
 

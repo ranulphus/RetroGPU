@@ -8,7 +8,7 @@ A condition that bounds a variable (!n, n == 0, n < 1), directly guarding a
 for loop that assigns that variable, leaves the variable at its guarded
 value after the loop, although the body runs. `while` loops and a separate
 loop counter are fine. This check fails on that shape in any C file Open
-Watcom builds (src/, hal/, tests/, tools/dos/).
+Watcom builds (glide/src/, hal/, tests/, glide/tests/, tools/dos/).
 
   ow_loops.py [ROOT]
 """
@@ -24,7 +24,7 @@ def main():
     root = sys.argv[1] if len(sys.argv) > 1 else os.path.dirname(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))))
     files = []
-    for d in ("src", "hal", "tests", "tools/dos"):
+    for d in ("glide/src", "hal", "tests", "glide/tests", "tools/dos"):
         files += glob.glob(os.path.join(root, d, "**", "*.c"), recursive=True)
     bad = 0
     for f in sorted(files):

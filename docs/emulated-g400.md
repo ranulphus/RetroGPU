@@ -6,7 +6,7 @@
 runtime's G400-family path can be exercised before the physical cards
 (PRD M6). Like every 86Box change here it is local and never upstreamed
 (PRD D4). Select them with `--card g400` / `--card g450` (or
-`MGA_CARD=...`) in `tools/loopa/run.py`, `tools/conform/run.py` and
+`MGA_CARD=...`) in `tools/loopa/run.py`, `glide/tools/conform/run.py` and
 `tools/games/replay.py`.
 
 Both build on the emulated G200 (`docs/emulated-g200.md`): the drawing

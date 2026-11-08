@@ -1,5 +1,5 @@
 # Native host build: unit tests and host-side tools.
-HOST_CFLAGS := -std=gnu99 -O1 -g -Wall -Wextra -Werror -Iinclude -Ihal/include -Isrc -Ibuild/gen \
+HOST_CFLAGS := -std=gnu99 -O1 -g -Wall -Wextra -Werror -Iglide/include -Ihal/include -Iglide/src -Ibuild/gen \
                -DMGA_HOST=1 -fno-strict-aliasing
 HOST_CFLAGS32 := $(HOST_CFLAGS) -m32 -mfpmath=387
 

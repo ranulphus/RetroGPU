@@ -4,7 +4,8 @@ each card (out/conform/summary-<card>.json) and the manifest's cell names."""
 import json
 import os
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+GLIDE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # glide/
+ROOT = os.path.dirname(GLIDE)   # the repository (out/)
 CARDS = ("g100", "g200")
 
 
@@ -17,7 +18,7 @@ def load(card):
 
 
 def main():
-    man = json.load(open(os.path.join(ROOT, "tests", "conform", "manifest.json")))["t13"]
+    man = json.load(open(os.path.join(GLIDE, "tests", "conform", "manifest.json")))["t13"]
     res = {c: load(c) for c in CARDS}
     cards = [c for c in CARDS if res[c]]
     out = ["# Combine coverage", "",
@@ -40,7 +41,7 @@ def main():
             out.append(row)
         out.append("")
     out += ["Approximate cells: " + man.get("why", "") + ".", ""]
-    open(os.path.join(ROOT, "docs", "combine-coverage.md"), "w").write("\n".join(out))
+    open(os.path.join(GLIDE, "docs", "combine-coverage.md"), "w").write("\n".join(out))
 
 
 if __name__ == "__main__":

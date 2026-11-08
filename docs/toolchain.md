@@ -29,7 +29,7 @@ dependencies); it passes through the `BOX86_*`, `LOOPA_*`, `VOODOO_*`,
   plus `-bd -s -zl` for DLL code (no stack probes, no default libraries).
 - Link: `format os2 le dll initglobal`, `option modname=glide2x`,
   `start=__DLLstart_`, `nocaseexact`, exports generated from
-  `abi/glide2x.api`. `tools/abi/lefix.py` then sets the module flags to
+  `glide/abi/glide2x.api`. `glide/tools/abi/lefix.py` then sets the module flags to
   `0x8200` and the lowercase module name the games' loader expects.
 - Only self-contained C-library modules may be linked (`make check-clib`);
   the DLL has no C-library startup.
@@ -53,13 +53,13 @@ anywhere Open Watcom compiles.
 
 ## Generated code (`build/gen/`)
 
-From `abi/glide2x.api`:
+From `glide/abi/glide2x.api`:
 
 | Generator | Output |
 |---|---|
-| `tools/abi/gen_exports.py` | function ids and names, logged stubs, export list, `api.json`, the `glapi_t` table for test programs |
-| `tools/abi/gen_trace.py` | the exported thunks (call tracing) and GLPLAY's dispatcher |
-| `tools/abi/gen_header.py` | `include/glide/glide2.h` from `abi/constants.tsv` and `abi/types.h.frag` (committed; `make check-header`) |
+| `glide/tools/abi/gen_exports.py` | function ids and names, logged stubs, export list, `api.json`, the `glapi_t` table for test programs |
+| `glide/tools/abi/gen_trace.py` | the exported thunks (call tracing) and GLPLAY's dispatcher |
+| `glide/tools/abi/gen_header.py` | `glide/include/glide/glide2.h` from `glide/abi/constants.tsv` and `glide/abi/types.h.frag` (committed; `make check-header`) |
 
 ## Make targets
 

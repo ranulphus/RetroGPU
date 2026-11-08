@@ -10,7 +10,7 @@ import os
 import struct
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))   # the repository (build/)
 TR_BREF, TR_BMIN, TR_BCACHE = 0x40000000, 64, 512
 TR_MAGIC, TR_NULL, TR_VREF, OP_PSEUDO, OP_LFBSPANS, OP_END = 0x5254474D, 0xFFFFFFFF, 0x80000000, 0xF000, 0xF001, 0xFFFF
 

@@ -1,4 +1,5 @@
-# MGA-Glide top-level build. `make help` lists the targets.
+# RetroGPU top-level build: the HAL, the test platform and the Glide runtime
+# (glide/glide.mk); DOS-GL builds in gl/. `make help` lists the targets.
 include config.mk
 -include config.local.mk
 include tools/setup/versions.mk
@@ -13,21 +14,6 @@ export WATCOM DJGPP_PREFIX MGA_CACHE OW_URL OW_SHA256 DJGPP_URL DJGPP_SHA256 CWS
 .PHONY: help runtime header check-header check-exports check-clib tests-host \
         setup-ow setup-djgpp hal-ow hal-djgpp hal-host clean
 
-# ---- Generated glue ------------------------------------------------------
-API_SRCS := abi/glide2x.api tools/abi/api.py tools/abi/gen_exports.py tools/abi/gen_trace.py
-build/gen/stamp: $(API_SRCS)
-	@mkdir -p build/gen
-	$(PYTHON) tools/abi/gen_exports.py . build/gen
-	$(PYTHON) tools/abi/gen_trace.py build/gen
-	@touch $@
-
-header: include/glide/glide2.h
-include/glide/glide2.h: abi/constants.tsv abi/types.h.frag abi/glide2x.api tools/abi/gen_header.py
-	$(PYTHON) tools/abi/gen_header.py . $@
-
-check-header:
-	@$(PYTHON) tools/abi/gen_header.py . build/glide2.h.check && cmp -s build/glide2.h.check include/glide/glide2.h \
-	  || { echo "include/glide/glide2.h is stale: run make header"; exit 1; }
 
 # ---- HAL -----------------------------------------------------------------
 HAL_COMMON := hal/src/debug/serial.c hal/src/debug/regtrace.c hal/src/pci.c hal/src/chip.c hal/src/vbe.c hal/src/fifo.c hal/src/engine.c hal/src/dac.c hal/src/texhw.c hal/src/present.c hal/src/setup/trap.c hal/src/vram.c hal/src/blit.c hal/src/cursor.c hal/src/warp.c
@@ -55,72 +41,8 @@ build/host/libmgahal.a: $(HAL_HOST:%.c=build/host/%.o)
 	ar rcs $@ $^
 hal-host: build/host/libmgahal.a
 
-build/gen/stubs.c build/gen/api_names.c build/gen/api_ids.h build/gen/api_names.h build/gen/thunks.c build/gen/replay_gen.c build/gen/proxy_thunks.c build/gen/glapi_names.c build/gen/glapi_static.c: build/gen/stamp
-
-# ---- Runtime DLL ---------------------------------------------------------
-RT_SRCS := $(wildcard src/rt/*.c src/dll/*.c src/glide/*.c src/lfb/*.c src/tex/*.c src/combine/*.c src/trace/*.c)
-RT_OBJS := $(RT_SRCS:%.c=build/ow/%.obj) build/ow/gen/stubs.obj build/ow/gen/api_names.obj build/ow/gen/thunks.obj
-
-build/ow/glide2x.lnk: mk/glide2x.lnk.in Makefile
-	@mkdir -p $(dir $@)
-	$(Q)sed -e 's|@WATCOM@|$(WATCOM)|g' -e 's|@VER@|$(shell git describe --always --dirty 2>/dev/null)|' $< > $@
-
-build/ow/GLIDE2X.OVL: $(RT_OBJS) build/ow/mgahal.lib build/ow/glide2x.lnk
-	$(Q)echo "  WLINK   $@"
-	$(Q)$(WLINK) @build/ow/glide2x.lnk name $@ option map=build/ow/GLIDE2X.map \
-	  $(addprefix file ,$(RT_OBJS)) library build/ow/mgahal.lib
-	$(Q)$(PYTHON) tools/abi/lefix.py $@ >/dev/null
-runtime: build/ow/GLIDE2X.OVL
-
-# Profiling flavour (hal/include/mga/prof.h): the same runtime with stage
-# timers; MGAGLIDE stats=N adds an MGL-PROF line to each MGL-STAT. Pentium only.
-OWP := build/ow-prof
-RT_OBJS_PROF := $(RT_SRCS:%.c=$(OWP)/%.obj) $(OWP)/gen/stubs.obj $(OWP)/gen/api_names.obj $(OWP)/gen/thunks.obj
-$(OWP)/%.obj: %.c | build/gen/stamp
-	@mkdir -p $(dir $@)
-	$(Q)echo "  WCC     $< (prof)"
-	$(Q)$(WCC) $(OW_CFLAGS) -dMGA_PROF=1 $(if $(filter src/% hal/%,$<),$(OW_DLLFLAGS)) -ad=$(@:.obj=.d) -adt=$@ \
-	  -add=$< -adfs -fo=$@ $<
-$(OWP)/gen/%.obj: build/gen/%.c | build/gen/stamp
-	@mkdir -p $(dir $@)
-	$(Q)echo "  WCC     $< (prof)"
-	$(Q)$(WCC) $(OW_CFLAGS) -dMGA_PROF=1 $(OW_DLLFLAGS) -ad=$(@:.obj=.d) -adt=$@ -add=$< -adfs -fo=$@ $<
-$(OWP)/mgahal.lib: $(HAL_OW:%.c=$(OWP)/%.obj)
-	@rm -f $@
-	$(Q)echo "  WLIB    $@"
-	$(Q)$(WLIB) -q -b -n $@ $(addprefix +,$^)
-$(OWP)/GLIDE2X.OVL: $(RT_OBJS_PROF) $(OWP)/mgahal.lib build/ow/glide2x.lnk
-	$(Q)echo "  WLINK   $@"
-	$(Q)$(WLINK) @build/ow/glide2x.lnk name $@ option map=$(OWP)/GLIDE2X.map \
-	  $(addprefix file ,$(RT_OBJS_PROF)) library $(OWP)/mgahal.lib
-	$(Q)$(PYTHON) tools/abi/lefix.py $@ >/dev/null
-runtime-prof: $(OWP)/GLIDE2X.OVL
-.PHONY: runtime-prof
-
-# GLTRACE.OVL: the recording proxy in front of a retail runtime (docs/trace.md).
-PX_OBJS := build/ow/gen/proxy_thunks.obj build/ow/proxy/proxy.obj build/ow/proxy/leload.obj \
-           build/ow/src/trace/trace.obj build/ow/src/trace/trfmt.obj build/ow/src/tex/texfmt.obj \
-           build/ow/src/dll/config.obj build/ow/src/dll/dllmain.obj \
-           $(patsubst %.c,build/ow/%.obj,$(wildcard src/rt/*.c)) build/ow/gen/api_names.obj build/ow/gen/glapi_names.obj
-build/ow/proxy/%.obj: src/proxy/%.c | build/gen/stamp
-	@mkdir -p $(dir $@)
-	$(Q)echo "  WCC     $<"
-	$(Q)$(WCC) $(OW_CFLAGS) $(OW_DLLFLAGS) -i=tests/shim -ad=$(@:.obj=.d) -adt=$@ -add=$< -adfs -fo=$@ $<
-build/ow/proxy/leload.obj: tests/shim/leload.c | build/gen/stamp
-	@mkdir -p $(dir $@)
-	$(Q)echo "  WCC     $<"
-	$(Q)$(WCC) $(OW_CFLAGS) $(OW_DLLFLAGS) -i=tests/shim -ad=$(@:.obj=.d) -adt=$@ -add=$< -adfs -fo=$@ $<
-build/ow/GLTRACE.OVL: $(PX_OBJS) build/ow/mgahal.lib build/ow/glide2x.lnk
-	$(Q)echo "  WLINK   $@"
-	$(Q)$(WLINK) @build/ow/glide2x.lnk name $@ option map=build/ow/GLTRACE.map \
-	  $(addprefix file ,$(PX_OBJS)) library build/ow/mgahal.lib
-	$(Q)$(PYTHON) tools/abi/lefix.py $@ >/dev/null
-gltrace: build/ow/GLTRACE.OVL
-
-check-exports: build/ow/GLIDE2X.OVL
-	$(PYTHON) tools/abi/check_exports.py $< abi/glide2x.api abi/games/*.names
-check-clib: build/ow/GLIDE2X.OVL
-	$(PYTHON) tools/abi/check_clib.py build/ow/GLIDE2X.map
+# ---- The Glide runtime (glide/glide.mk) ---------------------------------
+include glide/glide.mk
 
 # ---- Toolchains ----------------------------------------------------------
 setup-ow:
@@ -182,16 +104,6 @@ loopa-fpcheck: dostests build/djgpp/FPCHECK.EXE
 	echo "loopa-fpcheck: Watcom and DJGPP pass"
 .PHONY: loopa-fpcheck
 
-# ---- Host trace replay (tools/hreplay) --------------------------------------
-HR_SRCS := $(RT_SRCS) $(HAL_HOST) tests/unit/refrast.c tools/hreplay/hreplay.c
-HR_GEN  := build/gen/thunks.c build/gen/stubs.c build/gen/api_names.c build/gen/replay_gen.c build/gen/glapi_static.c
-build/host32/hreplay: $(HR_SRCS) $(HR_GEN) $(wildcard src/*/*.h hal/include/mga/*.h tests/unit/*.h tests/shim/*.h)
-	@mkdir -p $(dir $@)
-	$(Q)echo "  CC32    $@"
-	$(Q)$(HOST_CC) $(HOST_CFLAGS32) -Wno-unused-parameter -Wno-array-parameter -Itests/shim -Itests/unit -o $@ $(HR_SRCS) $(HR_GEN) -lm
-hreplay: build/host32/hreplay
-hreplay-check: build/host32/hreplay dostests runtime
-	$(DEV) $(PYTHON) tools/hreplay/check.py
 
 # ---- Host tests ----------------------------------------------------------
 include tests/unit/unit.mk
@@ -206,7 +118,7 @@ help:
 	@echo "check-clib     verify the DLL links only self-contained C-library code"
 	@echo "tests-host     build and run host unit tests"
 	@echo "hal-ow|hal-djgpp|hal-host   build the shared HAL for each toolchain"
-	@echo "header         regenerate include/glide/glide2.h from abi/"
+	@echo "header         regenerate glide/include/glide/glide2.h from glide/abi/"
 	@echo "setup-ow|setup-djgpp        install pinned toolchains"
 	@echo "loopa TEST=..  run a DOS test in 86Box (see tools/loopa)"
 
@@ -283,18 +195,6 @@ loopa-selftest: dostests runtime build/djgpp/STACKPG.EXE build/djgpp/MOUSETST.EX
 	  echo "  selftest keywait: VECCHK ok, KEYWAIT read the key (ok)"; \
 	else echo "  selftest keywait: expected HX-VECCHK ok and HX-KEY scan=1c"; exit 1; fi
 
-# Conformance suite (tools/conform/run.py). References come from a retail
-# OVL on the emulated Voodoo and are committed; checks run MGA-Glide.
-.PHONY: conform conform-ref conform-ci rig hreplay hreplay-check gltrace smoke-djgpp
-conform: runtime dostests
-	$(DEV) $(PYTHON) tools/conform/run.py check $(TESTS)
-conform-ref: dostests
-	$(DEV) $(PYTHON) tools/conform/run.py ref $(TESTS)
-conform-ci: runtime dostests
-	$(PYTHON) tools/conform/run.py check
-	MGA_CARD=g200 $(PYTHON) tools/conform/run.py check
-	MGA_CARD=g400 $(PYTHON) tools/conform/run.py check
-	MGA_CARD=g450 $(PYTHON) tools/conform/run.py check
 
 # Loop C rig program (static x86-64 Linux, for cuda6; docs/loop-c-results.md).
 build/mgarig: tests/rig/mgarig.c tests/rig/edgecal.h $(HAL_COMMON) hal/port/linux.c $(wildcard hal/include/mga/*.h)

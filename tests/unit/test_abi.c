@@ -1,6 +1,6 @@
-/* Structure layouts must match the shipped Glide 2.x ABI (docs/abi-facts.md).
+/* Structure layouts must match the shipped Glide 2.x ABI (glide/docs/abi-facts.md).
  * Checked on the host; the same asserts run under Open Watcom in the DOS
- * builds via include/glide/layout.h. */
+ * builds via glide/include/glide/layout.h. */
 #include "unit.h"
 #include "glide/layout.h"
 

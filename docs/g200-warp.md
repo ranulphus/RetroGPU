@@ -136,7 +136,7 @@ without a failure.
 
 After G7, MGA-Glide's own conformance (`make conform-ci`) failed t04 on the G200: 237 edge pixels against the
 Voodoo's frame. The WARP sets triangles up with its own edge rule, and t04's manifest entry already allowed for it
-(`"warp": {"edge": true}`), but `tools/conform/run.py` applied that only on the G400 family. It now applies it
+(`"warp": {"edge": true}`), but `glide/tools/conform/run.py` applied that only on the G400 family. It now applies it
 wherever the WARP draws: the G200, G400 and G450, unless `MGA_OPTS` has `warp=0` (2026-11-04: 27 of 27 on the
 G200; t04 drew 39 triangles through the WARP).
 

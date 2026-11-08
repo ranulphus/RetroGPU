@@ -11,7 +11,7 @@ import os
 import subprocess
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))   # the repository (build/, out/, tools/)
 sys.path.insert(0, os.path.join(ROOT, "tools", "loopa"))
 import png  # noqa: E402
 

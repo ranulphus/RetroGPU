@@ -2,10 +2,10 @@
 # with the files listed in its UNIT_<name> variable.
 UNIT_TESTS := $(patsubst tests/unit/%.c,%,$(wildcard tests/unit/test_*.c))
 UNIT_COMMON := tests/unit/unit.c
-UNIT_test_fmt := src/rt/fmt.c
+UNIT_test_fmt := glide/src/rt/fmt.c
 UNIT_test_leload := tests/shim/leload.c build/gen/glapi_names.c
 UNIT_test_trap := hal/src/setup/trap.c tests/unit/refrast.c
-UNIT_test_texfmt := src/tex/texfmt.c
+UNIT_test_texfmt := glide/src/tex/texfmt.c
 UNIT_test_regtrace := hal/src/debug/regtrace.c
 UNIT_test_plan := hal/src/vbe.c tests/unit/refrast.c
 UNIT_test_present := hal/src/present.c hal/src/engine.c hal/src/texhw.c hal/src/setup/trap.c tests/unit/refrast.c

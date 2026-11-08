@@ -124,7 +124,7 @@ void sys_delay_us(uint32_t us)
 }
 
 /* DPMI 0501h block allocator: simple bump arena with a free list is
- * provided by src/rt for the runtime; the HAL only needs a few tables. */
+ * provided by glide/src/rt for the runtime; the HAL only needs a few tables. */
 void *sys_alloc(uint32_t bytes)
 {
     union REGS r;

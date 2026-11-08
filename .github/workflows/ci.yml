@@ -32,7 +32,7 @@ jobs:
         with: { path: .mga-opt/watcom, key: "ow-${{ hashFiles('tools/setup/versions.mk') }}" }
       - run: make setup-ow
       - run: make runtime dostests check-exports check-clib gltrace
-      - run: python3 tools/abi/check_exports.py build/ow/GLTRACE.OVL abi/glide2x.api abi/games/*.names
+      - run: python3 glide/tools/abi/check_exports.py build/ow/GLTRACE.OVL glide/abi/glide2x.api glide/abi/games/*.names
       - uses: actions/upload-artifact@v4
         with:
           name: dos-binaries
