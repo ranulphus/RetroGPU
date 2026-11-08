@@ -1,13 +1,13 @@
 # tests/unit/test_setupgold.c: scenario, draws, hash of the register state at each draw
 g100-exact 6721 f061478e3770e30c
 g100-voodoo 6701 7027bfae73637c42
-g200-exact 6747 09b60711c867848f
-g200-voodoo 6799 d2e72de5decd2082
+g200-exact 6747 c249653f08b09df7
+g200-voodoo 6799 e4cdb2197d023e5e
 g400-exact 6724 e37023ab4a3f5d0b
 g400-voodoo 6744 95b65f5c108e20c0
-g200-extreme 3427 874bcb2ccafef589
+g200-extreme 3427 7399ea052de05edf
 g400-extreme 3229 19067cc37697c4d4
 g100-fans 8969 eae59242645485c4
-g200-fans 9137 cb38b4e950db0c6d
+g200-fans 9137 7d42cf004a12b8f3
 g400-fans 9253 4ef23f5820e685ad
 g400-fans-voodoo 9235 7fbca28387cc3281
