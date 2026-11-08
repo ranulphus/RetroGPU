@@ -13,7 +13,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 card=${1:-g450}
-hal=${MGAHAL_DIR:-${MGA_GLIDE:-$HOME/MGA-Glide}}
+hal=$(cd "$root/.." && pwd)   # the HAL and harness: RetroGPU, this tree's parent
 b=$root/build/doom
 data=${MGA_CACHE:-$HOME/.cache/mga-glide}/fixtures/games/doom/DOOM
 for f in "$b/PRBOOMP.EXE" "$b/PRBOOM.WAD" "$data/DOOM.WAD" "$hal/build/ow/dos/UTEXIT.COM"; do

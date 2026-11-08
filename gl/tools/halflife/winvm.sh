@@ -13,7 +13,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 card=${1:-g450}
-hal=${MGAHAL_DIR:-${MGA_GLIDE:-$HOME/MGA-Glide}}
+hal=$(cd "$root/.." && pwd)   # the HAL and harness: RetroGPU, this tree's parent
 b=$root/build/halflife
 data=${MGA_CACHE:-$HOME/.cache/mga-glide}/fixtures/games/halflife/VALVE
 for f in "$b/HLDGL.EXE" "$b/EXTRAS.PK3" "$b/DOSLFN.COM" "$data/pak0.pak" "$hal/build/ow/dos/UTEXIT.COM"; do

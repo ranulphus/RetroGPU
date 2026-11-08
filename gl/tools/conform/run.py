@@ -25,7 +25,7 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-MGAHAL = os.environ.get("MGA_GLIDE", os.path.expanduser("~/MGA-Glide"))     # its harness and image tools
+MGAHAL = os.path.dirname(ROOT)     # RetroGPU, this tree's parent: the harness and image tools
 sys.path.insert(0, os.path.join(MGAHAL, "tools"))
 sys.path.insert(0, os.path.join(MGAHAL, "tools", "loopa"))
 import imgcmp  # noqa: E402

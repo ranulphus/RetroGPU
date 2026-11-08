@@ -28,8 +28,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-MGA = os.environ.get("MGA_GLIDE", os.path.expanduser("~/MGA-Glide"))
-HAL = os.environ.get("MGAHAL_DIR", MGA)
+MGA = HAL = os.path.dirname(ROOT)   # RetroGPU, this tree's parent: the harness and the bench runner
 EXE = os.path.join(ROOT, "build", "exe", "G4EXP.EXE")
 
 VARIANTS = [("D", None, "124567"), ("C", "DGL_COMBINER=1", "1246"), ("T", "DGL_TC2_EXTRA=8000", "12456"),

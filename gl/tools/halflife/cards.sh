@@ -26,7 +26,7 @@ done
 python3 - "$root" "$name" "${cards[@]}" <<'EOF' || rc=1
 import glob, os, sys
 root, name, cards = sys.argv[1], sys.argv[2], sys.argv[3:]
-sys.path.insert(0, os.path.join(root, "third_party", "mgahal", "tools"))
+sys.path.insert(0, os.path.join(root, "..", "tools"))   # imgcmp: RetroGPU's tools
 import imgcmp
 base = os.path.join(root, "out", "%s-%s" % (name, cards[0]))   # Loop A's PNGs of the F*.PPM snapshots
 frames = sorted(glob.glob(os.path.join(base, "f*.png")))

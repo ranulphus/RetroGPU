@@ -30,7 +30,6 @@
 # none), SHOTS (screenshot
 # seconds after boot), PRE (one more
 # RUN.BAT line), NAME (result directory out/NAME, default hl-MODE-CARD),
-# MGAHAL_DIR (another MGA-Glide checkout; default $MGA_GLIDE or ~/MGA-Glide).
 # Needs build/halflife (tools/halflife/build.sh) and the fixture
 # (tools/halflife/fixtures.py). Screenshots of retail data stay local.
 set -euo pipefail
@@ -40,7 +39,7 @@ mode=${1:?usage: run.sh MODE [CARD] [-- ARGS...]}; shift
 card=g450
 if [ $# -gt 0 ] && [ "$1" != "--" ]; then card=$1; shift; fi
 [ "${1:-}" = "--" ] && shift
-hal=${MGAHAL_DIR:-${MGA_GLIDE:-$HOME/MGA-Glide}}
+hal=$(cd "$root/.." && pwd)   # the HAL and harness: RetroGPU, this tree's parent
 # The DOS helpers Loop A puts in C:\HX (built in MGA-Glide's checkout).
 [ -f "$hal/build/ow/dos/UTEXIT.COM" ] || make -C "$root" -s dostools
 b=$root/build/halflife

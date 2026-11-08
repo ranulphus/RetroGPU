@@ -8,23 +8,15 @@
 #   make doom / loopa-doom MODE=timedemo   PrBoom-plus on SDL3 and DOS-GL (tools/doom)
 #   make sdl / sdl-examples / loopa-sdl   SDL3 on DOS with DOS-GL (tools/sdl, docs/sdl.md)
 #   make conform-bench PC=bench-g400 [TESTS=...]   the conformance suite on a bench PC
-# The Matrox HAL, harness and 86Box patches come from MGA-Glide's checkout beside
-# this one (MGA_GLIDE, default ~/MGA-Glide; PRD D15), built from its main as it is.
+# The Matrox HAL, harness and 86Box patches are RetroGPU's: this directory's
+# parent, the repository root (PRD D15), so a HAL change and its effect on GL
+# are one commit. MGAHAL is always the parent, whatever the environment says.
 include config.mk
 -include config.local.mk
 .SECONDEXPANSION:
 
-MGAHAL   := $(MGA_GLIDE)
-export MGA_GLIDE
-ifeq ($(wildcard $(MGAHAL)/hal/include/mga/hal.h),)
-ifneq ($(filter-out clean help,$(or $(MAKECMDGOALS),all)),)
-$(error No MGA-Glide checkout at MGA_GLIDE=$(MGA_GLIDE): clone github.com/ranulphus/MGA-Glide there, or set MGA_GLIDE)
-endif
-endif
-# GLOS's API header (src/dgl/glos.c) comes from its checkout beside this one too (GLOS, default ~/GLOS), on main.
-# Dependency files from before 2026-11-02 name the vendored copies that went (third_party/mgahal, third_party/glos):
-# they and their objects are dropped once, so the next build makes them afresh against the checkouts.
-$(foreach d,$(shell grep -rlE 'third_party/(mgahal|glos)/' build --include='*.d' 2>/dev/null),$(shell rm -f $(d) $(d:.d=.o)))
+MGAHAL   := $(abspath $(CURDIR)/..)
+# GLOS's API header (src/dgl/glos.c) comes from its checkout beside RetroGPU (GLOS, default ~/GLOS), on main.
 BUILD_ID := $(shell git describe --always --dirty 2>/dev/null || echo unknown)
 Q ?= @
 

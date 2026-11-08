@@ -48,7 +48,7 @@ def main():
     ap.add_argument("--unbind", action="store_true")
     ap.add_argument("--vram-kb", type=int, default=8192)
     ap.add_argument("--vram-base-kb", type=int, default=0)
-    ap.add_argument("--mgarig", default=os.path.expanduser("~/MGA-Glide/build/mgarig"))
+    ap.add_argument("--mgarig", default=os.path.join(os.path.dirname(ROOT), "build", "mgarig"))
     ap.add_argument("--tests", default="", help="conformance tests (default all)")
     a = ap.parse_args()
     out = os.path.join(ROOT, "out", "rig", a.host.split("@")[-1])

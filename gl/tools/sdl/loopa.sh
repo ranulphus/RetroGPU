@@ -6,7 +6,7 @@ set -uo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 card=${1:-g450}; shift || true
 checks=${*:-info keys beep busy badirq gl modes crash exit joy}
-harness=${MGAHAL_DIR:-${MGA_GLIDE:-$HOME/MGA-Glide}}
+harness=$(cd "$root/.." && pwd)   # RetroGPU, this tree's parent
 out=$root/out/sdl-$card
 mkdir -p "$out"
 blaster='SET BLASTER=A220 I5 D1 H5 T6'
