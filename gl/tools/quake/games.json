@@ -1,0 +1,27 @@
+{
+ "_about": "Game disks for the Quake ports in Loop A (MGA-Glide tools/loopa/run.py --games-file). Fixtures come from tools/quake/fixtures.py; cylinders size the D: image (63 x 16 x cylinders sectors).",
+ "quake": {
+  "title": "Quake 1.06 (registered, retail)",
+  "fixture": "games/quake",
+  "dir": "QUAKE",
+  "cwd": "QUAKE",
+  "run": [],
+  "cylinders": 250
+ },
+ "lq": {
+  "title": "LibreQuake v0.09-beta lite (BSD-3 art, GPL-2 progs)",
+  "fixture": "games/lq",
+  "dir": "QUAKE",
+  "cwd": "QUAKE",
+  "run": [],
+  "cylinders": 200
+ },
+ "quake2": {
+  "title": "Quake 2 (retail)",
+  "fixture": "games/quake2",
+  "dir": "QUAKE2",
+  "cwd": "QUAKE2",
+  "run": [],
+  "cylinders": 1000
+ }
+}

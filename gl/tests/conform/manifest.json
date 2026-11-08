@@ -1,0 +1,22 @@
+{
+ "_comment": "Per-frame comparison settings for tools/conform/run.py. tol: per-channel difference after RGB565 quantisation; frac: fraction of pixels allowed beyond it; edge: ignore colour edges of the reference (1 px). The references come from Mesa OSMesa (RGBA8, undithered); DOS-GL draws RGB565 with the chip's dither. A test's own entry (\"t16\") may add \"pre\": RUN.BAT lines for the DOS run only (the Mesa reference never sees them).",
+ "_default": {
+  "tol": 24,
+  "frac": 0.005,
+  "edge": true
+ },
+ "t16": {
+  "pre": [
+   "SET DGL_TEXHEAP_KB=600"
+  ]
+ },
+ "t31": {
+  "pre": [
+   "SET DGL_ILOAD=1"
+  ]
+ },
+ "combine": {
+  "tol": 36,
+  "_why": "The G400 combiner's multiplies drop bits ((a*b)>>8 in 86Box's model, which truncates; the datasheet's '16:16:16, saturate, rup' is not settled on silicon), and unit 1's x2 and x4 (modbright) scale the loss of two multiplies in a row: those quads come out a few levels darker than Mesa (worst 25 and 33). x1, ADD and unit 0's x2 stay within 17."
+ }
+}

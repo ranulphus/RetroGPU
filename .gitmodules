@@ -1,0 +1,6 @@
+[submodule "gl/third_party/classicube"]
+	path = gl/third_party/classicube
+	url = https://github.com/ClassiCube/ClassiCube.git
+[submodule "gl/third_party/sdl"]
+	path = gl/third_party/sdl
+	url = https://github.com/libsdl-org/SDL

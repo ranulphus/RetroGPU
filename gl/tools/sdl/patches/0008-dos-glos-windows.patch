@@ -1,0 +1,894 @@
+diff --git a/src/core/dos/SDL_glos.c b/src/core/dos/SDL_glos.c
+new file mode 100644
+index 0000000..2a50d00
+--- /dev/null
++++ b/src/core/dos/SDL_glos.c
+@@ -0,0 +1,94 @@
++/*
++  Simple DirectMedia Layer
++  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
++
++  This software is provided 'as-is', without any express or implied
++  warranty.  In no event will the authors be held liable for any damages
++  arising from the use of this software.
++
++  Permission is granted to anyone to use this software for any purpose,
++  including commercial applications, and to alter it and redistribute it
++  freely, subject to the following restrictions:
++
++  1. The origin of this software must not be misrepresented; you must not
++     claim that you wrote the original software. If you use this software
++     in a product, an acknowledgment in the product documentation would be
++     appreciated but is not required.
++  2. Altered source versions must be plainly marked as such, and must not be
++     misrepresented as being the original software.
++  3. This notice may not be removed or altered from any source distribution.
++*/
++
++#include "SDL_internal.h"
++
++#ifdef SDL_PLATFORM_DOS
++
++#include "SDL_glos.h"
++#include <dpmi.h>
++#include <sys/nearptr.h>
++
++static struct
++{
++    unsigned long off;
++    unsigned short sel;
++} glos_entry;
++static int glos_found; // 1 GLOS, -1 none
++
++int GLOS_Call(unsigned fn, unsigned *a, unsigned *b, unsigned c, unsigned d, unsigned si)
++{
++    unsigned char failed;
++    unsigned ra = fn, rb = b ? *b : 0;
++    if (glos_found <= 0) {
++        return -1;
++    }
++    __asm__ __volatile__("lcall *%[e]\n\tsetc %[f]"
++                         : "+a"(ra), "+b"(rb), "+c"(c), "+d"(d), "+S"(si), [f] "=m"(failed)
++                         : [e] "m"(glos_entry)
++                         : "edi", "cc", "memory");
++    if (a) {
++        *a = ra;
++    }
++    if (b) {
++        *b = rb;
++    }
++    return failed ? (int)ra : 0;
++}
++
++unsigned GLOS_Caps(void)
++{
++    unsigned a, b = 0;
++    if (!glos_found) {
++        __dpmi_paddr p;
++        glos_found = -1;
++        if (__dpmi_get_vendor_specific_api_entry_point("GLOS", &p) == 0) {
++            glos_entry.off = p.offset32;
++            glos_entry.sel = p.selector;
++            glos_found = 1;
++        }
++    }
++    if (GLOS_Call(GLOS_FN_VERSION, &a, &b, 0, 0, 0) != 0 || a < 0x10001u) {
++        return 0;
++    }
++    return b;
++}
++
++bool GLOS_BecomeApp(void)
++{
++    unsigned a, b = 0x10001u; // the API version SDL is built for
++    int r;
++    if (!GLOS_Caps()) {
++        return false;
++    }
++    r = GLOS_Call(GLOS_FN_INIT, &a, &b, 0, 0, 0);
++    return r == 0 || (r == GLOS_E_INIT && b == GLOS_INIT_ALREADY);
++}
++
++void *GLOS_Pointer(unsigned linear)
++{
++    if (!linear || !__djgpp_nearptr_enable()) {
++        return NULL;
++    }
++    return (void *)(linear + __djgpp_conventional_base);
++}
++
++#endif // SDL_PLATFORM_DOS
+diff --git a/src/core/dos/SDL_glos.h b/src/core/dos/SDL_glos.h
+new file mode 100644
+index 0000000..313d58b
+--- /dev/null
++++ b/src/core/dos/SDL_glos.h
+@@ -0,0 +1,100 @@
++/*
++  Simple DirectMedia Layer
++  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
++
++  This software is provided 'as-is', without any express or implied
++  warranty.  In no event will the authors be held liable for any damages
++  arising from the use of this software.
++
++  Permission is granted to anyone to use this software for any purpose,
++  including commercial applications, and to alter it and redistribute it
++  freely, subject to the following restrictions:
++
++  1. The origin of this software must not be misrepresented; you must not
++     claim that you wrote the original software. If you use this software
++     in a product, an acknowledgment in the product documentation would be
++     appreciated but is not required.
++  2. Altered source versions must be plainly marked as such, and must not be
++     misrepresented as being the original software.
++  3. This notice may not be removed or altered from any source distribution.
++*/
++
++// GLOS: a graphical DOS whose DPMI host answers 0A00h "GLOS" with an API of
++// windows, events and a sound mixer (GLOS's include/glos/api.h, version 1.1).
++// A program run under it gets windows instead of the screen: SDL's "glos"
++// video and audio drivers (SDL_glosvideo.c, SDL_glosaudio.c) use these.
++
++#ifndef SDL_glos_h_
++#define SDL_glos_h_
++
++#include "SDL_internal.h"
++
++#define GLOS_FN_VERSION 0
++#define GLOS_FN_INIT 1
++#define GLOS_FN_YIELD 2
++#define GLOS_FN_SLEEP 3
++#define GLOS_FN_EVENT 5
++#define GLOS_FN_WINDOW 6
++#define GLOS_FN_CLOSE 7
++#define GLOS_FN_SHOW 8
++#define GLOS_FN_RESIZE 10
++#define GLOS_FN_TITLE 11
++#define GLOS_FN_PIXELS 12
++#define GLOS_FN_PRESENT 13
++#define GLOS_FN_FOCUS 14
++#define GLOS_FN_SCREEN 15
++#define GLOS_FN_AUDIO 21
++
++#define GLOS_E_INIT 5
++#define GLOS_INIT_ALREADY 1
++
++#define GLOS_CAP_GPU 1
++#define GLOS_CAP_GLWIN 2
++#define GLOS_CAP_AUDIO 4
++
++#define GLOS_EV_KEY 1
++#define GLOS_EV_MOUSE 2
++#define GLOS_EV_FOCUS 3
++#define GLOS_EV_RESIZE 4
++#define GLOS_EV_CLOSE 5
++
++#define GLOS_WIN_FIXED 1
++#define GLOS_WIN_ANYWHERE 4
++
++typedef struct
++{
++    unsigned size, type, window, time;
++    int x, y;
++    unsigned buttons, key, ch, mods, down;
++} GLOS_Event;
++
++typedef struct
++{
++    unsigned size, id;
++    int x, y, w, h;
++    unsigned flags;
++    char title[48];
++    unsigned pixels, pitch, bpp;
++    unsigned char rpos, rsize, gpos, gsize, bpos, bsize, pad[2];
++} GLOS_Window;
++
++typedef struct
++{
++    unsigned size, rate, channels, bytes;
++    volatile unsigned write, read, periods, underruns;
++    unsigned mixer_rate, period_frames;
++    volatile unsigned volume;
++    unsigned ring;
++} GLOS_Stream;
++
++// The API's capabilities (GLOS_CAP_), 0 without GLOS 1.1 or later.
++extern unsigned GLOS_Caps(void);
++// Function fn with EBX, ECX, EDX, ESI: 0, or GLOS's error code; EAX and EBX
++// come back in *a and *b (either may be NULL).
++extern int GLOS_Call(unsigned fn, unsigned *a, unsigned *b, unsigned c, unsigned d, unsigned si);
++// The program a GLOS app (or one already): true.
++extern bool GLOS_BecomeApp(void);
++// A linear address GLOS gave, as a pointer (near pointers are on: SDL_RunApp).
++extern void *GLOS_Pointer(unsigned linear);
++
++#endif // SDL_glos_h_
+diff --git a/src/video/SDL_sysvideo.h b/src/video/SDL_sysvideo.h
+index 8b71f80..43a119e 100644
+--- a/src/video/SDL_sysvideo.h
++++ b/src/video/SDL_sysvideo.h
+@@ -547,6 +547,7 @@ extern VideoBootStrap Emscripten_bootstrap;
+ extern VideoBootStrap OFFSCREEN_bootstrap;
+ extern VideoBootStrap QNX_bootstrap;
+ extern VideoBootStrap OPENVR_bootstrap;
++extern VideoBootStrap GLOS_bootstrap;
+ extern VideoBootStrap DOSVESA_bootstrap;
+ 
+ extern bool SDL_UninitializedVideo(void);
+diff --git a/src/video/SDL_video.c b/src/video/SDL_video.c
+index 1960d5f..af724cc 100644
+--- a/src/video/SDL_video.c
++++ b/src/video/SDL_video.c
+@@ -153,6 +153,7 @@ static VideoBootStrap *bootstrap[] = {
+ #endif
+ #endif
+ #ifdef SDL_VIDEO_DRIVER_DOSVESA
++    &GLOS_bootstrap, // (before vesa: a GLOS desktop that can show the program gives it windows)
+     &DOSVESA_bootstrap,
+ #endif
+ #ifdef SDL_VIDEO_DRIVER_OPENVR
+diff --git a/src/video/dos/SDL_dosevents.c b/src/video/dos/SDL_dosevents.c
+index 76a68d1..747d99b 100644
+--- a/src/video/dos/SDL_dosevents.c
++++ b/src/video/dos/SDL_dosevents.c
+@@ -48,7 +48,7 @@
+ #define VGA_STATUS_VBLANK 0x08 // bit 3: vertical retrace active
+ 
+ // Scancode table: https://www.plantation-productions.com/Webster/www.artofasm.com/DOS/pdf/apndxc.pdf
+-static const SDL_Scancode DOSVESA_ScancodeMapping[] = { // index is the scancode from the IRQ1 handler bitwise-ANDed against 0x7F.
++const SDL_Scancode DOSVESA_ScancodeMapping[128] = { // index is the scancode from the IRQ1 handler bitwise-ANDed against 0x7F.
+     /* 0x00 */ SDL_SCANCODE_UNKNOWN,
+     /* 0x01 */ SDL_SCANCODE_ESCAPE,
+     /* 0x02 */ SDL_SCANCODE_1,
+@@ -146,7 +146,7 @@ static const SDL_Scancode DOSVESA_ScancodeMapping[] = { // index is the scancode
+ };
+ 
+ // Extended scancode table for keys prefixed with 0xE0
+-static const SDL_Scancode DOSVESA_ExtendedScancodeMapping[] = { // index is the scancode byte following the 0xE0 prefix, masked with 0x7F.
++const SDL_Scancode DOSVESA_ExtendedScancodeMapping[128] = { // index is the scancode byte following the 0xE0 prefix, masked with 0x7F.
+     /* 0x00 */ SDL_SCANCODE_UNKNOWN,
+     /* 0x01 */ SDL_SCANCODE_UNKNOWN,
+     /* 0x02 */ SDL_SCANCODE_UNKNOWN,
+diff --git a/src/video/dos/SDL_dosevents_c.h b/src/video/dos/SDL_dosevents_c.h
+index bbff76f..49db0a5 100644
+--- a/src/video/dos/SDL_dosevents_c.h
++++ b/src/video/dos/SDL_dosevents_c.h
+@@ -28,4 +28,9 @@ void DOSVESA_PumpEvents(SDL_VideoDevice *device);
+ void DOSVESA_InitKeyboard(SDL_VideoDevice *device);
+ void DOSVESA_QuitKeyboard(SDL_VideoDevice *device);
+ 
++// Set 1 scan codes, without and with the E0h prefix (bit 7 masked off), as
++// SDL's: also the glos driver's (GLOS gives keys as set 1 codes).
++extern const SDL_Scancode DOSVESA_ScancodeMapping[128];
++extern const SDL_Scancode DOSVESA_ExtendedScancodeMapping[128];
++
+ #endif // SDL_dosevents_c_h_
+diff --git a/src/video/dos/SDL_dosvideo.h b/src/video/dos/SDL_dosvideo.h
+index 9d0cf9f..5b4a01d 100644
+--- a/src/video/dos/SDL_dosvideo.h
++++ b/src/video/dos/SDL_dosvideo.h
+@@ -75,6 +75,11 @@ struct SDL_VideoData
+     bool page_flip_available; // true if mode supports double-buffering
+     bool banked_mode;         // true if current mode uses banked (not LFB) access
+ 
++    // The glos driver (SDL_glosvideo.c)
++    bool glos_relative;       // relative mouse mode: motions as moves from the last position
++    float glos_mouse_x, glos_mouse_y;
++    bool glos_have_mouse;
++
+ #ifdef SDL_VIDEO_OPENGL_DOSGL
+     // OpenGL through DOS-GL (SDL_dosopengl.c)
+     SDL_Window *gl_window;  // the OpenGL window, if one exists
+@@ -92,6 +97,11 @@ struct SDL_DisplayData
+ struct SDL_WindowData
+ {
+     int framebuffer_vsync;
++    // The glos driver (SDL_glosvideo.c): the window's GLOS id (an OpenGL
++    // window's is DOS-GL's, from the context's creation on), its pixels.
++    unsigned glos_id;
++    void *glos_pixels;
++    int glos_pitch;
+ };
+ 
+ #endif // SDL_dosvideo_h
+diff --git a/src/video/dos/SDL_glosvideo.c b/src/video/dos/SDL_glosvideo.c
+new file mode 100644
+index 0000000..b391ef0
+--- /dev/null
++++ b/src/video/dos/SDL_glosvideo.c
+@@ -0,0 +1,594 @@
++/*
++  Simple DirectMedia Layer
++  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
++
++  This software is provided 'as-is', without any express or implied
++  warranty.  In no event will the authors be held liable for any damages
++  arising from the use of this software.
++
++  Permission is granted to anyone to use this software for any purpose,
++  including commercial applications, and to alter it and redistribute it
++  freely, subject to the following restrictions:
++
++  1. The origin of this software must not be misrepresented; you must not
++     claim that you wrote the original software. If you use this software
++     in a product, an acknowledgment in the product documentation would be
++     appreciated but is not required.
++  2. Altered source versions must be plainly marked as such, and must not be
++     misrepresented as being the original software.
++  3. This notice may not be removed or altered from any source distribution.
++*/
++
++// The "glos" video driver: windows on a GLOS desktop (GLOS's PRD §10.4).
++//
++// Under GLOS, with a desktop that can show OpenGL in a window (a Matrox card
++// at 16 bits a pixel: GLOS_CAP_GLWIN), a program gets windows instead of the
++// screen and becomes a GLOS app. A software window's pixels are GLOS's (the
++// desktop's format, RGB565), mapped into the program: SDL draws there and
++// says where (GLOS_FN_PRESENT). An OpenGL window is DOS-GL's (dglInit opens
++// it at context creation, of the window's size). Keys, the mouse, focus,
++// size and close requests come as GLOS events. A "fullscreen" window is a
++// window of the mode's size: the desktop stays. Otherwise (plain DOS, another
++// desktop) the "vesa" driver takes the screen as before.
++
++#include "SDL_internal.h"
++
++#ifdef SDL_VIDEO_DRIVER_DOSVESA
++
++#include "../../core/dos/SDL_glos.h"
++#include "../../core/dos/SDL_dos_scheduler.h"
++#include "../../events/SDL_keyboard_c.h"
++#include "../../events/SDL_mouse_c.h"
++#include "../../events/SDL_windowevents_c.h"
++#include "../SDL_sysvideo.h"
++#include "SDL_dosevents_c.h"
++#include "SDL_dosvideo.h"
++
++#ifdef SDL_VIDEO_OPENGL_DOSGL
++#include <GL/dosgl.h>
++#endif
++
++// Window sizes offered as "fullscreen" modes: those that fit on the desktop
++// with a frame, a title bar and the task bar.
++static const int glos_sizes[][2] = { { 320, 200 }, { 320, 240 }, { 400, 300 }, { 512, 384 }, { 640, 400 },
++                                     { 640, 480 }, { 800, 600 }, { 1024, 768 }, { 1280, 1024 } };
++
++static int glos_desk_w, glos_desk_h;
++
++static bool GLOS_SetRelativeMouseMode(bool enabled);
++
++static SDL_Window *GLOS_WindowOf(SDL_VideoDevice *device, unsigned id)
++{
++    for (SDL_Window *w = device->windows; w; w = w->next) {
++        if (w->internal && w->internal->glos_id == id) {
++            return w;
++        }
++    }
++    return NULL;
++}
++
++static bool GLOS_VideoInit(SDL_VideoDevice *device)
++{
++    GLOS_Window scr;
++    SDL_VideoDisplay vdisplay;
++    SDL_DisplayMode mode;
++    unsigned a, b;
++
++    if (!GLOS_BecomeApp()) {
++        return SDL_SetError("GLOS: the program can't be a GLOS app here");
++    }
++    SDL_zero(scr);
++    scr.size = sizeof(scr);
++    b = (unsigned)&scr;
++    if (GLOS_Call(GLOS_FN_SCREEN, &a, &b, 0, 0, 0) != 0 || scr.bpp != 16) {
++        return SDL_SetError("GLOS: no 16-bit desktop");
++    }
++    glos_desk_w = scr.w;
++    glos_desk_h = scr.h;
++
++    SDL_zero(mode);
++    mode.format = SDL_PIXELFORMAT_RGB565;
++    mode.w = scr.w;
++    mode.h = scr.h;
++    mode.pixel_density = 1.0f;
++    SDL_zero(vdisplay);
++    vdisplay.desktop_mode = mode;
++    vdisplay.name = (char *)"GLOS desktop";
++    if (!SDL_AddVideoDisplay(&vdisplay, false)) {
++        return false;
++    }
++    SDL_GetMouse()->internal = NULL;
++    SDL_GetMouse()->SetRelativeMouseMode = GLOS_SetRelativeMouseMode;
++    device->internal->glos_have_mouse = true;
++    return true;
++}
++
++static bool GLOS_GetDisplayModes(SDL_VideoDevice *device, SDL_VideoDisplay *display)
++{
++    (void)device;
++    for (int i = 0; i < (int)SDL_arraysize(glos_sizes); i++) {
++        SDL_DisplayMode mode;
++        if (glos_sizes[i][0] > glos_desk_w - 8 || glos_sizes[i][1] > glos_desk_h - 48) {
++            continue;
++        }
++        SDL_zero(mode);
++        mode.format = SDL_PIXELFORMAT_RGB565;
++        mode.w = glos_sizes[i][0];
++        mode.h = glos_sizes[i][1];
++        mode.pixel_density = 1.0f;
++        SDL_AddFullscreenDisplayMode(display, &mode);
++    }
++    return true;
++}
++
++static bool GLOS_SetDisplayMode(SDL_VideoDevice *device, SDL_VideoDisplay *display, SDL_DisplayMode *mode)
++{
++    (void)device;
++    (void)display;
++    (void)mode; // the desktop keeps its mode: a "fullscreen" window is a window of the mode's size
++    return true;
++}
++
++static void GLOS_VideoQuit(SDL_VideoDevice *device)
++{
++    (void)device;
++}
++
++static void GLOS_Destroy(SDL_VideoDevice *device)
++{
++    SDL_free(device->internal);
++    SDL_free(device);
++}
++
++// The window's GLOS pixels as SDL's framebuffer (a software window).
++static bool GLOS_Pixels(SDL_Window *window)
++{
++    SDL_WindowData *wd = window->internal;
++    GLOS_Window g;
++    unsigned a, b = wd->glos_id;
++    SDL_zero(g);
++    g.size = sizeof(g);
++    if (GLOS_Call(GLOS_FN_PIXELS, &a, &b, (unsigned)&g, 0, 0) != 0) {
++        return SDL_SetError("GLOS: no pixels for the window");
++    }
++    wd->glos_pixels = GLOS_Pointer(g.pixels);
++    wd->glos_pitch = (int)g.pitch;
++    window->w = g.w;
++    window->h = g.h;
++    return wd->glos_pixels != NULL;
++}
++
++static bool GLOS_CreateWindow(SDL_VideoDevice *device, SDL_Window *window, SDL_PropertiesID create_props)
++{
++    SDL_WindowData *wd = (SDL_WindowData *)SDL_calloc(1, sizeof(SDL_WindowData));
++    GLOS_Window g;
++    unsigned a, b;
++    int w = window->floating.w, h = window->floating.h;
++    (void)create_props;
++    if (!wd) {
++        return false;
++    }
++    window->internal = wd;
++    if (window->requested_fullscreen_mode.w > 0 && (window->flags & SDL_WINDOW_FULLSCREEN)) {
++        w = window->requested_fullscreen_mode.w;
++        h = window->requested_fullscreen_mode.h;
++    }
++    if (w <= 0 || h <= 0) {
++        w = 640, h = 480;
++    }
++    window->floating.w = window->windowed.w = window->w = w;
++    window->floating.h = window->windowed.h = window->h = h;
++    if (window->flags & SDL_WINDOW_OPENGL) {
++        return true; // DOS-GL opens it, at the context's creation
++    }
++    SDL_zero(g);
++    g.size = sizeof(g);
++    g.w = w;
++    g.h = h;
++    g.flags = GLOS_WIN_ANYWHERE | ((window->flags & SDL_WINDOW_RESIZABLE) ? 0 : GLOS_WIN_FIXED);
++    SDL_strlcpy(g.title, window->title ? window->title : "SDL", sizeof(g.title));
++    b = (unsigned)&g;
++    if (GLOS_Call(GLOS_FN_WINDOW, &a, &b, 0, 0, 0) != 0) {
++        return SDL_SetError("GLOS: no window of %dx%d", w, h);
++    }
++    wd->glos_id = g.id;
++    if (!(window->flags & SDL_WINDOW_HIDDEN)) {
++        b = wd->glos_id;
++        GLOS_Call(GLOS_FN_SHOW, &a, &b, 1, 0, 0);
++    }
++    return true;
++}
++
++static void GLOS_SetWindowTitle(SDL_VideoDevice *device, SDL_Window *window)
++{
++    unsigned a, b = window->internal->glos_id;
++    (void)device;
++    if (b) {
++        GLOS_Call(GLOS_FN_TITLE, &a, &b, (unsigned)(window->title ? window->title : ""), 0, 0);
++    }
++}
++
++static void GLOS_ShowWindow(SDL_VideoDevice *device, SDL_Window *window)
++{
++    unsigned a, b = window->internal->glos_id;
++    (void)device;
++    if (b) {
++        GLOS_Call(GLOS_FN_SHOW, &a, &b, 1, 0, 0);
++    }
++}
++
++static void GLOS_HideWindow(SDL_VideoDevice *device, SDL_Window *window)
++{
++    unsigned a, b = window->internal->glos_id;
++    (void)device;
++    if (b) {
++        GLOS_Call(GLOS_FN_SHOW, &a, &b, 0, 0, 0);
++    }
++}
++
++static void GLOS_RaiseWindow(SDL_VideoDevice *device, SDL_Window *window)
++{
++    unsigned a, b = window->internal->glos_id;
++    (void)device;
++    if (b) {
++        GLOS_Call(GLOS_FN_FOCUS, &a, &b, 0, 0, 0);
++    }
++}
++
++static void GLOS_SetWindowSize(SDL_VideoDevice *device, SDL_Window *window)
++{
++    unsigned a, b = window->internal->glos_id;
++    (void)device;
++    if (!b || (window->flags & SDL_WINDOW_OPENGL)) {
++        return; // an OpenGL window's size is its context's: a new context for another
++    }
++    if (GLOS_Call(GLOS_FN_RESIZE, &a, &b, (unsigned)window->pending.w, (unsigned)window->pending.h, 0) == 0) {
++        window->surface_valid = false;
++        SDL_SendWindowEvent(window, SDL_EVENT_WINDOW_RESIZED, window->pending.w, window->pending.h);
++    }
++}
++
++static SDL_FullscreenResult GLOS_SetWindowFullscreen(SDL_VideoDevice *device, SDL_Window *window,
++                                                     SDL_VideoDisplay *display, SDL_FullscreenOp fullscreen)
++{
++    (void)device;
++    (void)display;
++    if (fullscreen != SDL_FULLSCREEN_OP_LEAVE && window->requested_fullscreen_mode.w > 0 && !window->internal->glos_id) {
++        // Before an OpenGL context: the window simply has the mode's size.
++        window->floating.w = window->windowed.w = window->w = window->requested_fullscreen_mode.w;
++        window->floating.h = window->windowed.h = window->h = window->requested_fullscreen_mode.h;
++    }
++    return SDL_FULLSCREEN_SUCCEEDED;
++}
++
++static void GLOS_GetWindowSizeInPixels(SDL_VideoDevice *device, SDL_Window *window, int *w, int *h)
++{
++    (void)device;
++    *w = window->w;
++    *h = window->h;
++}
++
++static void GLOS_DestroyWindow(SDL_VideoDevice *device, SDL_Window *window)
++{
++    SDL_WindowData *wd = window->internal;
++    unsigned a, b;
++    (void)device;
++    if (wd && wd->glos_id && !(window->flags & SDL_WINDOW_OPENGL)) {
++        b = wd->glos_id;
++        GLOS_Call(GLOS_FN_CLOSE, &a, &b, 0, 0, 0);
++    }
++#ifdef SDL_VIDEO_OPENGL_DOSGL
++    if ((window->flags & SDL_WINDOW_OPENGL) && device->internal->gl_context_active) {
++        dglShutdown(); // the program never destroyed the context: DOS-GL closes its window
++        device->internal->gl_context_active = false;
++    }
++    if (device->internal->gl_window == window) {
++        device->internal->gl_window = NULL;
++    }
++#endif
++    SDL_free(wd);
++    window->internal = NULL;
++}
++
++// ---- software windows
++
++static bool GLOS_CreateWindowFramebuffer(SDL_VideoDevice *device, SDL_Window *window, SDL_PixelFormat *format,
++                                         void **pixels, int *pitch)
++{
++    (void)device;
++    if (!window->internal->glos_id) {
++        return SDL_SetError("GLOS: an OpenGL window has no framebuffer");
++    }
++    if (!GLOS_Pixels(window)) {
++        return false;
++    }
++    *format = SDL_PIXELFORMAT_RGB565;
++    *pixels = window->internal->glos_pixels;
++    *pitch = window->internal->glos_pitch;
++    return true;
++}
++
++static bool GLOS_UpdateWindowFramebuffer(SDL_VideoDevice *device, SDL_Window *window, const SDL_Rect *rects,
++                                         int numrects)
++{
++    unsigned a, b = window->internal->glos_id;
++    (void)device;
++    if (numrects <= 0 || numrects > 16) {
++        return GLOS_Call(GLOS_FN_PRESENT, &a, &b, 0, 0, 0) == 0;
++    }
++    for (int i = 0; i < numrects; i++) {
++        int r[4] = { rects[i].x, rects[i].y, rects[i].w, rects[i].h };
++        b = window->internal->glos_id;
++        GLOS_Call(GLOS_FN_PRESENT, &a, &b, (unsigned)r, 0, 0);
++    }
++    return true;
++}
++
++static void GLOS_DestroyWindowFramebuffer(SDL_VideoDevice *device, SDL_Window *window)
++{
++    (void)device;
++    window->internal->glos_pixels = NULL;
++}
++
++// ---- events
++
++static Uint8 GLOS_Button(unsigned b)
++{
++    return b == 1 ? SDL_BUTTON_LEFT : b == 2 ? SDL_BUTTON_RIGHT : SDL_BUTTON_MIDDLE;
++}
++
++static void GLOS_PumpEvents(SDL_VideoDevice *device)
++{
++    SDL_VideoData *data = device->internal;
++    GLOS_Event ev;
++    unsigned a, b;
++    DOS_Yield(); // cooperative threads (the audio thread) run here, as with the vesa driver
++    for (;;) {
++        SDL_Window *window;
++        SDL_zero(ev);
++        ev.size = sizeof(ev);
++        b = (unsigned)&ev;
++        if (GLOS_Call(GLOS_FN_EVENT, &a, &b, 0, 0, 0) != 0 || a != 1) {
++            break;
++        }
++        window = GLOS_WindowOf(device, ev.window);
++        switch (ev.type) {
++        case GLOS_EV_KEY: {
++            unsigned code = ev.key & 0x7F;
++            SDL_Scancode sc = (ev.key & 0x100) ? DOSVESA_ExtendedScancodeMapping[code] : DOSVESA_ScancodeMapping[code];
++            if (sc == SDL_SCANCODE_UNKNOWN) {
++                break;
++            }
++            SDL_SendKeyboardKey(0, SDL_GLOBAL_KEYBOARD_ID, (int)ev.key, sc, ev.down != 0);
++            if (ev.down && ev.ch >= 32 && ev.ch != 127 && !(SDL_GetModState() & (SDL_KMOD_CTRL | SDL_KMOD_ALT))) {
++                char text[5];
++                *SDL_UCS4ToUTF8(ev.ch, text) = '\0';
++                SDL_SendKeyboardText(text);
++            }
++            break;
++        }
++        case GLOS_EV_MOUSE:
++            if (!window) {
++                break;
++            }
++            if (data->glos_relative) {
++                SDL_SendMouseMotion(0, window, SDL_GLOBAL_MOUSE_ID, true, (float)ev.x - data->glos_mouse_x,
++                                    (float)ev.y - data->glos_mouse_y);
++            } else {
++                SDL_SendMouseMotion(0, window, SDL_GLOBAL_MOUSE_ID, false, (float)ev.x, (float)ev.y);
++            }
++            data->glos_mouse_x = (float)ev.x;
++            data->glos_mouse_y = (float)ev.y;
++            if (ev.key) { // a button changed
++                SDL_SendMouseButton(0, window, SDL_GLOBAL_MOUSE_ID, GLOS_Button(ev.key), ev.down != 0);
++            }
++            break;
++        case GLOS_EV_FOCUS:
++            if (window) {
++                SDL_SetKeyboardFocus(ev.down ? window : NULL);
++                SDL_SetMouseFocus(ev.down ? window : NULL);
++            }
++            break;
++        case GLOS_EV_RESIZE:
++            if (window) {
++                window->surface_valid = false; // its pixels are elsewhere now
++                SDL_SendWindowEvent(window, SDL_EVENT_WINDOW_RESIZED, ev.x, ev.y);
++            }
++            break;
++        case GLOS_EV_CLOSE:
++            if (window) {
++                SDL_SendWindowEvent(window, SDL_EVENT_WINDOW_CLOSE_REQUESTED, 0, 0);
++            }
++            break;
++        }
++    }
++}
++
++static bool GLOS_SetRelativeMouseMode(bool enabled)
++{
++    SDL_VideoDevice *device = SDL_GetVideoDevice();
++    if (device && device->internal) {
++        device->internal->glos_relative = enabled;
++    }
++    return true;
++}
++
++// ---- OpenGL windows: DOS-GL's own, in a window of its own
++
++#ifdef SDL_VIDEO_OPENGL_DOSGL
++#if defined(DGL_API_VERSION) && DGL_API_VERSION >= 0x0103
++static void GLOS_GL_WaitHook(void *arg)
++{
++    (void)arg;
++    DOS_Yield();
++}
++#endif
++
++static bool GLOS_GL_LoadLibrary(SDL_VideoDevice *device, const char *path)
++{
++    (void)device;
++    (void)path;
++    return true;
++}
++
++static SDL_FunctionPointer GLOS_GL_GetProcAddress(SDL_VideoDevice *device, const char *proc)
++{
++    (void)device;
++    return (SDL_FunctionPointer)dglGetProcAddress(proc);
++}
++
++static void GLOS_GL_UnloadLibrary(SDL_VideoDevice *device)
++{
++    (void)device;
++}
++
++static SDL_GLContext GLOS_GL_CreateContext(SDL_VideoDevice *device, SDL_Window *window)
++{
++    SDL_VideoData *data = device->internal;
++    DGLConfig cfg;
++    unsigned a, b;
++    if (!(window->flags & SDL_WINDOW_OPENGL)) {
++        SDL_SetError("GLOS: not an OpenGL window");
++        return NULL;
++    }
++    if (data->gl_context_active) {
++        SDL_SetError("DOS-GL: one OpenGL context at a time");
++        return NULL;
++    }
++    SDL_zero(cfg);
++    cfg.width = window->w;
++    cfg.height = window->h;
++    cfg.color_bits = 16;
++    cfg.depth_bits = device->gl_config.depth_size > 0 ? 16 : 0;
++    cfg.double_buffer = device->gl_config.double_buffer ? 1 : 0;
++    cfg.vsync = data->gl_swap_interval != 0;
++    if (dglInit(&cfg) != 0) {
++        SDL_SetError("DOS-GL: %s", dglGetErrorString());
++        return NULL;
++    }
++    data->gl_context_active = true;
++    data->gl_window = window;
++#if defined(DGL_API_VERSION) && DGL_API_VERSION >= 0x0104
++    window->internal->glos_id = dglGetGlosWindow();
++#endif
++    if (window->internal->glos_id && window->title) {
++        b = window->internal->glos_id;
++        GLOS_Call(GLOS_FN_TITLE, &a, &b, (unsigned)window->title, 0, 0);
++    }
++#if defined(DGL_API_VERSION) && DGL_API_VERSION >= 0x0103
++    dglSetWaitHook(GLOS_GL_WaitHook, NULL);
++#endif
++    SDL_SetKeyboardFocus(window);
++    SDL_SetMouseFocus(window);
++    return (SDL_GLContext)data;
++}
++
++static bool GLOS_GL_MakeCurrent(SDL_VideoDevice *device, SDL_Window *window, SDL_GLContext context)
++{
++    (void)device;
++    (void)window;
++    (void)context;
++    return true;
++}
++
++static bool GLOS_GL_SetSwapInterval(SDL_VideoDevice *device, int interval)
++{
++    device->internal->gl_swap_interval = interval ? 1 : 0;
++    dglSetVSync(device->internal->gl_swap_interval);
++    return true;
++}
++
++static bool GLOS_GL_GetSwapInterval(SDL_VideoDevice *device, int *interval)
++{
++    *interval = device->internal->gl_swap_interval;
++    return true;
++}
++
++static bool GLOS_GL_SwapWindow(SDL_VideoDevice *device, SDL_Window *window)
++{
++    (void)device;
++    (void)window;
++    DOS_Yield();
++    dglSwapBuffers();
++    return true;
++}
++
++static bool GLOS_GL_DestroyContext(SDL_VideoDevice *device, SDL_GLContext context)
++{
++    SDL_VideoData *data = device->internal;
++    (void)context;
++    if (data->gl_context_active) {
++#if defined(DGL_API_VERSION) && DGL_API_VERSION >= 0x0103
++        dglSetWaitHook(NULL, NULL);
++#endif
++        dglShutdown(); // DOS-GL closes its window
++        data->gl_context_active = false;
++        if (data->gl_window && data->gl_window->internal) {
++            data->gl_window->internal->glos_id = 0;
++        }
++    }
++    return true;
++}
++#endif
++
++static SDL_VideoDevice *GLOS_CreateDevice(void)
++{
++    SDL_VideoDevice *device;
++    const char *want = SDL_GetHint(SDL_HINT_VIDEO_DRIVER);
++    if (want && SDL_strcasecmp(want, "glos") != 0) {
++        return NULL; // (asked for another by name)
++    }
++    if (!(GLOS_Caps() & GLOS_CAP_GLWIN)) {
++        return NULL; // plain DOS, or a desktop that can't show this program: the vesa driver's screen
++    }
++    device = (SDL_VideoDevice *)SDL_calloc(1, sizeof(SDL_VideoDevice));
++    if (!device) {
++        return NULL;
++    }
++    device->internal = (SDL_VideoData *)SDL_calloc(1, sizeof(SDL_VideoData));
++    if (!device->internal) {
++        SDL_free(device);
++        return NULL;
++    }
++    device->free = GLOS_Destroy;
++    device->VideoInit = GLOS_VideoInit;
++    device->VideoQuit = GLOS_VideoQuit;
++    device->GetDisplayModes = GLOS_GetDisplayModes;
++    device->SetDisplayMode = GLOS_SetDisplayMode;
++    device->CreateSDLWindow = GLOS_CreateWindow;
++    device->SetWindowTitle = GLOS_SetWindowTitle;
++    device->ShowWindow = GLOS_ShowWindow;
++    device->HideWindow = GLOS_HideWindow;
++    device->RaiseWindow = GLOS_RaiseWindow;
++    device->SetWindowSize = GLOS_SetWindowSize;
++    device->SetWindowFullscreen = GLOS_SetWindowFullscreen;
++    device->GetWindowSizeInPixels = GLOS_GetWindowSizeInPixels;
++    device->DestroyWindow = GLOS_DestroyWindow;
++    device->CreateWindowFramebuffer = GLOS_CreateWindowFramebuffer;
++    device->UpdateWindowFramebuffer = GLOS_UpdateWindowFramebuffer;
++    device->DestroyWindowFramebuffer = GLOS_DestroyWindowFramebuffer;
++    device->PumpEvents = GLOS_PumpEvents;
++#ifdef SDL_VIDEO_OPENGL_DOSGL
++    device->internal->gl_swap_interval = 1;
++    device->GL_LoadLibrary = GLOS_GL_LoadLibrary;
++    device->GL_GetProcAddress = GLOS_GL_GetProcAddress;
++    device->GL_UnloadLibrary = GLOS_GL_UnloadLibrary;
++    device->GL_CreateContext = GLOS_GL_CreateContext;
++    device->GL_MakeCurrent = GLOS_GL_MakeCurrent;
++    device->GL_SetSwapInterval = GLOS_GL_SetSwapInterval;
++    device->GL_GetSwapInterval = GLOS_GL_GetSwapInterval;
++    device->GL_SwapWindow = GLOS_GL_SwapWindow;
++    device->GL_DestroyContext = GLOS_GL_DestroyContext;
++#endif
++    return device;
++}
++
++VideoBootStrap GLOS_bootstrap = {
++    "glos",
++    "GLOS desktop windows",
++    GLOS_CreateDevice,
++    NULL,
++    false
++};
++
++#endif // SDL_VIDEO_DRIVER_DOSVESA

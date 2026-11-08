@@ -1,0 +1,11 @@
+{
+ "_about": "Game disk for PrBoom-plus in Loop A (MGA-Glide tools/loopa/run.py --games-file). The fixture comes from tools/doom/fixtures.py (the owner's IWADs); cylinders size the D: image (63 x 16 x cylinders sectors): DOOM.WAD and DOOM2.WAD need about 55, the rest is room for the program, saves, configs and logs.",
+ "doom": {
+  "title": "PrBoom-plus (the owner's IWADs)",
+  "fixture": "games/doom/DOOM",
+  "dir": "DOOM",
+  "cwd": "DOOM",
+  "run": [],
+  "cylinders": 100
+ }
+}

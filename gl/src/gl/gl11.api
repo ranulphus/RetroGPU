@@ -1,0 +1,340 @@
+# The OpenGL 1.1 entry points: name | return type | parameter types.
+# DOS-GL implements the ones its sources define (APIENTRY gl...); the build
+# generates logged stubs for the rest (tools/gen_stubs.py), so a program that
+# binds every GL 1.1 function (Quake 2's static ref_gl) links.
+glAccum | void | GLenum, GLfloat
+glAlphaFunc | void | GLenum, GLclampf
+glAreTexturesResident | GLboolean | GLsizei, const GLuint *, GLboolean *
+glArrayElement | void | GLint
+glBegin | void | GLenum
+glBindTexture | void | GLenum, GLuint
+glBitmap | void | GLsizei, GLsizei, GLfloat, GLfloat, GLfloat, GLfloat, const GLubyte *
+glBlendFunc | void | GLenum, GLenum
+glCallList | void | GLuint
+glCallLists | void | GLsizei, GLenum, const GLvoid *
+glClear | void | GLbitfield
+glClearAccum | void | GLfloat, GLfloat, GLfloat, GLfloat
+glClearColor | void | GLclampf, GLclampf, GLclampf, GLclampf
+glClearDepth | void | GLclampd
+glClearIndex | void | GLfloat
+glClearStencil | void | GLint
+glClipPlane | void | GLenum, const GLdouble *
+glColor3b | void | GLbyte, GLbyte, GLbyte
+glColor3bv | void | const GLbyte *
+glColor3d | void | GLdouble, GLdouble, GLdouble
+glColor3dv | void | const GLdouble *
+glColor3f | void | GLfloat, GLfloat, GLfloat
+glColor3fv | void | const GLfloat *
+glColor3i | void | GLint, GLint, GLint
+glColor3iv | void | const GLint *
+glColor3s | void | GLshort, GLshort, GLshort
+glColor3sv | void | const GLshort *
+glColor3ub | void | GLubyte, GLubyte, GLubyte
+glColor3ubv | void | const GLubyte *
+glColor3ui | void | GLuint, GLuint, GLuint
+glColor3uiv | void | const GLuint *
+glColor3us | void | GLushort, GLushort, GLushort
+glColor3usv | void | const GLushort *
+glColor4b | void | GLbyte, GLbyte, GLbyte, GLbyte
+glColor4bv | void | const GLbyte *
+glColor4d | void | GLdouble, GLdouble, GLdouble, GLdouble
+glColor4dv | void | const GLdouble *
+glColor4f | void | GLfloat, GLfloat, GLfloat, GLfloat
+glColor4fv | void | const GLfloat *
+glColor4i | void | GLint, GLint, GLint, GLint
+glColor4iv | void | const GLint *
+glColor4s | void | GLshort, GLshort, GLshort, GLshort
+glColor4sv | void | const GLshort *
+glColor4ub | void | GLubyte, GLubyte, GLubyte, GLubyte
+glColor4ubv | void | const GLubyte *
+glColor4ui | void | GLuint, GLuint, GLuint, GLuint
+glColor4uiv | void | const GLuint *
+glColor4us | void | GLushort, GLushort, GLushort, GLushort
+glColor4usv | void | const GLushort *
+glColorMask | void | GLboolean, GLboolean, GLboolean, GLboolean
+glColorMaterial | void | GLenum, GLenum
+glColorPointer | void | GLint, GLenum, GLsizei, const GLvoid *
+glCopyPixels | void | GLint, GLint, GLsizei, GLsizei, GLenum
+glCopyTexImage1D | void | GLenum, GLint, GLenum, GLint, GLint, GLsizei, GLint
+glCopyTexImage2D | void | GLenum, GLint, GLenum, GLint, GLint, GLsizei, GLsizei, GLint
+glCopyTexSubImage1D | void | GLenum, GLint, GLint, GLint, GLint, GLsizei
+glCopyTexSubImage2D | void | GLenum, GLint, GLint, GLint, GLint, GLint, GLsizei, GLsizei
+glCullFace | void | GLenum
+glDeleteLists | void | GLuint, GLsizei
+glDeleteTextures | void | GLsizei, const GLuint *
+glDepthFunc | void | GLenum
+glDepthMask | void | GLboolean
+glDepthRange | void | GLclampd, GLclampd
+glDisable | void | GLenum
+glDisableClientState | void | GLenum
+glDrawArrays | void | GLenum, GLint, GLsizei
+glDrawBuffer | void | GLenum
+glDrawElements | void | GLenum, GLsizei, GLenum, const GLvoid *
+glDrawPixels | void | GLsizei, GLsizei, GLenum, GLenum, const GLvoid *
+glEdgeFlag | void | GLboolean
+glEdgeFlagPointer | void | GLsizei, const GLvoid *
+glEdgeFlagv | void | const GLboolean *
+glEnable | void | GLenum
+glEnableClientState | void | GLenum
+glEnd | void | void
+glEndList | void | void
+glEvalCoord1d | void | GLdouble
+glEvalCoord1dv | void | const GLdouble *
+glEvalCoord1f | void | GLfloat
+glEvalCoord1fv | void | const GLfloat *
+glEvalCoord2d | void | GLdouble, GLdouble
+glEvalCoord2dv | void | const GLdouble *
+glEvalCoord2f | void | GLfloat, GLfloat
+glEvalCoord2fv | void | const GLfloat *
+glEvalMesh1 | void | GLenum, GLint, GLint
+glEvalMesh2 | void | GLenum, GLint, GLint, GLint, GLint
+glEvalPoint1 | void | GLint
+glEvalPoint2 | void | GLint, GLint
+glFeedbackBuffer | void | GLsizei, GLenum, GLfloat *
+glFinish | void | void
+glFlush | void | void
+glFogf | void | GLenum, GLfloat
+glFogfv | void | GLenum, const GLfloat *
+glFogi | void | GLenum, GLint
+glFogiv | void | GLenum, const GLint *
+glFrontFace | void | GLenum
+glFrustum | void | GLdouble, GLdouble, GLdouble, GLdouble, GLdouble, GLdouble
+glGenLists | GLuint | GLsizei
+glGenTextures | void | GLsizei, GLuint *
+glGetBooleanv | void | GLenum, GLboolean *
+glGetClipPlane | void | GLenum, GLdouble *
+glGetDoublev | void | GLenum, GLdouble *
+glGetError | GLenum | void
+glGetFloatv | void | GLenum, GLfloat *
+glGetIntegerv | void | GLenum, GLint *
+glGetLightfv | void | GLenum, GLenum, GLfloat *
+glGetLightiv | void | GLenum, GLenum, GLint *
+glGetMapdv | void | GLenum, GLenum, GLdouble *
+glGetMapfv | void | GLenum, GLenum, GLfloat *
+glGetMapiv | void | GLenum, GLenum, GLint *
+glGetMaterialfv | void | GLenum, GLenum, GLfloat *
+glGetMaterialiv | void | GLenum, GLenum, GLint *
+glGetPixelMapfv | void | GLenum, GLfloat *
+glGetPixelMapuiv | void | GLenum, GLuint *
+glGetPixelMapusv | void | GLenum, GLushort *
+glGetPointerv | void | GLenum, GLvoid **
+glGetPolygonStipple | void | GLubyte *
+glGetString | const GLubyte* | GLenum
+glGetTexEnvfv | void | GLenum, GLenum, GLfloat *
+glGetTexEnviv | void | GLenum, GLenum, GLint *
+glGetTexGendv | void | GLenum, GLenum, GLdouble *
+glGetTexGenfv | void | GLenum, GLenum, GLfloat *
+glGetTexGeniv | void | GLenum, GLenum, GLint *
+glGetTexImage | void | GLenum, GLint, GLenum, GLenum, GLvoid *
+glGetTexLevelParameterfv | void | GLenum, GLint, GLenum, GLfloat *
+glGetTexLevelParameteriv | void | GLenum, GLint, GLenum, GLint *
+glGetTexParameterfv | void | GLenum, GLenum, GLfloat *
+glGetTexParameteriv | void | GLenum, GLenum, GLint *
+glHint | void | GLenum, GLenum
+glIndexMask | void | GLuint
+glIndexPointer | void | GLenum, GLsizei, const GLvoid *
+glIndexd | void | GLdouble
+glIndexdv | void | const GLdouble *
+glIndexf | void | GLfloat
+glIndexfv | void | const GLfloat *
+glIndexi | void | GLint
+glIndexiv | void | const GLint *
+glIndexs | void | GLshort
+glIndexsv | void | const GLshort *
+glIndexub | void | GLubyte
+glIndexubv | void | const GLubyte *
+glInitNames | void | void
+glInterleavedArrays | void | GLenum, GLsizei, const GLvoid *
+glIsEnabled | GLboolean | GLenum
+glIsList | GLboolean | GLuint
+glIsTexture | GLboolean | GLuint
+glLightModelf | void | GLenum, GLfloat
+glLightModelfv | void | GLenum, const GLfloat *
+glLightModeli | void | GLenum, GLint
+glLightModeliv | void | GLenum, const GLint *
+glLightf | void | GLenum, GLenum, GLfloat
+glLightfv | void | GLenum, GLenum, const GLfloat *
+glLighti | void | GLenum, GLenum, GLint
+glLightiv | void | GLenum, GLenum, const GLint *
+glLineStipple | void | GLint, GLushort
+glLineWidth | void | GLfloat
+glListBase | void | GLuint
+glLoadIdentity | void | void
+glLoadMatrixd | void | const GLdouble *
+glLoadMatrixf | void | const GLfloat *
+glLoadName | void | GLuint
+glLogicOp | void | GLenum
+glMap1d | void | GLenum, GLdouble, GLdouble, GLint, GLint, const GLdouble *
+glMap1f | void | GLenum, GLfloat, GLfloat, GLint, GLint, const GLfloat *
+glMap2d | void | GLenum, GLdouble, GLdouble, GLint, GLint, GLdouble, GLdouble, GLint, GLint, const GLdouble *
+glMap2f | void | GLenum, GLfloat, GLfloat, GLint, GLint, GLfloat, GLfloat, GLint, GLint, const GLfloat *
+glMapGrid1d | void | GLint, GLdouble, GLdouble
+glMapGrid1f | void | GLint, GLfloat, GLfloat
+glMapGrid2d | void | GLint, GLdouble, GLdouble, GLint, GLdouble, GLdouble
+glMapGrid2f | void | GLint, GLfloat, GLfloat, GLint, GLfloat, GLfloat
+glMaterialf | void | GLenum, GLenum, GLfloat
+glMaterialfv | void | GLenum, GLenum, const GLfloat *
+glMateriali | void | GLenum, GLenum, GLint
+glMaterialiv | void | GLenum, GLenum, const GLint *
+glMatrixMode | void | GLenum
+glMultMatrixd | void | const GLdouble *
+glMultMatrixf | void | const GLfloat *
+glNewList | void | GLuint, GLenum
+glNormal3b | void | GLbyte, GLbyte, GLbyte
+glNormal3bv | void | const GLbyte *
+glNormal3d | void | GLdouble, GLdouble, GLdouble
+glNormal3dv | void | const GLdouble *
+glNormal3f | void | GLfloat, GLfloat, GLfloat
+glNormal3fv | void | const GLfloat *
+glNormal3i | void | GLint, GLint, GLint
+glNormal3iv | void | const GLint *
+glNormal3s | void | GLshort, GLshort, GLshort
+glNormal3sv | void | const GLshort *
+glNormalPointer | void | GLenum, GLsizei, const GLvoid *
+glOrtho | void | GLdouble, GLdouble, GLdouble, GLdouble, GLdouble, GLdouble
+glPassThrough | void | GLfloat
+glPixelMapfv | void | GLenum, GLsizei, const GLfloat *
+glPixelMapuiv | void | GLenum, GLsizei, const GLuint *
+glPixelMapusv | void | GLenum, GLsizei, const GLushort *
+glPixelStoref | void | GLenum, GLfloat
+glPixelStorei | void | GLenum, GLint
+glPixelTransferf | void | GLenum, GLfloat
+glPixelTransferi | void | GLenum, GLint
+glPixelZoom | void | GLfloat, GLfloat
+glPointSize | void | GLfloat
+glPolygonMode | void | GLenum, GLenum
+glPolygonOffset | void | GLfloat, GLfloat
+glPolygonStipple | void | const GLubyte *
+glPopAttrib | void | void
+glPopClientAttrib | void | void
+glPopMatrix | void | void
+glPopName | void | void
+glPrioritizeTextures | void | GLsizei, const GLuint *, const GLclampf *
+glPushAttrib | void | GLbitfield
+glPushClientAttrib | void | GLbitfield
+glPushMatrix | void | void
+glPushName | void | GLuint
+glRasterPos2d | void | GLdouble, GLdouble
+glRasterPos2dv | void | const GLdouble *
+glRasterPos2f | void | GLfloat, GLfloat
+glRasterPos2fv | void | const GLfloat *
+glRasterPos2i | void | GLint, GLint
+glRasterPos2iv | void | const GLint *
+glRasterPos2s | void | GLshort, GLshort
+glRasterPos2sv | void | const GLshort *
+glRasterPos3d | void | GLdouble, GLdouble, GLdouble
+glRasterPos3dv | void | const GLdouble *
+glRasterPos3f | void | GLfloat, GLfloat, GLfloat
+glRasterPos3fv | void | const GLfloat *
+glRasterPos3i | void | GLint, GLint, GLint
+glRasterPos3iv | void | const GLint *
+glRasterPos3s | void | GLshort, GLshort, GLshort
+glRasterPos3sv | void | const GLshort *
+glRasterPos4d | void | GLdouble, GLdouble, GLdouble, GLdouble
+glRasterPos4dv | void | const GLdouble *
+glRasterPos4f | void | GLfloat, GLfloat, GLfloat, GLfloat
+glRasterPos4fv | void | const GLfloat *
+glRasterPos4i | void | GLint, GLint, GLint, GLint
+glRasterPos4iv | void | const GLint *
+glRasterPos4s | void | GLshort, GLshort, GLshort, GLshort
+glRasterPos4sv | void | const GLshort *
+glReadBuffer | void | GLenum
+glReadPixels | void | GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, GLvoid *
+glRectd | void | GLdouble, GLdouble, GLdouble, GLdouble
+glRectdv | void | const GLdouble *, const GLdouble *
+glRectf | void | GLfloat, GLfloat, GLfloat, GLfloat
+glRectfv | void | const GLfloat *, const GLfloat *
+glRecti | void | GLint, GLint, GLint, GLint
+glRectiv | void | const GLint *, const GLint *
+glRects | void | GLshort, GLshort, GLshort, GLshort
+glRectsv | void | const GLshort *, const GLshort *
+glRenderMode | GLint | GLenum
+glRotated | void | GLdouble, GLdouble, GLdouble, GLdouble
+glRotatef | void | GLfloat, GLfloat, GLfloat, GLfloat
+glScaled | void | GLdouble, GLdouble, GLdouble
+glScalef | void | GLfloat, GLfloat, GLfloat
+glScissor | void | GLint, GLint, GLsizei, GLsizei
+glSelectBuffer | void | GLsizei, GLuint *
+glShadeModel | void | GLenum
+glStencilFunc | void | GLenum, GLint, GLuint
+glStencilMask | void | GLuint
+glStencilOp | void | GLenum, GLenum, GLenum
+glTexCoord1d | void | GLdouble
+glTexCoord1dv | void | const GLdouble *
+glTexCoord1f | void | GLfloat
+glTexCoord1fv | void | const GLfloat *
+glTexCoord1i | void | GLint
+glTexCoord1iv | void | const GLint *
+glTexCoord1s | void | GLshort
+glTexCoord1sv | void | const GLshort *
+glTexCoord2d | void | GLdouble, GLdouble
+glTexCoord2dv | void | const GLdouble *
+glTexCoord2f | void | GLfloat, GLfloat
+glTexCoord2fv | void | const GLfloat *
+glTexCoord2i | void | GLint, GLint
+glTexCoord2iv | void | const GLint *
+glTexCoord2s | void | GLshort, GLshort
+glTexCoord2sv | void | const GLshort *
+glTexCoord3d | void | GLdouble, GLdouble, GLdouble
+glTexCoord3dv | void | const GLdouble *
+glTexCoord3f | void | GLfloat, GLfloat, GLfloat
+glTexCoord3fv | void | const GLfloat *
+glTexCoord3i | void | GLint, GLint, GLint
+glTexCoord3iv | void | const GLint *
+glTexCoord3s | void | GLshort, GLshort, GLshort
+glTexCoord3sv | void | const GLshort *
+glTexCoord4d | void | GLdouble, GLdouble, GLdouble, GLdouble
+glTexCoord4dv | void | const GLdouble *
+glTexCoord4f | void | GLfloat, GLfloat, GLfloat, GLfloat
+glTexCoord4fv | void | const GLfloat *
+glTexCoord4i | void | GLint, GLint, GLint, GLint
+glTexCoord4iv | void | const GLint *
+glTexCoord4s | void | GLshort, GLshort, GLshort, GLshort
+glTexCoord4sv | void | const GLshort *
+glTexCoordPointer | void | GLint, GLenum, GLsizei, const GLvoid *
+glTexEnvf | void | GLenum, GLenum, GLfloat
+glTexEnvfv | void | GLenum, GLenum, const GLfloat *
+glTexEnvi | void | GLenum, GLenum, GLint
+glTexEnviv | void | GLenum, GLenum, const GLint *
+glTexGend | void | GLenum, GLenum, GLdouble
+glTexGendv | void | GLenum, GLenum, const GLdouble *
+glTexGenf | void | GLenum, GLenum, GLfloat
+glTexGenfv | void | GLenum, GLenum, const GLfloat *
+glTexGeni | void | GLenum, GLenum, GLint
+glTexGeniv | void | GLenum, GLenum, const GLint *
+glTexImage1D | void | GLenum, GLint, GLint, GLsizei, GLint, GLenum, GLenum, const GLvoid *
+glTexImage2D | void | GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const GLvoid *
+glTexParameterf | void | GLenum, GLenum, GLfloat
+glTexParameterfv | void | GLenum, GLenum, const GLfloat *
+glTexParameteri | void | GLenum, GLenum, GLint
+glTexParameteriv | void | GLenum, GLenum, const GLint *
+glTexSubImage1D | void | GLenum, GLint, GLint, GLsizei, GLenum, GLenum, const GLvoid *
+glTexSubImage2D | void | GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, const GLvoid *
+glTranslated | void | GLdouble, GLdouble, GLdouble
+glTranslatef | void | GLfloat, GLfloat, GLfloat
+glVertex2d | void | GLdouble, GLdouble
+glVertex2dv | void | const GLdouble *
+glVertex2f | void | GLfloat, GLfloat
+glVertex2fv | void | const GLfloat *
+glVertex2i | void | GLint, GLint
+glVertex2iv | void | const GLint *
+glVertex2s | void | GLshort, GLshort
+glVertex2sv | void | const GLshort *
+glVertex3d | void | GLdouble, GLdouble, GLdouble
+glVertex3dv | void | const GLdouble *
+glVertex3f | void | GLfloat, GLfloat, GLfloat
+glVertex3fv | void | const GLfloat *
+glVertex3i | void | GLint, GLint, GLint
+glVertex3iv | void | const GLint *
+glVertex3s | void | GLshort, GLshort, GLshort
+glVertex3sv | void | const GLshort *
+glVertex4d | void | GLdouble, GLdouble, GLdouble, GLdouble
+glVertex4dv | void | const GLdouble *
+glVertex4f | void | GLfloat, GLfloat, GLfloat, GLfloat
+glVertex4fv | void | const GLfloat *
+glVertex4i | void | GLint, GLint, GLint, GLint
+glVertex4iv | void | const GLint *
+glVertex4s | void | GLshort, GLshort, GLshort, GLshort
+glVertex4sv | void | const GLshort *
+glVertexPointer | void | GLint, GLenum, GLsizei, const GLvoid *
+glViewport | void | GLint, GLint, GLsizei, GLsizei

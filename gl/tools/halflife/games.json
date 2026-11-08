@@ -1,0 +1,11 @@
+{
+ "_about": "Game disk for Half-Life in Loop A (MGA-Glide tools/loopa/run.py --games-file). The fixture comes from tools/halflife/fixtures.py; cylinders size the D: image (63 x 16 x cylinders sectors): the data needs about 685, the rest is room for the executable, saves and logs.",
+ "halflife": {
+  "title": "Half-Life (WON, retail)",
+  "fixture": "games/halflife",
+  "dir": "HL",
+  "cwd": "HL",
+  "run": [],
+  "cylinders": 800
+ }
+}

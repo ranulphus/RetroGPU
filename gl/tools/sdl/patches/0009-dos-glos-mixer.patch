@@ -1,0 +1,210 @@
+diff --git a/src/audio/SDL_audio.c b/src/audio/SDL_audio.c
+index cc1c3c8..6281e14 100644
+--- a/src/audio/SDL_audio.c
++++ b/src/audio/SDL_audio.c
+@@ -93,6 +93,7 @@ static const AudioBootStrap *const bootstrap[] = {
+     &QSAAUDIO_bootstrap,
+ #endif
+ #ifdef SDL_AUDIO_DRIVER_DOS_SOUNDBLASTER
++    &GLOSAUDIO_bootstrap, // (before the card: under GLOS, its mixer has it)
+     &DOSSOUNDBLASTER_bootstrap,
+ #endif
+ #ifdef SDL_AUDIO_DRIVER_OHAUDIO
+diff --git a/src/audio/SDL_sysaudio.h b/src/audio/SDL_sysaudio.h
+index 5999f84..db4db37 100644
+--- a/src/audio/SDL_sysaudio.h
++++ b/src/audio/SDL_sysaudio.h
+@@ -405,6 +405,7 @@ extern AudioBootStrap N3DSAUDIO_bootstrap;
+ extern AudioBootStrap NGAGEAUDIO_bootstrap;
+ extern AudioBootStrap EMSCRIPTENAUDIO_bootstrap;
+ extern AudioBootStrap QSAAUDIO_bootstrap;
++extern AudioBootStrap GLOSAUDIO_bootstrap;
+ extern AudioBootStrap DOSSOUNDBLASTER_bootstrap;
+ extern AudioBootStrap OHAUDIO_bootstrap;
+ 
+diff --git a/src/audio/dos/SDL_glosaudio.c b/src/audio/dos/SDL_glosaudio.c
+new file mode 100644
+index 0000000..70553e9
+--- /dev/null
++++ b/src/audio/dos/SDL_glosaudio.c
+@@ -0,0 +1,180 @@
++/*
++  Simple DirectMedia Layer
++  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
++
++  This software is provided 'as-is', without any express or implied
++  warranty.  In no event will the authors be held liable for any damages
++  arising from the use of this software.
++
++  Permission is granted to anyone to use this software for any purpose,
++  including commercial applications, and to alter it and redistribute it
++  freely, subject to the following restrictions:
++
++  1. The origin of this software must not be misrepresented; you must not
++     claim that you wrote the original software. If you use this software
++     in a product, an acknowledgment in the product documentation would be
++     appreciated but is not required.
++  2. Altered source versions must be plainly marked as such, and must not be
++     misrepresented as being the original software.
++  3. This notice may not be removed or altered from any source distribution.
++*/
++
++// The "glos" audio driver: a stream into GLOS's mixer (GLOS's PRD §10.5).
++//
++// Under GLOS, when the program has its windows from GLOS (the glos video
++// driver's condition, GLOS_CAP_GLWIN) and GLOS mixes the Sound Blaster
++// itself (GLOS_CAP_AUDIO), sound goes through GLOS: the card is the
++// desktop's, shared by every app. A stream is a ring of signed 16-bit
++// samples in pages GLOS shares with the program; SDL's audio thread writes
++// chunks into it and GLOS's mixer takes them from the card's interrupt.
++// Threads switch only at yields here, as with the Sound Blaster driver: the
++// audio thread fills the ring and yields when it is full. GLOS counts the
++// mixer's periods in which the stream ran short; closing the device logs
++// them as the Sound Blaster driver logs its own (audio category, debug).
++
++#include "SDL_internal.h"
++
++#ifdef SDL_AUDIO_DRIVER_DOS_SOUNDBLASTER
++
++#include "../../core/dos/SDL_glos.h"
++#include "../../core/dos/SDL_dos_scheduler.h"
++#include "../SDL_sysaudio.h"
++
++struct SDL_PrivateAudioData
++{
++    unsigned id;
++    GLOS_Stream *stream;
++    Uint8 *ring;
++    int chunk_size;
++    Uint8 *staging;
++};
++
++static bool GLOSAUDIO_OpenDevice(SDL_AudioDevice *device)
++{
++    struct SDL_PrivateAudioData *hidden;
++    unsigned a, b, bytes;
++    if (!GLOS_BecomeApp()) {
++        return SDL_SetError("GLOS: the program can't be a GLOS app here");
++    }
++    device->spec.format = SDL_AUDIO_S16LE;
++    if (device->spec.channels > 2) {
++        device->spec.channels = 2;
++    }
++    // The mixer's own rate (a stream's header says it): SDL converts to it once, the mixer not again, and the
++    // ring holds that much more time.
++    b = 0;
++    if (GLOS_Call(GLOS_FN_AUDIO, &a, &b, 22050, 2, 4096) == 0) {
++        GLOS_Stream *probe = (GLOS_Stream *)GLOS_Pointer(b);
++        unsigned id = a;
++        if (probe && probe->mixer_rate >= 4000 && probe->mixer_rate <= 48000) {
++            device->spec.freq = (int)probe->mixer_rate;
++        }
++        b = 1;
++        GLOS_Call(GLOS_FN_AUDIO, &a, &b, id, 0, 0);
++    }
++    if (device->spec.freq < 4000 || device->spec.freq > 48000) {
++        device->spec.freq = 22050;
++    }
++    device->sample_frames = SDL_GetDefaultSampleFramesFromFreq(device->spec.freq);
++    SDL_UpdatedAudioDeviceFormat(device);
++    for (bytes = 4096; bytes < (unsigned)device->buffer_size * 8 && bytes < 65536; bytes *= 2) {
++    }
++    if ((unsigned)device->buffer_size * 2 > bytes) {
++        return SDL_SetError("GLOS: chunks of %d bytes are too big for a stream", device->buffer_size);
++    }
++    hidden = (struct SDL_PrivateAudioData *)SDL_calloc(1, sizeof(*hidden));
++    if (!hidden) {
++        return false;
++    }
++    hidden->staging = (Uint8 *)SDL_calloc(1, device->buffer_size);
++    if (!hidden->staging) {
++        SDL_free(hidden);
++        return false;
++    }
++    b = 0; // (EBX 0: open; ESI the ring's size)
++    if (GLOS_Call(GLOS_FN_AUDIO, &a, &b, (unsigned)device->spec.freq, (unsigned)device->spec.channels, bytes) != 0
++        || !(hidden->stream = (GLOS_Stream *)GLOS_Pointer(b))) {
++        SDL_free(hidden->staging);
++        SDL_free(hidden);
++        return SDL_SetError("GLOS: no stream from the mixer");
++    }
++    hidden->id = a;
++    hidden->ring = (Uint8 *)hidden->stream + hidden->stream->ring;
++    hidden->chunk_size = device->buffer_size;
++    device->hidden = hidden;
++    SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "GLOS: stream %u, %d Hz, %d channels, %d-byte chunks, a ring of %u (mixer %u Hz)",
++                 hidden->id, device->spec.freq, device->spec.channels, device->buffer_size, bytes,
++                 hidden->stream->mixer_rate);
++    return true;
++}
++
++// Room for a chunk, yielding to the program's other threads until there is.
++static bool GLOSAUDIO_WaitDevice(SDL_AudioDevice *device)
++{
++    struct SDL_PrivateAudioData *hidden = device->hidden;
++    GLOS_Stream *s = hidden->stream;
++    while (!SDL_GetAtomicInt(&device->shutdown)) {
++        if (s->bytes - (s->write - s->read) >= (unsigned)hidden->chunk_size) {
++            return true;
++        }
++        DOS_Yield();
++    }
++    return true;
++}
++
++static Uint8 *GLOSAUDIO_GetDeviceBuf(SDL_AudioDevice *device, int *buffer_size)
++{
++    (void)buffer_size;
++    return device->hidden->staging;
++}
++
++static bool GLOSAUDIO_PlayDevice(SDL_AudioDevice *device, const Uint8 *buffer, int buffer_size)
++{
++    struct SDL_PrivateAudioData *hidden = device->hidden;
++    GLOS_Stream *s = hidden->stream;
++    const unsigned mask = s->bytes - 1, pos = s->write & mask;
++    const unsigned first = pos + (unsigned)buffer_size <= s->bytes ? (unsigned)buffer_size : s->bytes - pos;
++    SDL_memcpy(hidden->ring + pos, buffer, first);
++    if (first < (unsigned)buffer_size) {
++        SDL_memcpy(hidden->ring, buffer + first, (unsigned)buffer_size - first);
++    }
++    s->write += (unsigned)buffer_size; // (one aligned store: the mixer sees it whole)
++    return true;
++}
++
++static void GLOSAUDIO_CloseDevice(SDL_AudioDevice *device)
++{
++    struct SDL_PrivateAudioData *hidden = device->hidden;
++    unsigned a, b = 1;
++    if (!hidden) {
++        return;
++    }
++    SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "GLOS: %u of %u chunks underran (%d bytes, %u in the ring)",
++                 hidden->stream->underruns, hidden->stream->periods, hidden->chunk_size,
++                 hidden->stream->bytes / (unsigned)hidden->chunk_size);
++    GLOS_Call(GLOS_FN_AUDIO, &a, &b, hidden->id, 0, 0);
++    SDL_free(hidden->staging);
++    SDL_free(hidden);
++    device->hidden = NULL;
++}
++
++static bool GLOSAUDIO_Init(SDL_AudioDriverImpl *impl)
++{
++    const unsigned need = GLOS_CAP_GLWIN | GLOS_CAP_AUDIO;
++    if ((GLOS_Caps() & need) != need) {
++        return false; // plain DOS, or no windows or no mixer from GLOS: the Sound Blaster driver's card
++    }
++    impl->OpenDevice = GLOSAUDIO_OpenDevice;
++    impl->WaitDevice = GLOSAUDIO_WaitDevice;
++    impl->GetDeviceBuf = GLOSAUDIO_GetDeviceBuf;
++    impl->PlayDevice = GLOSAUDIO_PlayDevice;
++    impl->CloseDevice = GLOSAUDIO_CloseDevice;
++    impl->OnlyHasDefaultPlaybackDevice = true;
++    return true;
++}
++
++AudioBootStrap GLOSAUDIO_bootstrap = {
++    "glos", "GLOS mixer", GLOSAUDIO_Init, false, false
++};
++
++#endif // SDL_AUDIO_DRIVER_DOS_SOUNDBLASTER

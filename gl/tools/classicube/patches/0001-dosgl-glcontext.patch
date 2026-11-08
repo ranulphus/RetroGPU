@@ -1,0 +1,144 @@
+diff --git a/src/msdos/Window_MSDOS.c b/src/msdos/Window_MSDOS.c
+index 6c7f3747e..80fae651a 100644
+--- a/src/msdos/Window_MSDOS.c
++++ b/src/msdos/Window_MSDOS.c
+@@ -7,6 +7,12 @@
+ 
+ #include <dpmi.h>
+ #include <sys/nearptr.h>
++#if CC_GFX_BACKEND == CC_GFX_BACKEND_GL11
++/* 3D through DOS-GL (hardware OpenGL 1.1 on Matrox G200/G400/G450). The
++ * launcher keeps VGA mode 13h; the game runs in a VBE mode DOS-GL picks. */
++#include <GL/dosgl.h>
++#define CC_DOSGL
++#endif
+ #include <pc.h>
+ #include <bios.h>
+ 
+@@ -167,13 +173,7 @@ void Window_PreInit(void) { }
+ #define DISP_WIDTH  320
+ #define DISP_HEIGHT 200
+ 
+-void Window_Init(void) {
+-	DisplayInfo.Width  = DISP_WIDTH;
+-	DisplayInfo.Height = DISP_HEIGHT;
+-
+-	DisplayInfo.ScaleX = 0.5f;
+-	DisplayInfo.ScaleY = 0.5f;
+-
++static void SetMode13(void) {
+ 	// Change VGA mode to 0x13 (320x200x8bpp)
+ 	__dpmi_regs regs;
+ 	regs.x.ax = VGA_CMD_SETMODE | VGA_MODE_320x200_8;
+@@ -187,7 +187,31 @@ void Window_Init(void) {
+     	outportb(0x3c9, ((i >> 2) & 0x07) << 3);
+     	outportb(0x3c9, ((i >> 5) & 0x07) << 3);	
+ 	}
++}
+ 
++void Window_Init(void) {
++	DisplayInfo.Width  = DISP_WIDTH;
++	DisplayInfo.Height = DISP_HEIGHT;
++
++	DisplayInfo.ScaleX = 0.5f;
++	DisplayInfo.ScaleY = 0.5f;
++#ifdef CC_DOSGL
++	{
++		/* The game may ask for any mode DOS-GL offers: report the largest. */
++		DGLMode modes[32];
++		int i, n = dglEnumModes(modes, 32);
++		for (i = 0; i < n; i++)
++		{
++			if (modes[i].width * modes[i].height <= DisplayInfo.Width * DisplayInfo.Height) continue;
++			DisplayInfo.Width  = modes[i].width;
++			DisplayInfo.Height = modes[i].height;
++		}
++		DisplayInfo.ScaleX = 1.0f;
++		DisplayInfo.ScaleY = 1.0f;
++	}
++#else
++	SetMode13();
++#endif
+ 	Mouse_Init();
+ }
+ 
+@@ -215,10 +239,37 @@ static void DoCreateWindow(int width, int height) {
+ 	Window_Main.UIScaleY = DEFAULT_UI_SCALE_Y;
+ }
+ 
++#ifdef CC_DOSGL
++/* The mode for a requested size: exact, else the largest that fits, else 640x480. */
++static void PickMode(int width, int height, int* w, int* h) {
++	DGLMode modes[32];
++	int i, n = dglEnumModes(modes, 32);
++	*w = 640; *h = 480;
++	for (i = 0; i < n; i++)
++	{
++		if (modes[i].width == width && modes[i].height == height) { *w = width; *h = height; return; }
++	}
++	for (i = 0; i < n; i++)
++	{
++		if (modes[i].width > width || modes[i].height > height) continue;
++		if (modes[i].width * modes[i].height <= *w * *h) continue;
++		*w = modes[i].width; *h = modes[i].height;
++	}
++}
++
++void Window_Create2D(int width, int height) { SetMode13(); DoCreateWindow(width, height); }
++void Window_Create3D(int width, int height) {
++	DoCreateWindow(width, height);
++	PickMode(width, height, &Window_Main.Width, &Window_Main.Height);
++}
++
++void Window_Destroy(void) { Window_Main.Exists = false; }
++#else
+ void Window_Create2D(int width, int height) { DoCreateWindow(width, height); }
+ void Window_Create3D(int width, int height) { DoCreateWindow(width, height); }
+ 
+ void Window_Destroy(void) { }
++#endif
+ 
+ void Window_SetTitle(const cc_string* title) { }
+ 
+@@ -346,3 +397,41 @@ void Window_DisableRawMouse(void) {
+ 	DefaultDisableRawMouse();
+ }
+ 
++
++
++#ifdef CC_DOSGL
++/*########################################################################################################################*
++*-------------------------------------------------------DOS-GL context----------------------------------------------------*
++*#########################################################################################################################*/
++void GLContext_Create(void) {
++	DGLConfig cfg = { 0 };
++	cfg.width  = Window_Main.Width;
++	cfg.height = Window_Main.Height;
++	cfg.color_bits    = 16;
++	cfg.depth_bits    = 16;
++	cfg.double_buffer = 1;
++	cfg.vsync         = 1;
++	if (dglInit(&cfg) != 0) Process_Abort2(0, dglGetErrorString());
++
++	Window_Main.Width  = dglGetDeviceInfo()->width;
++	Window_Main.Height = dglGetDeviceInfo()->height;
++}
++
++void GLContext_Update(void) { }
++cc_bool GLContext_TryRestore(void) { return true; }
++void GLContext_Free(void) { dglShutdown(); }
++void* GLContext_GetAddress(const char* function) { return NULL; }
++
++cc_bool GLContext_SwapBuffers(void) {
++	dglSwapBuffers();
++	return true;
++}
++
++void GLContext_SetVSync(cc_bool vsync) { dglSetVSync(vsync); }
++
++void GLContext_GetApiInfo(cc_string* info) {
++	const DGLDeviceInfo* d = dglGetDeviceInfo();
++	int vram = d ? (int)(d->vram_bytes >> 10) : 0;
++	String_Format2(info, "%c, %i KB VRAM\n", d ? d->chip_name : "no card", &vram);
++}
++#endif

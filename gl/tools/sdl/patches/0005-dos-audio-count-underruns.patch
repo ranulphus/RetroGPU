@@ -1,0 +1,59 @@
+diff --git a/src/audio/dos/SDL_dosaudio_sb.c b/src/audio/dos/SDL_dosaudio_sb.c
+index aa38d217a..a6e8e24a5 100644
+--- a/src/audio/dos/SDL_dosaudio_sb.c
++++ b/src/audio/dos/SDL_dosaudio_sb.c
+@@ -99,6 +99,8 @@ static int isr_dma_halfdma = 0;       // half the DMA buffer size, in bytes
+ static int isr_dma_channel = 0;
+ static bool isr_is_16bit = false;
+ static Uint8 isr_silence_value = 0;
++static volatile int isr_chunks = 0;    // DMA halves filled since the first chunk was written
++static volatile int isr_underruns = 0; // of those, filled with silence: the ring was empty
+ 
+ // Copy `len` bytes from the ring buffer at position `pos` into `dst`,
+ // handling the power-of-2 wrap. All pointers are memory-locked.
+@@ -151,12 +153,18 @@ static void SoundBlasterIRQHandler(void)
+     // How many bytes are available in the ring?
+     const int avail = isr_ring_write - isr_ring_read; // both are monotonic
+ 
++    if (isr_ring_write > 0) {
++        isr_chunks++;
++    }
+     if (avail >= isr_chunk_size) {
+         RingCopyOut(dma_dst, isr_ring_read, isr_chunk_size);
+         isr_ring_read += isr_chunk_size;
+     } else {
+         // Ring underrun: fill with silence so we don't replay stale audio.
+         SDL_memset(dma_dst, isr_silence_value, isr_chunk_size);
++        if (isr_ring_write > 0) {
++            isr_underruns++; // the audio thread did not keep up
++        }
+     }
+ }
+ static void SoundBlasterIRQHandler_End(void) {}
+@@ -362,6 +370,8 @@ static bool DOSSOUNDBLASTER_OpenDevice(SDL_AudioDevice *device)
+     isr_dma_channel = hidden->dma_channel;
+     isr_is_16bit = is_sb16;
+     isr_silence_value = soundblaster_silence_value;
++    isr_chunks = 0;
++    isr_underruns = 0;
+ 
+     // Lock all ISR code and data to prevent page faults during interrupts.
+     DOS_LockCode(SoundBlasterIRQHandler, SoundBlasterIRQHandler_End);
+@@ -379,6 +389,8 @@ static bool DOSSOUNDBLASTER_OpenDevice(SDL_AudioDevice *device)
+     DOS_LockVariable(isr_dma_channel);
+     DOS_LockVariable(isr_is_16bit);
+     DOS_LockVariable(isr_silence_value);
++    DOS_LockVariable(isr_chunks);
++    DOS_LockVariable(isr_underruns);
+     DOS_LockVariable(isr_irq_ack_port);
+     DOS_LockVariable(soundblaster_irq);
+ 
+@@ -508,6 +520,8 @@ static void DOSSOUNDBLASTER_CloseDevice(SDL_AudioDevice *device)
+         }
+ 
+         DOS_UnhookInterrupt(&hidden->interrupt_hook, true);
++        SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "SoundBlaster: %d of %d chunks underran (%d bytes, %d in the ring)",
++                     isr_underruns, isr_chunks, hidden->chunk_size, hidden->ring_size / hidden->chunk_size);
+ 
+         // disable DMA — mask the appropriate DMA channel.
+         if (hidden->dma_buffer) {

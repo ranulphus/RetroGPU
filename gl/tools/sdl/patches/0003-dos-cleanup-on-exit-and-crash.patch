@@ -1,0 +1,202 @@
+diff --git a/src/audio/dos/SDL_dosaudio_sb.c b/src/audio/dos/SDL_dosaudio_sb.c
+index 2958c5609..aa38d217a 100644
+--- a/src/audio/dos/SDL_dosaudio_sb.c
++++ b/src/audio/dos/SDL_dosaudio_sb.c
+@@ -186,6 +186,33 @@ static bool DOSSOUNDBLASTER_WaitDevice(SDL_AudioDevice *device)
+     }
+ }
+ 
++// The open device, for DOS_AddCleanup: a program that exits or crashes
++// without closing it would leave the card looping its DMA buffer.
++static struct SDL_PrivateAudioData *open_device;
++
++static void DOSSOUNDBLASTER_StopOnExit(void)
++{
++    struct SDL_PrivateAudioData *hidden = open_device;
++    if (!hidden) {
++        return;
++    }
++    open_device = NULL;
++    if (hidden->is_16bit) {
++        WriteSoundBlasterDSP(0xD5); // pause 16-bit DMA
++        WriteSoundBlasterDSP(0xD9); // exit 16-bit auto-init DMA
++    } else {
++        WriteSoundBlasterDSP(0xD0); // halt 8-bit DMA
++        WriteSoundBlasterDSP(0xDA); // exit auto-init DMA
++    }
++    WriteSoundBlasterDSP(0xD3); // speaker off
++    if (hidden->is_16bit) {
++        outportb(0xD4, 0x04 | hidden->dma_channel);
++    } else {
++        outportb(0x0A, 0x04 | hidden->dma_channel);
++    }
++    DOS_UnhookInterrupt(&hidden->interrupt_hook, true);
++}
++
+ static bool DOSSOUNDBLASTER_OpenDevice(SDL_AudioDevice *device)
+ {
+     const bool is_sb16 = soundblaster_is_sb16;
+@@ -356,6 +383,8 @@ static bool DOSSOUNDBLASTER_OpenDevice(SDL_AudioDevice *device)
+     DOS_LockVariable(soundblaster_irq);
+ 
+     DOS_HookInterrupt(soundblaster_irq, SoundBlasterIRQHandler, &hidden->interrupt_hook);
++    open_device = hidden;
++    DOS_AddCleanup(DOSSOUNDBLASTER_StopOnExit);
+ 
+     WriteSoundBlasterDSP(0xD1); // turn on the speaker
+     // The speaker-on command takes up to 112 ms to complete on real hardware.
+@@ -456,6 +485,8 @@ static bool DOSSOUNDBLASTER_PlayDevice(SDL_AudioDevice *device, const Uint8 *buf
+ 
+ static void DOSSOUNDBLASTER_CloseDevice(SDL_AudioDevice *device)
+ {
++    DOS_RemoveCleanup(DOSSOUNDBLASTER_StopOnExit);
++    open_device = NULL;
+     struct SDL_PrivateAudioData *hidden = device->hidden;
+     if (hidden) {
+         // Disable PCM.
+diff --git a/src/core/dos/SDL_dos.c b/src/core/dos/SDL_dos.c
+index 0ba077319..50c6a23c8 100644
+--- a/src/core/dos/SDL_dos.c
++++ b/src/core/dos/SDL_dos.c
+@@ -20,6 +20,9 @@
+ */
+ #include "SDL_internal.h"
+ 
++#include <signal.h>
++#include <stdlib.h>
++
+ #if defined(SDL_PLATFORM_DOS)
+ 
+ #include "SDL_dos.h"
+@@ -87,6 +90,72 @@ char *DOS_GetFarPtrCString(const Uint32 segoffset)
+     return retval;
+ }
+ 
++#define DOS_MAX_CLEANUPS 4
++static DOS_CleanupFn cleanups[DOS_MAX_CLEANUPS];
++static bool cleanups_installed;
++static const int cleanup_signals[] = { SIGSEGV, SIGILL, SIGFPE, SIGABRT, SIGINT };
++#define NUM_CLEANUP_SIGNALS (int)SDL_arraysize(cleanup_signals)
++static void (*previous_handlers[NUM_CLEANUP_SIGNALS])(int);
++
++static void DOS_RunCleanups(void)
++{
++    for (int i = DOS_MAX_CLEANUPS - 1; i >= 0; i--) {
++        DOS_CleanupFn fn = cleanups[i];
++        if (fn) {
++            cleanups[i] = NULL;
++            fn();
++        }
++    }
++}
++
++static void DOS_CleanupOnSignal(int sig)
++{
++    void (*previous)(int) = SIG_DFL;
++    DOS_RunCleanups();
++    for (int i = 0; i < NUM_CLEANUP_SIGNALS; i++) {
++        if (cleanup_signals[i] == sig) {
++            previous = previous_handlers[i];
++        }
++    }
++    signal(sig, previous);
++    if (previous != SIG_DFL && previous != SIG_IGN) {
++        previous(sig);
++    } else {
++        raise(sig);
++    }
++}
++
++void DOS_AddCleanup(DOS_CleanupFn fn)
++{
++    if (!cleanups_installed) {
++        cleanups_installed = true;
++        atexit(DOS_RunCleanups);
++        for (int i = 0; i < NUM_CLEANUP_SIGNALS; i++) {
++            previous_handlers[i] = signal(cleanup_signals[i], DOS_CleanupOnSignal);
++        }
++    }
++    for (int i = 0; i < DOS_MAX_CLEANUPS; i++) {
++        if (cleanups[i] == fn) {
++            return;
++        }
++    }
++    for (int i = 0; i < DOS_MAX_CLEANUPS; i++) {
++        if (!cleanups[i]) {
++            cleanups[i] = fn;
++            return;
++        }
++    }
++}
++
++void DOS_RemoveCleanup(DOS_CleanupFn fn)
++{
++    for (int i = 0; i < DOS_MAX_CLEANUPS; i++) {
++        if (cleanups[i] == fn) {
++            cleanups[i] = NULL;
++        }
++    }
++}
++
+ void DOS_HookInterrupt(int irq, DOS_InterruptHookFn fn, DOS_InterruptHook *hook)
+ {
+     SDL_assert(irq >= 0 && irq <= 15);
+diff --git a/src/core/dos/SDL_dos.h b/src/core/dos/SDL_dos.h
+index 11dc58d5e..c9d209169 100644
+--- a/src/core/dos/SDL_dos.h
++++ b/src/core/dos/SDL_dos.h
+@@ -148,6 +148,16 @@ typedef struct DOS_InterruptHook
+ void DOS_HookInterrupt(int irq, DOS_InterruptHookFn fn, DOS_InterruptHook *hook); // `irq` is the IRQ number, not the interrupt vector number!
+ void DOS_UnhookInterrupt(DOS_InterruptHook *hook, bool disable_interrupt);
+ 
++// Cleanups for a program that ends without SDL_Quit(): exit() from anywhere,
++// or a fatal signal (SIGSEGV, SIGILL, SIGFPE, SIGABRT, SIGINT). Each runs at
++// most once, newest first, and must only touch hardware (no allocation): a
++// Sound Blaster left in auto-init DMA would otherwise loop its buffer until
++// the machine is reset. The signal handlers chain to those installed before
++// SDL's, and handlers installed later (a GL library's) chain to SDL's.
++typedef void (*DOS_CleanupFn)(void);
++void DOS_AddCleanup(DOS_CleanupFn fn);
++void DOS_RemoveCleanup(DOS_CleanupFn fn);
++
+ // Ends C function definitions when using C++
+ #ifdef __cplusplus
+ }
+diff --git a/src/video/dos/SDL_dosevents.c b/src/video/dos/SDL_dosevents.c
+index 9372f35ea..76a68d1d4 100644
+--- a/src/video/dos/SDL_dosevents.c
++++ b/src/video/dos/SDL_dosevents.c
+@@ -378,6 +378,18 @@ static void KeyboardIRQHandler(void) // this is wrapped in a thing that handles
+ }
+ static void KeyboardIRQHandler_End(void) {} // end-of-ISR label for memory locking
+ 
++// The hooked keyboard, for DOS_AddCleanup: IRQ 1 goes back to the BIOS
++// when a program exits or crashes without SDL_Quit.
++static DOS_InterruptHook *keyboard_hook_for_exit;
++
++static void DOSVESA_UnhookKeyboardOnExit(void)
++{
++    if (keyboard_hook_for_exit) {
++        DOS_UnhookInterrupt(keyboard_hook_for_exit, false);
++        keyboard_hook_for_exit = NULL;
++    }
++}
++
+ void DOSVESA_InitKeyboard(SDL_VideoDevice *device)
+ {
+     SDL_VideoData *data = device->internal;
+@@ -389,10 +401,14 @@ void DOSVESA_InitKeyboard(SDL_VideoDevice *device)
+     DOS_LockVariable(keyevents_tail);
+ 
+     DOS_HookInterrupt(1, KeyboardIRQHandler, &data->keyboard_interrupt_hook);
++    keyboard_hook_for_exit = &data->keyboard_interrupt_hook;
++    DOS_AddCleanup(DOSVESA_UnhookKeyboardOnExit);
+ }
+ 
+ void DOSVESA_QuitKeyboard(SDL_VideoDevice *device)
+ {
++    DOS_RemoveCleanup(DOSVESA_UnhookKeyboardOnExit);
++    keyboard_hook_for_exit = NULL;
+     SDL_VideoData *data = device->internal;
+     DOS_UnhookInterrupt(&data->keyboard_interrupt_hook, false);
+ 

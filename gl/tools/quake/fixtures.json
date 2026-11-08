@@ -1,0 +1,295 @@
+{
+ "_about": "Sizes and sha256 of the retail files fixtures.py installs (the data itself is never committed).",
+ "quake": {
+  "CONFIG.CFG": {
+   "sha256": "75ad46121a70d030dbf001e27be50615fb64139d92f71aee382e320276340f18",
+   "size": 1817
+  },
+  "PAK0.PAK": {
+   "sha256": "35a9c55e5e5a284a159ad2a62e0e8def23d829561fe2f54eb402dbc0a9a946af",
+   "size": 18689235
+  },
+  "PAK1.PAK": {
+   "sha256": "94e355836ec42bc464e4cbe794cfb7b5163c6efa1bcc575622bb36475bf1cf30",
+   "size": 34257856
+  }
+ },
+ "quake2": {
+  "GAMEX86.DLL": {
+   "sha256": "459fe0b7b4545b1378ff2a51a76c860041649915199a328969b2b25f05ad93f2",
+   "size": 357376
+  },
+  "PAK0.PAK": {
+   "sha256": "1ce99eb11e7e251ccdf690858effba79836dbe5e32a4083ad00a13ecda491679",
+   "size": 183997730
+  },
+  "PLAYERS/FEMALE/ATHENA.PCX": {
+   "sha256": "075041ac8a678c172645f3b258b07947bc27fc9da06f1c4e3557d5f4e3a63011",
+   "size": 50156
+  },
+  "PLAYERS/FEMALE/ATHENA_I.PCX": {
+   "sha256": "1d6238f311b08dbb079625f3b0d6296662782295f7e6829a9dcfb0fa917b69a1",
+   "size": 1921
+  },
+  "PLAYERS/FEMALE/BRIANNA.PCX": {
+   "sha256": "a019afc977be5e87ac69090db58d9b74f59d4d4c6bc42c554fd035bfd58d6f25",
+   "size": 50897
+  },
+  "PLAYERS/FEMALE/BRIAN~12.PCX": {
+   "sha256": "9fa1ad64dafea4ddd1c47370c9f319d3abbfbdbc9d77294657b36dfa3e9371fa",
+   "size": 1968
+  },
+  "PLAYERS/FEMALE/COBALT.PCX": {
+   "sha256": "e20ee5c242afea390262e960770a819cce00dcf35a83a31c53d9acf8aa6d51a9",
+   "size": 50813
+  },
+  "PLAYERS/FEMALE/COBALT_I.PCX": {
+   "sha256": "416c30e3d6b11f6830dfdb654bf66062923e9119d2a557d82b80ef68b4eff0b9",
+   "size": 1940
+  },
+  "PLAYERS/FEMALE/ENSIGN.PCX": {
+   "sha256": "33f4ddb4177d7f75588a9e4265a74cc1343776dc8cf7032f012752486338f799",
+   "size": 52745
+  },
+  "PLAYERS/FEMALE/ENSIGN_I.PCX": {
+   "sha256": "f03ebf50a0ec7912b2a018bc756d44997ddca456b90635b2f309fa231d413173",
+   "size": 1971
+  },
+  "PLAYERS/FEMALE/JEZEBEL.PCX": {
+   "sha256": "114ee04bf45b051f9b987ced7511947fcc057f8be0f39e6d73a74d552db20a18",
+   "size": 51062
+  },
+  "PLAYERS/FEMALE/JEZEB~24.PCX": {
+   "sha256": "7affd109db8199f3f27333ec6d9ba9d2d07078d41b88d57e8836937651e3f08c",
+   "size": 1950
+  },
+  "PLAYERS/FEMALE/JUNGLE.PCX": {
+   "sha256": "e0e3f907673b56636318b59da0444c79bab06b26032e50501a7870f54d34516f",
+   "size": 61037
+  },
+  "PLAYERS/FEMALE/JUNGLE_I.PCX": {
+   "sha256": "d98f535729ae7a48cab10158d04534b3900d8c9ced42fc3605e27de84965b055",
+   "size": 2118
+  },
+  "PLAYERS/FEMALE/LOTUS.PCX": {
+   "sha256": "9ac419fd4ee7253b904b1ff950aecc3e0cdfb91e80c1f518aecd86a39ca93e76",
+   "size": 54147
+  },
+  "PLAYERS/FEMALE/LOTUS_I.PCX": {
+   "sha256": "8e34dec260dd8e4cf87461f36ef670fdce4d804cf225fc7ce5ca59e48413a046",
+   "size": 2021
+  },
+  "PLAYERS/FEMALE/STILETTO.PCX": {
+   "sha256": "e91b478c14ce22f76f024282e53011304ba89b7d81d3f81e9b3b485357781e4a",
+   "size": 54074
+  },
+  "PLAYERS/FEMALE/STILE~36.PCX": {
+   "sha256": "fd3da92630f94316eb796b0daaa523a7c05ff08a67fadef28f2a11f6ce016a3e",
+   "size": 2040
+  },
+  "PLAYERS/FEMALE/TRIS.MD2": {
+   "sha256": "d6f97d6003b65fb770b8d739cd6235d297898353127b90c50f99d676c553cc2d",
+   "size": 275632
+  },
+  "PLAYERS/FEMALE/VENUS.PCX": {
+   "sha256": "25524c0716fdb696c736ab76d16a6df9638728d4a5da7527721aad980aff28e2",
+   "size": 50891
+  },
+  "PLAYERS/FEMALE/VENUS_I.PCX": {
+   "sha256": "df08c7f236218621184251cb5d3dd44797740aa5d10121430f76d35137ba050f",
+   "size": 1963
+  },
+  "PLAYERS/FEMALE/VOODOO.PCX": {
+   "sha256": "2e6d2b92762e917b18190faeb538512eb112e549aff8903e87133b7f661f43a6",
+   "size": 51033
+  },
+  "PLAYERS/FEMALE/VOODOO_I.PCX": {
+   "sha256": "7082007061f0451286bc3e777f29902585e99c3f970ab3e969dba724d63d2c4b",
+   "size": 1970
+  },
+  "PLAYERS/FEMALE/WEAPON.MD2": {
+   "sha256": "ce0c9f5e4431302be3b7abbfdbd4ecc96f3e8015ff5c59083c5162b47c2af44f",
+   "size": 38912
+  },
+  "PLAYERS/FEMALE/WEAPON.PCX": {
+   "sha256": "ce8278dff1343e5845f4d380341746c6dcf04916e9b52ab66d7059af1b65bed9",
+   "size": 9089
+  },
+  "PLAYERS/MALE/CIPHER.PCX": {
+   "sha256": "1e15a0dc1dbd0c39ebb57365ef464cb56ab427ba95281b1e2b2dbe3b3df99359",
+   "size": 56554
+  },
+  "PLAYERS/MALE/CIPHER_I.PCX": {
+   "sha256": "18149b9692116476561c57f6fb064ae3f312f4c04c707a62817cded2ff2a7249",
+   "size": 1940
+  },
+  "PLAYERS/MALE/CLAYMORE.PCX": {
+   "sha256": "bbc4710edf4c8d894e4f1d1e371b5f1fba9edf852f1f22a3f9eaa0dde81fdef3",
+   "size": 56727
+  },
+  "PLAYERS/MALE/CLAYM~12.PCX": {
+   "sha256": "f61fc2abfefab3db70a336fbe78fa58c623f6bb2a765d300534dd9a13947895e",
+   "size": 1939
+  },
+  "PLAYERS/MALE/FLAK.PCX": {
+   "sha256": "f336a8247429a2afaf1c1f3bc33f856d3a526e50b0f630ff46d9c5d7ab6ef5ec",
+   "size": 56636
+  },
+  "PLAYERS/MALE/FLAK_I.PCX": {
+   "sha256": "c66a0d4e98a123cba6c27672298446aa8a39ad00e9070c92a03ff1c93718b412",
+   "size": 1971
+  },
+  "PLAYERS/MALE/GRUNT.PCX": {
+   "sha256": "4cc63f1c2a4c04ece2ec3f11c2b941ba90a099528ad3d1ef5c6948778535db36",
+   "size": 58004
+  },
+  "PLAYERS/MALE/GRUNT_I.PCX": {
+   "sha256": "7448a9a3f61fcff7b2819b56957ea5ac54c65f316e14df33002a2024aff529d2",
+   "size": 1967
+  },
+  "PLAYERS/MALE/HOWITZER.PCX": {
+   "sha256": "2e5e3a4c4f074b64424afdbc3843446a85cc9dc4272657d6dc530d3e6ad26143",
+   "size": 59655
+  },
+  "PLAYERS/MALE/HOWIT~24.PCX": {
+   "sha256": "fc4487f1a3a9cb9c6dd7db68aa58aaa82684469313f1dc00b5123cd9a920d38c",
+   "size": 1979
+  },
+  "PLAYERS/MALE/MAJOR.PCX": {
+   "sha256": "921404b0153c16c1f71f9e606c4f21ddd031dc9dfcd5f271dc2c82cc64cdbb61",
+   "size": 58158
+  },
+  "PLAYERS/MALE/MAJOR_I.PCX": {
+   "sha256": "1a687f5b7796ab893a379d1f27611a6c3996785fe7597e884f7357663f3f3157",
+   "size": 1971
+  },
+  "PLAYERS/MALE/NIGHTOPS.PCX": {
+   "sha256": "d8871e3ccb78892bca1dbe3abf2e6e3aa1b0c021c9f4ee8d0fbf04dcbad07c99",
+   "size": 57938
+  },
+  "PLAYERS/MALE/NIGHT~32.PCX": {
+   "sha256": "8e0e5ad5855ede9ecf7133065192b65f9d58dcc51188393fb9e198f5310d09a6",
+   "size": 1976
+  },
+  "PLAYERS/MALE/POINTMAN.PCX": {
+   "sha256": "64e0fab69db2ba973d2c04e915b725ec797c4a0d89606b406fe5587a905ad7ca",
+   "size": 58619
+  },
+  "PLAYERS/MALE/POINT~36.PCX": {
+   "sha256": "6c46d6cd704d25d180bed3e59176eee646fffe9e67bfc86830681dc9e22d61f3",
+   "size": 1956
+  },
+  "PLAYERS/MALE/PSYCHO.PCX": {
+   "sha256": "28167f289410d515d78d56af266a254289ddb81e961246c322c33ca365af4749",
+   "size": 56607
+  },
+  "PLAYERS/MALE/PSYCHO_I.PCX": {
+   "sha256": "abcd5ec1a6dd6052d69aeedfcfcc263b1b3df3568595161f19d633e0229269a9",
+   "size": 1937
+  },
+  "PLAYERS/MALE/RAMPAGE.PCX": {
+   "sha256": "41c24764598912dfc69200497795af752ed5eefdd431587380f817154dc80c66",
+   "size": 56685
+  },
+  "PLAYERS/MALE/RAMPA~44.PCX": {
+   "sha256": "b7039897fe52468b216826f0806048b729e94445494990994680dec577a45a13",
+   "size": 1936
+  },
+  "PLAYERS/MALE/RAZOR.PCX": {
+   "sha256": "62be986f0e9aa2a9f16c19e507f07c4552c5f5f05d8593587c7cc90bac223329",
+   "size": 56767
+  },
+  "PLAYERS/MALE/RAZOR_I.PCX": {
+   "sha256": "144d13aa4a8855aadee3b1a9adf704a4c959146417b9ea06f4b09a1c90cbfb89",
+   "size": 1924
+  },
+  "PLAYERS/MALE/RECON.PCX": {
+   "sha256": "4b02b8e9cae2d1fca16266a1ad60885734b8f261079373bd1d8a73165b1eb3fe",
+   "size": 56672
+  },
+  "PLAYERS/MALE/RECON_I.PCX": {
+   "sha256": "5f29ddee0c3425c8e7a959b7162d18f326f4514e53e36530d49b0e21b430c0ec",
+   "size": 1936
+  },
+  "PLAYERS/MALE/SCOUT.PCX": {
+   "sha256": "28f3b27ad941c38447a38b7e48431298ed5afbfc2d01a9a29683f218b02f48a7",
+   "size": 57298
+  },
+  "PLAYERS/MALE/SCOUT_I.PCX": {
+   "sha256": "3c9fa0fc770fa7509aeb3229cab0af6ec98df41959fd524e61a60fdedae43e7b",
+   "size": 1959
+  },
+  "PLAYERS/MALE/SNIPER.PCX": {
+   "sha256": "ce3d924ea2e2609a931b95d80a9a21272fcd57247f57f5b005b81b163a9ff09c",
+   "size": 61661
+  },
+  "PLAYERS/MALE/SNIPER_I.PCX": {
+   "sha256": "aa505237bf15e3aabbd947894d8ae7926cc6e6e93196beec30b7105c5c972ebe",
+   "size": 2109
+  },
+  "PLAYERS/MALE/TRIS.MD2": {
+   "sha256": "0274ef54e1cf31ff39ab8a21e133ddf709f1b595e4008c5b9a5c234ed211dbf4",
+   "size": 278592
+  },
+  "PLAYERS/MALE/VIPER.PCX": {
+   "sha256": "b31427cc95fb1f899701e0c7e0b3588f28adeec55ff4811de7750191ee2ed9f8",
+   "size": 56334
+  },
+  "PLAYERS/MALE/VIPER_I.PCX": {
+   "sha256": "9f044c21fe9353823cb08fc0da6affd224c6b7ef1596935190a475a4b0fbb4ef",
+   "size": 1925
+  },
+  "PLAYERS/MALE/WEAPON.MD2": {
+   "sha256": "b1d3c78722594d99d40d650914c4f9bfed27e34d210743b99576d299e4b700c7",
+   "size": 38912
+  },
+  "PLAYERS/MALE/WEAPON.PCX": {
+   "sha256": "ce8278dff1343e5845f4d380341746c6dcf04916e9b52ab66d7059af1b65bed9",
+   "size": 9089
+  },
+  "VIDEO/END.CIN": {
+   "sha256": "99c45d4f18063bfd2857a1d524d0f671a79fcb9833f1d000afe4adeea331a410",
+   "size": 19311290
+  },
+  "VIDEO/EOU1_.CIN": {
+   "sha256": "9e2604f72b7fd5a2fa6033d16abcee7c6b053b173f3c035e6b0a95fc97bdd5a2",
+   "size": 6038210
+  },
+  "VIDEO/EOU2_.CIN": {
+   "sha256": "03a247a1c060c35ea15947383774a3f9bc5a142b0036999ffbf82cff3b14daa4",
+   "size": 6586381
+  },
+  "VIDEO/EOU3_.CIN": {
+   "sha256": "1ccf1377a231b16b993abb792ae34e5bd3c54c10902885526a99cab19ed9faaf",
+   "size": 6708418
+  },
+  "VIDEO/EOU4_.CIN": {
+   "sha256": "708ac52c2444286251c2f9c20de53c2deb472659e84fe8fd72d8a1b9df0dc767",
+   "size": 5464002
+  },
+  "VIDEO/EOU5_.CIN": {
+   "sha256": "949baf067c3ea444f51a05897d58805350a780d0762ced4296e4d8fc57ffeaf9",
+   "size": 6848133
+  },
+  "VIDEO/EOU6_.CIN": {
+   "sha256": "bce4adeba5b6faa5741147a36ac76d7240c39c9dbf7011fd2687d88ddd9923b5",
+   "size": 7099332
+  },
+  "VIDEO/EOU7_.CIN": {
+   "sha256": "35c71258f161b9189f5048699c2da0712072dbc407a23ee26fedc23da8e9535c",
+   "size": 7766671
+  },
+  "VIDEO/EOU8_.CIN": {
+   "sha256": "f72a0bafc4bfe87e3824c89c6c8fdd5b5c518ac174013915ce28fd16840df8b3",
+   "size": 11875656
+  },
+  "VIDEO/IDLOG.CIN": {
+   "sha256": "d5177f538be17641ef97d5d0d9cb5deb80954447d430789858acc32c1c6c0c43",
+   "size": 3159828
+  },
+  "VIDEO/NTRO.CIN": {
+   "sha256": "5d0d3cbccbc21542192af7ff573929a795385963740124e9301b1f64a9d89df3",
+   "size": 82836235
+  }
+ }
+}

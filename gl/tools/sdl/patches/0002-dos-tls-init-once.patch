@@ -1,0 +1,59 @@
+diff --git a/src/thread/dos/SDL_systls.c b/src/thread/dos/SDL_systls.c
+index 86220de35..d4d230bc4 100644
+--- a/src/thread/dos/SDL_systls.c
++++ b/src/thread/dos/SDL_systls.c
+@@ -24,41 +24,48 @@
+ #ifdef SDL_THREAD_DOS
+ 
+ /* DOS thread-local storage — uses per-thread static array indexed by
+-   the scheduler's thread ID. With only DOS_MAX_THREADS (8) threads,
++   the scheduler's thread ID (1..DOS_MAX_THREADS; 1 is the main thread,
++   also before the scheduler starts). With only DOS_MAX_THREADS threads,
+    a simple static array is efficient and avoids any dynamic allocation. */
+ 
+ #include "../../core/dos/SDL_dos_scheduler.h"
+ #include "../SDL_thread_c.h"
+ 
+ static SDL_TLSData *tls_data[DOS_MAX_THREADS];
++static bool tls_initialized;
+ 
+ void SDL_SYS_InitTLSData(void)
+ {
+-    SDL_zeroa(tls_data);
++    // SDL_SetTLS() calls this every time: only the first call may clear.
++    if (!tls_initialized) {
++        SDL_zeroa(tls_data);
++        tls_initialized = true;
++    }
+ }
+ 
+ SDL_TLSData *SDL_SYS_GetTLSData(void)
+ {
+     int tid = DOS_GetCurrentThreadID();
+-    if (tid < 0 || tid >= DOS_MAX_THREADS) {
++    if (tid < 1 || tid > DOS_MAX_THREADS) {
+         return NULL;
+     }
+-    return tls_data[tid];
++    return tls_data[tid - 1];
+ }
+ 
+ bool SDL_SYS_SetTLSData(SDL_TLSData *data)
+ {
+     int tid = DOS_GetCurrentThreadID();
+-    if (tid < 0 || tid >= DOS_MAX_THREADS) {
++    if (tid < 1 || tid > DOS_MAX_THREADS) {
+         return SDL_SetError("Invalid thread ID for TLS");
+     }
+-    tls_data[tid] = data;
++    tls_data[tid - 1] = data;
+     return true;
+ }
+ 
+ void SDL_SYS_QuitTLSData(void)
+ {
+     SDL_zeroa(tls_data);
++    tls_initialized = false;
+ }
+ 
+ #endif /* SDL_THREAD_DOS */

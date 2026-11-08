@@ -1,0 +1,50 @@
+diff --git a/src/audio/dos/SDL_dosaudio_sb.c b/src/audio/dos/SDL_dosaudio_sb.c
+index c2e541852..2da7d5c7a 100644
+--- a/src/audio/dos/SDL_dosaudio_sb.c
++++ b/src/audio/dos/SDL_dosaudio_sb.c
+@@ -191,10 +191,22 @@ static bool DOSSOUNDBLASTER_WaitDevice(SDL_AudioDevice *device)
+         // Available space = ring_size - (write - read).
+         // ring_write is ours (audio thread only), ring_read is advanced by
+         // the ISR. Read the ISR's copy so we see the latest drain position.
+-        const int used = hidden->ring_write - isr_ring_read;
++        const int read = isr_ring_read;
++        const int used = hidden->ring_write - read;
+         if ((size - used) >= hidden->chunk_size) {
+             return true; // room for at least one chunk
+         }
++        // A full ring that the card has not drained for a second: its IRQ
++        // never comes (BLASTER names another one), and waiting longer would
++        // hang the program when it closes the device. Give the device up.
++        if (read != hidden->last_read) {
++            hidden->last_read = read;
++            hidden->last_read_ns = SDL_GetTicksNS();
++        } else if (SDL_GetTicksNS() - hidden->last_read_ns > SDL_MS_TO_NS(1000)) {
++            SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "SoundBlaster: the card has not asked for audio for a second; "
++                                                 "is it on IRQ %d (BLASTER)? Giving it up.", soundblaster_irq);
++            return false;
++        }
+         DOS_Yield();
+         hidden->last_yield_ns = SDL_GetTicksNS();
+     }
+@@ -363,6 +375,8 @@ static bool DOSSOUNDBLASTER_OpenDevice(SDL_AudioDevice *device)
+ 
+     hidden->ring_read = 0;
+     hidden->ring_write = 0;
++    hidden->last_read = 0;
++    hidden->last_read_ns = SDL_GetTicksNS();
+ 
+     // Populate ISR-visible statics (all will be memory-locked below).
+     isr_ring_buffer = hidden->ring_buffer;
+diff --git a/src/audio/dos/SDL_dosaudio_sb.h b/src/audio/dos/SDL_dosaudio_sb.h
+index 2ca55c820..2a129bc1b 100644
+--- a/src/audio/dos/SDL_dosaudio_sb.h
++++ b/src/audio/dos/SDL_dosaudio_sb.h
+@@ -43,6 +43,8 @@ struct SDL_PrivateAudioData
+     int chunk_size;          // == device->buffer_size (one DMA half-buffer worth)
+     Uint8 *staging_buffer;   // audio thread writes here, then commits to ring
+     Uint64 last_yield_ns;    // when the audio thread last let the main thread run
++    int last_read;           // the ISR's read position when last seen to move,
++    Uint64 last_read_ns;     // and when: a card that stops draining is given up
+ };
+ 
+ #endif // SDL_dosaudio_sb_h_

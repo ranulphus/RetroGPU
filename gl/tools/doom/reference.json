@@ -1,0 +1,34 @@
+{
+ "_about": "PrBoom-plus timedemo results with -nodraw -nosound -checksum on the owner's IWADs (tools/doom/fixtures.json): gametics and the final digest of the per-tic game-state checksum. Recorded on Linux with SDL2 from the fork's first commit; every DOS build must reproduce them.",
+ "demos": {
+  "DOOM demo1": {
+   "final": "666eebff136fe91355be84d1327c7057",
+   "gametics": 1710
+  },
+  "DOOM demo2": {
+   "final": "e6e4d5b5aa53eff334aa96aebeb87368",
+   "gametics": 2347
+  },
+  "DOOM demo3": {
+   "final": "c2494139d3a284a2a2571477e8620e1",
+   "gametics": 3863
+  },
+  "DOOM demo4": {
+   "final": "5eb8fc99d9f7af2eea45090f65028ce",
+   "gametics": 818
+  },
+  "DOOM2 demo1": {
+   "final": "778bd305ab9189938ce2f4cb8efa17c",
+   "gametics": 1205
+  },
+  "DOOM2 demo2": {
+   "final": "b9ec2dcefe25d1878c028552a924ad9",
+   "gametics": 2001
+  },
+  "DOOM2 demo3": {
+   "final": "3f83dee22d14426e4864e7e25eaba1",
+   "gametics": 4471
+  }
+ },
+ "fork_commit": "aaf0e28e840f70dd47193a50b899dfa42b2dec03"
+}

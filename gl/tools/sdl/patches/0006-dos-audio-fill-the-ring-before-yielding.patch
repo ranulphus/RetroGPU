@@ -1,0 +1,53 @@
+diff --git a/src/audio/dos/SDL_dosaudio_sb.c b/src/audio/dos/SDL_dosaudio_sb.c
+index a6e8e24a5..c2e541852 100644
+--- a/src/audio/dos/SDL_dosaudio_sb.c
++++ b/src/audio/dos/SDL_dosaudio_sb.c
+@@ -170,17 +170,22 @@ static void SoundBlasterIRQHandler(void)
+ static void SoundBlasterIRQHandler_End(void) {}
+ 
+ // Wait until the ring buffer has room for one more chunk.
+-// The audio thread keeps yielding so the game's main thread can run while
+-// we wait. Because the ISR is steadily draining the ring, this only blocks
+-// when the ring is completely full, which is a good problem to have.
++//
++// Threads only switch when one yields, and a game may yield only once or
++// twice a frame. Each of the audio thread's turns must therefore fill the
++// whole ring: what it holds is all that plays until the next turn. So keep
++// mixing while there is room, and yield when the ring is full. Mixing that
++// is slower than playback would never fill it, so also yield once 10 ms
++// have passed since the last yield: the main thread must keep running.
+ static bool DOSSOUNDBLASTER_WaitDevice(SDL_AudioDevice *device)
+ {
+     struct SDL_PrivateAudioData *hidden = device->hidden;
+     const int size = hidden->ring_size;
+ 
+-    // Slow mixing can keep the ring below capacity indefinitely. Yield even
+-    // when there is room so the cooperative main thread can process events.
+-    DOS_Yield();
++    if (SDL_GetTicksNS() - hidden->last_yield_ns >= SDL_MS_TO_NS(10)) {
++        DOS_Yield();
++        hidden->last_yield_ns = SDL_GetTicksNS();
++    }
+ 
+     for (;;) {
+         // Available space = ring_size - (write - read).
+@@ -191,6 +196,7 @@ static bool DOSSOUNDBLASTER_WaitDevice(SDL_AudioDevice *device)
+             return true; // room for at least one chunk
+         }
+         DOS_Yield();
++        hidden->last_yield_ns = SDL_GetTicksNS();
+     }
+ }
+ 
+diff --git a/src/audio/dos/SDL_dosaudio_sb.h b/src/audio/dos/SDL_dosaudio_sb.h
+index 5c0318862..2ca55c820 100644
+--- a/src/audio/dos/SDL_dosaudio_sb.h
++++ b/src/audio/dos/SDL_dosaudio_sb.h
+@@ -42,6 +42,7 @@ struct SDL_PrivateAudioData
+     int ring_size;           // total ring buffer size (power-of-2, multiple of chunk_size)
+     int chunk_size;          // == device->buffer_size (one DMA half-buffer worth)
+     Uint8 *staging_buffer;   // audio thread writes here, then commits to ring
++    Uint64 last_yield_ns;    // when the audio thread last let the main thread run
+ };
+ 
+ #endif // SDL_dosaudio_sb_h_

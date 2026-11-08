@@ -1,0 +1,20 @@
+# Half-Life H3 exit (run.sh play), one Loop A --keys item per line: seconds,
+# then the set 1 scancode (0x1xx are E0 keys). Each @TEXT line waits for
+# TEXT on COM1 and times the lines after it from there, so the script keeps
+# its order however slowly 86Box runs. HL-ACTIVE <map> is the engine's line
+# for "the client is in the level": before it (loading, reconnecting after a
+# level change) the console key and game keys are ignored.
+@Localize_AddToDict          # mainui is up: the main menu
+8.0:0x31                     # N: New game
+15.0:0x32                    # M: Medium
+@HL-ACTIVE c0a0              # the new game is running
+5.0:0x40                     # F6: quick save (WON's default.cfg)
+@Saving game to save/quick.sav
+5.0:0x41                     # F7: quick load
+@HL-ACTIVE c0a0a             # the tram took the player through the landmark
+5.0:0x29                     # ` console
+5.6:0x10                     # q
+6.2:0x16                     # u
+6.8:0x17                     # i
+7.4:0x14                     # t
+8.0:0x1c                     # Enter

@@ -1,0 +1,574 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 97b1f441a..16660220e 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -442,6 +442,8 @@ if(VITA)
+ endif()
+ 
+ if(DOS)
++  set_option(SDL_DOS_DOSGL "OpenGL on DOS through DOS-GL, Matrox G200/G400/G450 (DOSGL_DIR)" OFF)
++  set(DOSGL_DIR "" CACHE PATH "DOS-GL's tree: include/GL/dosgl.h and build/lib/libGL.a")
+   set(SDL_GPU              OFF)
+   set(SDL_CAMERA           OFF)
+   set(SDL_HAPTIC           OFF)
+@@ -3636,6 +3638,20 @@ elseif(DOS)
+   sdl_glob_sources("${SDL3_SOURCE_DIR}/src/video/dos/*.c")
+   set(HAVE_SDL_VIDEO TRUE)
+ 
++  # OpenGL through DOS-GL, a static OpenGL 1.1 subset for DJGPP on Matrox
++  # G200/G400/G450 cards (SDL_GL_* windows only: SDL's OpenGL renderer needs
++  # more than DOS-GL implements). Programs link DOS-GL's libGL.a after SDL.
++  if(SDL_OPENGL AND SDL_DOS_DOSGL)
++    if(NOT EXISTS "${DOSGL_DIR}/include/GL/dosgl.h")
++      message(FATAL_ERROR "SDL_DOS_DOSGL: no include/GL/dosgl.h under DOSGL_DIR (\"${DOSGL_DIR}\")")
++    endif()
++    set(SDL_VIDEO_OPENGL 1)
++    set(SDL_VIDEO_OPENGL_DOSGL 1)
++    sdl_include_directories(PRIVATE SYSTEM "${DOSGL_DIR}/include")
++    sdl_link_dependency(opengl LIBS GL)
++    set(HAVE_OPENGL TRUE)
++  endif()
++
+   set(SDL_FSOPS_POSIX 1)
+   sdl_sources("${SDL3_SOURCE_DIR}/src/filesystem/posix/SDL_sysfsops.c")
+   set(HAVE_SDL_FSOPS TRUE)
+diff --git a/include/build_config/SDL_build_config.h.cmake b/include/build_config/SDL_build_config.h.cmake
+index bd342ceb6..a385fb374 100644
+--- a/include/build_config/SDL_build_config.h.cmake
++++ b/include/build_config/SDL_build_config.h.cmake
+@@ -485,6 +485,7 @@
+ #cmakedefine SDL_VIDEO_OPENGL_GLX 1
+ #cmakedefine SDL_VIDEO_OPENGL_WGL 1
+ #cmakedefine SDL_VIDEO_OPENGL_EGL 1
++#cmakedefine SDL_VIDEO_OPENGL_DOSGL 1
+ 
+ #cmakedefine SDL_VIDEO_STATIC_ANGLE 1
+ 
+diff --git a/src/video/dos/SDL_dosmodes.c b/src/video/dos/SDL_dosmodes.c
+index d3cb94efc..69faa3dc0 100644
+--- a/src/video/dos/SDL_dosmodes.c
++++ b/src/video/dos/SDL_dosmodes.c
+@@ -31,6 +31,7 @@
+ // DOS declarations
+ #include "SDL_dosmodes.h"
+ #include "SDL_dosvideo.h"
++#include "SDL_dosopengl.h"
+ #include <sys/movedata.h> // for dosmemput (banked framebuffer access)
+ 
+ // Some VESA usage information:
+@@ -494,6 +495,19 @@ bool DOSVESA_SetDisplayMode(SDL_VideoDevice *device, SDL_VideoDisplay *sdl_displ
+     SDL_VideoData *data = device->internal;
+     const SDL_DisplayModeData *modedata = mode->internal;
+ 
++#ifdef SDL_VIDEO_OPENGL_DOSGL
++    // With an OpenGL window, DOS-GL sets the modes (dglInit) and puts text
++    // mode back (dglShutdown); VideoQuit then restores the saved VBE state.
++    // SDL's own fullscreen switches, including the one back to the desktop
++    // mode when the window goes, must not touch the hardware in between.
++    if (data->gl_owns_screen) {
++        return true;
++    }
++    if (DOSVESA_GL_IsGLOnlyMode(mode)) { // DOS-GL's own sizes are for OpenGL windows
++        return SDL_SetError("%dx%d is an OpenGL-only mode (DOS-GL)", mode->w, mode->h);
++    }
++#endif
++
+     if (data->current_mode.internal && (data->current_mode.internal->mode_id == modedata->mode_id)) {
+         return true;
+     }
+diff --git a/src/video/dos/SDL_dosopengl.c b/src/video/dos/SDL_dosopengl.c
+new file mode 100644
+index 000000000..fe3cc3d47
+--- /dev/null
++++ b/src/video/dos/SDL_dosopengl.c
+@@ -0,0 +1,308 @@
++/*
++  Simple DirectMedia Layer
++  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
++
++  This software is provided 'as-is', without any express or implied
++  warranty.  In no event will the authors be held liable for any damages
++  arising from the use of this software.
++
++  Permission is granted to anyone to use this software for any purpose,
++  including commercial applications, and to alter it and redistribute it
++  freely, subject to the following restrictions:
++
++  1. The origin of this software must not be misrepresented; you must not
++     claim that you wrote the original software. If you use this software
++     in a product, an acknowledgment in the product documentation would be
++     appreciated but is not required.
++  2. Altered source versions must be plainly marked as such, and must not be
++     misrepresented as being the original software.
++  3. This notice may not be removed or altered from any source distribution.
++*/
++
++#include "SDL_internal.h"
++
++#if defined(SDL_VIDEO_DRIVER_DOSVESA) && defined(SDL_VIDEO_OPENGL_DOSGL)
++
++#include "../../events/SDL_mouse_c.h"
++#include "../../core/dos/SDL_dos_scheduler.h"
++#include "SDL_dosvideo.h"
++#include "SDL_dosopengl.h"
++
++#include <GL/dosgl.h>
++
++// A display mode's internal mode_id for sizes only DOS-GL provides (drawn
++// scaled or zoomed into a larger BIOS mode); never set through VBE.
++#define DOSGL_MODE_SENTINEL 0xFFED
++
++#define MAX_DOSGL_MODES 32
++
++// DOS-GL's sizes, from dglEnumModes() at video init (before any mode set).
++static DGLMode dosgl_modes[MAX_DOSGL_MODES];
++static int num_dosgl_modes;
++
++static bool IsDOSGLSize(int w, int h)
++{
++    for (int i = 0; i < num_dosgl_modes; i++) {
++        if (dosgl_modes[i].width == w && dosgl_modes[i].height == h) {
++            return true;
++        }
++    }
++    return false;
++}
++
++void DOSVESA_GL_AddDisplayModes(SDL_VideoDevice *device, SDL_VideoDisplay *display)
++{
++    (void)device;
++    num_dosgl_modes = dglEnumModes(dosgl_modes, MAX_DOSGL_MODES);
++    if (num_dosgl_modes < 0) {
++        num_dosgl_modes = 0; // no DOS-GL card: OpenGL windows will fail to get a context
++    }
++
++    // Sizes the BIOS already has in 16-bit colour are listed from VBE; SDL
++    // refuses the duplicates. The rest (320x200, 320x240, 400x300, ...)
++    // exist only for OpenGL windows.
++    for (int i = 0; i < num_dosgl_modes; i++) {
++        SDL_DisplayModeData *internal = (SDL_DisplayModeData *)SDL_calloc(1, sizeof(*internal));
++        if (!internal) {
++            continue;
++        }
++        internal->mode_id = DOSGL_MODE_SENTINEL;
++        internal->w = (Uint16)dosgl_modes[i].width;
++        internal->h = (Uint16)dosgl_modes[i].height;
++        internal->bpp = 16;
++        internal->num_planes = 1;
++
++        SDL_DisplayMode mode;
++        SDL_zero(mode);
++        mode.format = SDL_PIXELFORMAT_RGB565;
++        mode.w = dosgl_modes[i].width;
++        mode.h = dosgl_modes[i].height;
++        mode.pixel_density = 1.0f;
++        mode.internal = internal;
++        if (!SDL_AddFullscreenDisplayMode(display, &mode)) {
++            SDL_free(internal);
++        }
++    }
++}
++
++bool DOSVESA_GL_IsGLOnlyMode(const SDL_DisplayMode *mode)
++{
++    return mode && mode->internal && mode->internal->mode_id == DOSGL_MODE_SENTINEL;
++}
++
++// For a software window: the mode SDL picked if it can take a framebuffer,
++// else one that can, of the same size if there is one (320x200 is VGA mode
++// 13h), else the smallest that holds it, else the largest.
++SDL_DisplayMode *DOSVESA_GL_SoftwareMode(SDL_VideoDisplay *display, SDL_DisplayMode *mode)
++{
++    SDL_DisplayMode *best = NULL, *largest = NULL;
++    if (!mode || !DOSVESA_GL_IsGLOnlyMode(mode)) {
++        return mode;
++    }
++    for (int i = 0; i < display->num_fullscreen_modes; i++) {
++        SDL_DisplayMode *m = &display->fullscreen_modes[i];
++        if (DOSVESA_GL_IsGLOnlyMode(m)) {
++            continue;
++        }
++        if (m->w == mode->w && m->h == mode->h) {
++            return m;
++        }
++        if (!largest || m->w * m->h > largest->w * largest->h) {
++            largest = m;
++        }
++        if (m->w >= mode->w && m->h >= mode->h && (!best || m->w * m->h < best->w * best->h)) {
++            best = m;
++        }
++    }
++    return best ? best : largest;
++}
++
++// The display's 16-bit mode for an OpenGL window of about w x h: that size
++// if DOS-GL has it, else the smallest DOS-GL size that holds it, else the
++// largest.
++static SDL_DisplayMode *ChooseGLMode(SDL_VideoDisplay *display, int w, int h)
++{
++    SDL_DisplayMode *best = NULL, *largest = NULL;
++    for (int i = 0; i < display->num_fullscreen_modes; i++) {
++        SDL_DisplayMode *m = &display->fullscreen_modes[i];
++        if (m->format != SDL_PIXELFORMAT_RGB565 || !IsDOSGLSize(m->w, m->h)) {
++            continue;
++        }
++        if (m->w == w && m->h == h) {
++            return m;
++        }
++        if (!largest || m->w * m->h > largest->w * largest->h) {
++            largest = m;
++        }
++        if (m->w >= w && m->h >= h && (!best || m->w * m->h < best->w * best->h)) {
++            best = m;
++        }
++    }
++    return best ? best : largest;
++}
++
++bool DOSVESA_GL_CreateWindow(SDL_VideoDevice *device, SDL_Window *window)
++{
++    SDL_VideoData *data = device->internal;
++    SDL_VideoDisplay *display = SDL_GetVideoDisplayForWindow(window);
++    SDL_DisplayMode *mode;
++    int w = window->floating.w, h = window->floating.h;
++
++    if (data->gl_window) {
++        return SDL_SetError("DOS-GL: one OpenGL window at a time");
++    }
++    if (window->requested_fullscreen_mode.w > 0) {
++        w = window->requested_fullscreen_mode.w;
++        h = window->requested_fullscreen_mode.h;
++    }
++    mode = display ? ChooseGLMode(display, w, h) : NULL;
++    if (!mode) {
++        return SDL_SetError("DOS-GL: no OpenGL mode (no Matrox G200/G400/G450?)");
++    }
++
++    // The mode is DOS-GL's to set, at context creation: SDL only records it,
++    // so that the fullscreen switch that follows sizes the window to it
++    // (DOSVESA_SetDisplayMode leaves the hardware alone for OpenGL windows).
++    data->gl_window = window;
++    data->gl_owns_screen = true;
++    SDL_copyp(&window->requested_fullscreen_mode, mode);
++    window->floating.w = window->windowed.w = window->w = mode->w;
++    window->floating.h = window->windowed.h = window->h = mode->h;
++
++    if (SDL_GetMouse()->internal != NULL) { // INT 33h services available: keep the pointer in the window
++        __dpmi_regs regs;
++        SDL_zero(regs);
++        regs.x.ax = 0x7;
++        regs.x.dx = (Uint16)(mode->w - 1);
++        __dpmi_int(0x33, &regs);
++        SDL_zero(regs);
++        regs.x.ax = 0x8;
++        regs.x.dx = (Uint16)(mode->h - 1);
++        __dpmi_int(0x33, &regs);
++    }
++    return true;
++}
++
++void DOSVESA_GL_DestroyWindow(SDL_VideoDevice *device, SDL_Window *window)
++{
++    SDL_VideoData *data = device->internal;
++    if (window != data->gl_window) {
++        return;
++    }
++    if (data->gl_context_active) { // the program never destroyed the context
++        dglShutdown();
++        data->gl_context_active = false;
++    }
++    data->gl_window = NULL;
++    // gl_owns_screen stays set: DOS-GL left text mode, and VideoQuit's VBE
++    // restore follows; no mode switch in between.
++}
++
++#if defined(DGL_API_VERSION) && DGL_API_VERSION >= 0x0103
++// DOS-GL 0.3 and later run this while a swap waits for the drawing engine:
++// threads switch only at yields, so this is where the audio thread refills
++// its ring during the wait.
++static void DOSVESA_GL_WaitHook(void *arg)
++{
++    (void)arg;
++    DOS_Yield();
++}
++#endif
++
++bool DOSVESA_GL_LoadLibrary(SDL_VideoDevice *device, const char *path)
++{
++    (void)device;
++    (void)path; // DOS-GL is linked in statically
++    return true;
++}
++
++SDL_FunctionPointer DOSVESA_GL_GetProcAddress(SDL_VideoDevice *device, const char *proc)
++{
++    (void)device;
++    return (SDL_FunctionPointer)dglGetProcAddress(proc);
++}
++
++void DOSVESA_GL_UnloadLibrary(SDL_VideoDevice *device)
++{
++    (void)device;
++}
++
++SDL_GLContext DOSVESA_GL_CreateContext(SDL_VideoDevice *device, SDL_Window *window)
++{
++    SDL_VideoData *data = device->internal;
++    DGLConfig cfg;
++
++    if (window != data->gl_window) {
++        SDL_SetError("DOS-GL: not an OpenGL window");
++        return NULL;
++    }
++    if (data->gl_context_active) {
++        SDL_SetError("DOS-GL: one OpenGL context at a time");
++        return NULL;
++    }
++    SDL_zero(cfg);
++    cfg.width = window->w;
++    cfg.height = window->h;
++    cfg.color_bits = 16;
++    cfg.depth_bits = device->gl_config.depth_size > 0 ? 16 : 0;
++    cfg.double_buffer = device->gl_config.double_buffer ? 1 : 0;
++    cfg.vsync = data->gl_swap_interval != 0;
++    if (dglInit(&cfg) != 0) {
++        SDL_SetError("DOS-GL: %s", dglGetErrorString());
++        return NULL;
++    }
++    data->gl_context_active = true;
++#if defined(DGL_API_VERSION) && DGL_API_VERSION >= 0x0103
++    dglSetWaitHook(DOSVESA_GL_WaitHook, NULL);
++#endif
++    return (SDL_GLContext)data; // the one context; any non-NULL handle
++}
++
++bool DOSVESA_GL_MakeCurrent(SDL_VideoDevice *device, SDL_Window *window, SDL_GLContext context)
++{
++    (void)device;
++    (void)window;
++    (void)context; // one window, one context: always current
++    return true;
++}
++
++bool DOSVESA_GL_SetSwapInterval(SDL_VideoDevice *device, int interval)
++{
++    SDL_VideoData *data = device->internal;
++    data->gl_swap_interval = interval ? 1 : 0; // adaptive (-1) waits for the retrace too
++    dglSetVSync(data->gl_swap_interval);
++    return true;
++}
++
++bool DOSVESA_GL_GetSwapInterval(SDL_VideoDevice *device, int *interval)
++{
++    *interval = device->internal->gl_swap_interval;
++    return true;
++}
++
++bool DOSVESA_GL_SwapWindow(SDL_VideoDevice *device, SDL_Window *window)
++{
++    (void)device;
++    (void)window;
++    // Threads switch only at yields: give the audio thread its turn before
++    // the swap waits for the drawing engine and the retrace.
++    DOS_Yield();
++    dglSwapBuffers();
++    return true;
++}
++
++bool DOSVESA_GL_DestroyContext(SDL_VideoDevice *device, SDL_GLContext context)
++{
++    SDL_VideoData *data = device->internal;
++    (void)context;
++    if (data->gl_context_active) {
++#if defined(DGL_API_VERSION) && DGL_API_VERSION >= 0x0103
++        dglSetWaitHook(NULL, NULL);
++#endif
++        dglShutdown(); // back to text mode; VideoQuit restores the saved VBE state later
++        data->gl_context_active = false;
++    }
++    return true;
++}
++
++#endif // SDL_VIDEO_DRIVER_DOSVESA && SDL_VIDEO_OPENGL_DOSGL
+diff --git a/src/video/dos/SDL_dosopengl.h b/src/video/dos/SDL_dosopengl.h
+new file mode 100644
+index 000000000..8e1ed3517
+--- /dev/null
++++ b/src/video/dos/SDL_dosopengl.h
+@@ -0,0 +1,56 @@
++/*
++  Simple DirectMedia Layer
++  Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
++
++  This software is provided 'as-is', without any express or implied
++  warranty.  In no event will the authors be held liable for any damages
++  arising from the use of this software.
++
++  Permission is granted to anyone to use this software for any purpose,
++  including commercial applications, and to alter it and redistribute it
++  freely, subject to the following restrictions:
++
++  1. The origin of this software must not be misrepresented; you must not
++     claim that you wrote the original software. If you use this software
++     in a product, an acknowledgment in the product documentation would be
++     appreciated but is not required.
++  2. Altered source versions must be plainly marked as such, and must not be
++     misrepresented as being the original software.
++  3. This notice may not be removed or altered from any source distribution.
++*/
++
++#ifndef SDL_dosopengl_h
++#define SDL_dosopengl_h
++
++#include "SDL_internal.h"
++
++#ifdef SDL_VIDEO_OPENGL_DOSGL
++
++#include "../SDL_sysvideo.h"
++
++/* OpenGL through DOS-GL: a static OpenGL 1.1 subset for DJGPP on Matrox
++ * G200/G400/G450 cards. DOS-GL sets the video mode itself when the context
++ * is created (dglInit) and restores text mode when it is destroyed, so an
++ * OpenGL window never goes through the VESA mode set; DOS-GL's own sizes,
++ * including those it draws scaled or zoomed into a larger BIOS mode, join
++ * the display's modes (OpenGL windows only). One context at a time. */
++
++extern void DOSVESA_GL_AddDisplayModes(SDL_VideoDevice *device, SDL_VideoDisplay *display);
++extern bool DOSVESA_GL_IsGLOnlyMode(const SDL_DisplayMode *mode);
++extern SDL_DisplayMode *DOSVESA_GL_SoftwareMode(SDL_VideoDisplay *display, SDL_DisplayMode *mode);
++extern bool DOSVESA_GL_CreateWindow(SDL_VideoDevice *device, SDL_Window *window);
++extern void DOSVESA_GL_DestroyWindow(SDL_VideoDevice *device, SDL_Window *window);
++
++extern bool DOSVESA_GL_LoadLibrary(SDL_VideoDevice *device, const char *path);
++extern SDL_FunctionPointer DOSVESA_GL_GetProcAddress(SDL_VideoDevice *device, const char *proc);
++extern void DOSVESA_GL_UnloadLibrary(SDL_VideoDevice *device);
++extern SDL_GLContext DOSVESA_GL_CreateContext(SDL_VideoDevice *device, SDL_Window *window);
++extern bool DOSVESA_GL_MakeCurrent(SDL_VideoDevice *device, SDL_Window *window, SDL_GLContext context);
++extern bool DOSVESA_GL_SetSwapInterval(SDL_VideoDevice *device, int interval);
++extern bool DOSVESA_GL_GetSwapInterval(SDL_VideoDevice *device, int *interval);
++extern bool DOSVESA_GL_SwapWindow(SDL_VideoDevice *device, SDL_Window *window);
++extern bool DOSVESA_GL_DestroyContext(SDL_VideoDevice *device, SDL_GLContext context);
++
++#endif // SDL_VIDEO_OPENGL_DOSGL
++
++#endif // SDL_dosopengl_h
+diff --git a/src/video/dos/SDL_dosvideo.c b/src/video/dos/SDL_dosvideo.c
+index 387a33360..caa46bf2f 100644
+--- a/src/video/dos/SDL_dosvideo.c
++++ b/src/video/dos/SDL_dosvideo.c
+@@ -33,6 +33,7 @@
+ #include "SDL_dosframebuffer_c.h"
+ #include "SDL_dosmodes.h"
+ #include "SDL_dosmouse.h"
++#include "SDL_dosopengl.h"
+ #include "SDL_dosvideo.h"
+ 
+ // Apply a display mode for a window: set the hardware mode, store it as
+@@ -63,6 +64,12 @@ static bool DOSVESA_CreateWindow(SDL_VideoDevice *device, SDL_Window *window, SD
+     SDL_SetMouseFocus(window);
+     SDL_SetKeyboardFocus(window);
+ 
++#ifdef SDL_VIDEO_OPENGL_DOSGL
++    if (window->flags & SDL_WINDOW_OPENGL) {
++        return DOSVESA_GL_CreateWindow(device, window);
++    }
++#endif
++
+     {
+         SDL_VideoDisplay *display = SDL_GetVideoDisplayForWindow(window);
+         if (!display) {
+@@ -82,6 +89,14 @@ static bool DOSVESA_CreateWindow(SDL_VideoDevice *device, SDL_Window *window, SD
+         if (!mode) {
+             return true;
+         }
++#ifdef SDL_VIDEO_OPENGL_DOSGL
++        // DOS-GL's own sizes are for OpenGL windows: a software window gets
++        // the nearest mode it can draw in.
++        mode = DOSVESA_GL_SoftwareMode(display, mode);
++        if (!mode) {
++            return true;
++        }
++#endif
+ 
+         DOSVESA_ApplyModeForWindow(display, window, mode);
+     }
+@@ -95,12 +110,20 @@ static void DOSVESA_SetWindowSize(SDL_VideoDevice *device, SDL_Window *window)
+     if (!display) {
+         return;
+     }
++#ifdef SDL_VIDEO_OPENGL_DOSGL
++    if (window->flags & SDL_WINDOW_OPENGL) {
++        return; // DOS-GL's mode is fixed for the context's life: recreate the window to change it
++    }
++#endif
+ 
+     SDL_DisplayMode closest;
+     SDL_DisplayMode *mode = NULL;
+     if (SDL_GetClosestFullscreenDisplayMode(display->id, window->floating.w, window->floating.h, 0.0f, false, &closest)) {
+         mode = &closest;
+     }
++#ifdef SDL_VIDEO_OPENGL_DOSGL
++    mode = DOSVESA_GL_SoftwareMode(display, mode);
++#endif
+ 
+     DOSVESA_ApplyModeForWindow(display, window, mode);
+ 
+@@ -119,6 +142,9 @@ static void DOSVESA_GetWindowSizeInPixels(SDL_VideoDevice *device, SDL_Window *w
+ 
+ static void DOSVESA_DestroyWindow(SDL_VideoDevice *device, SDL_Window *window)
+ {
++#ifdef SDL_VIDEO_OPENGL_DOSGL
++    DOSVESA_GL_DestroyWindow(device, window);
++#endif
+     SDL_free(window->internal);
+     window->internal = NULL;
+ }
+@@ -160,6 +186,10 @@ static bool DOSVESA_VideoInit(SDL_VideoDevice *device)
+     if (!display || !DOSVESA_GetDisplayModes(device, display)) {
+         return false;
+     }
++#ifdef SDL_VIDEO_OPENGL_DOSGL
++    DOSVESA_GL_AddDisplayModes(device, display);
++    data->gl_swap_interval = 1;
++#endif
+ 
+     // Pick a sensible default desktop mode. This determines the window
+     // size for FULLSCREEN_ONLY. Target 640x480 as a safe default; apps
+@@ -342,6 +372,18 @@ static SDL_VideoDevice *DOSVESA_CreateDevice(void)
+     device->PumpEvents = DOSVESA_PumpEvents;
+     device->device_caps = VIDEO_DEVICE_CAPS_FULLSCREEN_ONLY;
+ 
++#ifdef SDL_VIDEO_OPENGL_DOSGL
++    device->GL_LoadLibrary = DOSVESA_GL_LoadLibrary;
++    device->GL_GetProcAddress = DOSVESA_GL_GetProcAddress;
++    device->GL_UnloadLibrary = DOSVESA_GL_UnloadLibrary;
++    device->GL_CreateContext = DOSVESA_GL_CreateContext;
++    device->GL_MakeCurrent = DOSVESA_GL_MakeCurrent;
++    device->GL_SetSwapInterval = DOSVESA_GL_SetSwapInterval;
++    device->GL_GetSwapInterval = DOSVESA_GL_GetSwapInterval;
++    device->GL_SwapWindow = DOSVESA_GL_SwapWindow;
++    device->GL_DestroyContext = DOSVESA_GL_DestroyContext;
++#endif
++
+     return device;
+ }
+ 
+diff --git a/src/video/dos/SDL_dosvideo.h b/src/video/dos/SDL_dosvideo.h
+index c5646e9d8..9d0cf9f95 100644
+--- a/src/video/dos/SDL_dosvideo.h
++++ b/src/video/dos/SDL_dosvideo.h
+@@ -74,6 +74,14 @@ struct SDL_VideoData
+     Uint32 page_offset[2];    // byte offset of each page within video memory
+     bool page_flip_available; // true if mode supports double-buffering
+     bool banked_mode;         // true if current mode uses banked (not LFB) access
++
++#ifdef SDL_VIDEO_OPENGL_DOSGL
++    // OpenGL through DOS-GL (SDL_dosopengl.c)
++    SDL_Window *gl_window;  // the OpenGL window, if one exists
++    bool gl_owns_screen;    // DOS-GL sets and restores modes: no VBE mode sets until VideoQuit
++    bool gl_context_active; // dglInit done, dglShutdown not yet
++    int gl_swap_interval;   // 1: swaps wait for the retrace (DOS-GL's default)
++#endif
+ };
+ 
+ struct SDL_DisplayData

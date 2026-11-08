@@ -1,0 +1,15 @@
+{
+ "_about": "Sizes and sha256 of the Doom IWADs fixtures.py installs; the data itself is never committed.",
+ "doom": {
+  "DOOM.WAD": {
+   "sha256": "6fdf361847b46228cfebd9f3af09cd844282ac75f3edbb61ca4cb27103ce2e7f",
+   "size": 12408292,
+   "what": "The Ultimate Doom 1.9"
+  },
+  "DOOM2.WAD": {
+   "sha256": "10d67824b11025ddd9198e8cfc87ca335ee6e2d3e63af4180fa9b8a471893255",
+   "size": 14604584,
+   "what": "Doom II 1.9"
+  }
+ }
+}

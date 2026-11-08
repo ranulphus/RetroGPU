@@ -1,0 +1,31 @@
+# PrBoom-plus P3 exit (run.sh play, DOOM.WAD), one Loop A --keys item per
+# line: seconds, then the set 1 scancode. Each @TEXT line waits for TEXT on
+# COM1 and times the lines after it from there, so the script keeps its order
+# however slowly 86Box runs. DOOM-LEVEL <map> is the fork's line for "a level
+# has started" (src/DOS/i_dos.c); G_DoSaveGame and G_DoLoadGame log theirs.
+@ST_Init: Init status bar.   # the game is up: the title and its demos
+8.0:0x01                     # Esc: the main menu, on New Game
+10.0:0x1c                    # Enter: New Game
+12.0:0x1c                    # Enter: Knee-Deep in the Dead
+14.0:0x1c                    # Enter: Hurt me plenty (the default)
+@DOOM-LEVEL E1M1             # the new game is running
+5.0:0x3c                     # F2: save menu
+7.0:0x1c                     # Enter: slot 1 (the description defaults to the map)
+9.0:0x1c                     # Enter: save
+@G_DoSaveGame: [1]
+5.0:0x3d                     # F3: load menu
+7.0:0x1c                     # Enter: slot 1
+@G_DoLoadGame: [1]
+5.0:0x17                     # i
+5.4:0x20                     # d
+5.8:0x2e                     # c
+6.2:0x26                     # l
+6.6:0x12                     # e
+7.0:0x2f                     # v
+7.4:0x02                     # 1
+7.8:0x03                     # 2: idclev12, to E1M2
+@DOOM-LEVEL E1M2
+5.0:0x44                     # F10: quit?
+8.0:0x15                     # y
+@HX-KEYWAIT ready            # back in DOS: a key through the BIOS
+1.0:0x39                     # space

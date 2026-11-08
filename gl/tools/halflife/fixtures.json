@@ -1,0 +1,185 @@
+{
+ "_about": "Sizes and sha256 of the Half-Life (WON) files fixtures.py installs; the data itself is never committed.",
+ "halflife": {
+  "cached.wad": {
+   "sha256": "b9ac3a6c455fa54a11d4f00f8248909800b8b19f84e84bb35e826e4c137f262d",
+   "size": 129636
+  },
+  "decals.wad": {
+   "sha256": "17726e8174729011c7ea4e1e37b4ccfe7a9aa4abb82c2aaca87872cbe0c106d0",
+   "size": 924840
+  },
+  "gfx.wad": {
+   "sha256": "6fd53d6ef8d704299734018e3069ec12551e7fb2065804a1d4e5c936ac4033bd",
+   "size": 86608
+  },
+  "gfx/shell/btns_main.bmp": {
+   "sha256": "0cb83699568bf0e6d628233c83e4ff6551e40ff1ab97573ba4677cb0b6433520",
+   "size": 840672
+  },
+  "gfx/shell/dedicate.bmp": {
+   "sha256": "d2bc816cdea1c1dc4a1786cde28e191a89c93ef3127c64400017903356fa1f1a",
+   "size": 824
+  },
+  "gfx/shell/down.bmp": {
+   "sha256": "486279aa9f8af9987bde2b11e4000535304e784bd5ffdec2f5701afbe2ec4420",
+   "size": 248
+  },
+  "gfx/shell/favorite.bmp": {
+   "sha256": "1d6dbe71ac9cc99a51a8d2fe00b1fbe42b11fbae5202b460a6592172a82f9058",
+   "size": 824
+  },
+  "gfx/shell/head_advoptions.bmp": {
+   "sha256": "080795bb1c4cdb225f1d49e0c9ce9e598c7141a0aa8726324c8a17f4720d6aae",
+   "size": 37624
+  },
+  "gfx/shell/head_custom.bmp": {
+   "sha256": "aed37bc448e2128d35c21264352d59ece99c524a992260eb13fe3c15a1fdf9b2",
+   "size": 110456
+  },
+  "gfx/shell/kb_act.lst": {
+   "sha256": "8ea4cdb4636392a31fd1fabb9ff4d1e2c0a64270867c898bbaf88f12b42dcc4d",
+   "size": 1205
+  },
+  "gfx/shell/kb_def.lst": {
+   "sha256": "1a09320c1bec4d1ec2c7bceb9b481494a72651c5b01f292fa25439b999893583",
+   "size": 1091
+  },
+  "gfx/shell/linux.bmp": {
+   "sha256": "d204fabc1c3551bf67df38c8e5a31348d849262e7c67cd5bcd8d56dccb4004d2",
+   "size": 824
+  },
+  "gfx/shell/listen.bmp": {
+   "sha256": "fbebef999e158ea5169825193ee5dc584caee5f609bd6ec447ea8fe49261f18a",
+   "size": 1176
+  },
+  "gfx/shell/lock.bmp": {
+   "sha256": "0fc66cbb649d0ebc3ea3933aa9db40b28f334cf831ec7e76e2c10bf5ca6827fc",
+   "size": 1336
+  },
+  "gfx/shell/nonfav.bmp": {
+   "sha256": "ab79f35bb12d7350a78f53929a7a05c87a6fd2e02b02d219b2c4b83a464b842b",
+   "size": 1336
+  },
+  "gfx/shell/pcg.bmp": {
+   "sha256": "54fb2ec5692d5d8447c96d6a70eb86058aba853d77bd7586fe024ae081feffe9",
+   "size": 15478
+  },
+  "gfx/shell/unlock.bmp": {
+   "sha256": "bcf5ed86e9d724e1601cb06e5bd8b027f9e215c42610b865e8101676c877a431",
+   "size": 1334
+  },
+  "gfx/shell/up.bmp": {
+   "sha256": "15473ef64c4dbcd3650ab2416dacde36afc8680de40ca2589562580cd7834f40",
+   "size": 248
+  },
+  "gfx/shell/windows.bmp": {
+   "sha256": "ba236c88bf2927f8582be9a587dbb51908a484fd88ef51b1200f4f1f2705cead",
+   "size": 824
+  },
+  "halflife.wad": {
+   "sha256": "38ababf773463fdf6133005d13e543098fc42392b458057f239469b764691300",
+   "size": 37914096
+  },
+  "hw/d3d.cfg": {
+   "sha256": "73fb873d402ba757bee869d61efa82a44df5eb19f9741d31af04d5a09cb8f138",
+   "size": 426
+  },
+  "liblist.gam": {
+   "sha256": "16895528aff28ca69dd8d223e13db4daac1efce067227279e35073f0d9427489",
+   "size": 235
+  },
+  "liquids.wad": {
+   "sha256": "0f5c3ae49af4e72f4f26752c1fd5dfbea8f88859f1097badf8733fa6093a8f95",
+   "size": 475820
+  },
+  "listenserver.cfg": {
+   "sha256": "7eb23ce79abe1d7ce0fe1e049c331dd542b45679249577f850aff007068279f4",
+   "size": 821
+  },
+  "mapcycle.txt": {
+   "sha256": "efce3f5735ffb05ccf493c980bd61b774e43ce37ec12c0402d43400e07a6743e",
+   "size": 68
+  },
+  "maps/crossfire.bsp": {
+   "sha256": "6222243e0839022f3041e6b9e97776ce54d0cf87d4c3810e627b8b2815b555f5",
+   "size": 1241704
+  },
+  "maps/frenzy.bsp": {
+   "sha256": "752abc65a1bef9755efe9b0177f932cd9d617a59bffd43aed330076ca5c7f5cc",
+   "size": 662356
+  },
+  "models/player/barney/barney.bmp": {
+   "sha256": "96d9fb3d9ac5201d0ad134e487994e9a8645c4e76299b018b437b7bb268fafa3",
+   "size": 33878
+  },
+  "models/player/barney/barney.mdl": {
+   "sha256": "8bba02d6801db546259e8ee20847a4d3e96f2a1d60fa043f26ec9d3224bf6bea",
+   "size": 350264
+  },
+  "models/player/robo/robo.bmp": {
+   "sha256": "bea7d0ee672e6356ef62d6027474dd27fc03696e9d6bea82e48a7e326e88286c",
+   "size": 33878
+  },
+  "models/player/robo/robo.mdl": {
+   "sha256": "c929fd09db1075194e4644acc0ed41a4278eba12f86cc24d1f8fc29d0b90bec1",
+   "size": 305676
+  },
+  "models/player/zombie/zombie.bmp": {
+   "sha256": "08865ba940e8fa88df5fa2232fa17d229131b2e1791d785ea7fbcacee14ee15d",
+   "size": 33878
+  },
+  "models/player/zombie/zombie.mdl": {
+   "sha256": "a73009e66baf727ff4fecf715a36d36567a8cea633207f343d0792a8ba2b27e0",
+   "size": 292236
+  },
+  "pak0.pak": {
+   "sha256": "a03140547f462ff1e593ed91b29c34ba712f348f866bc8947bdd05bc84e61f6c",
+   "size": 302907835
+  },
+  "profile.lst": {
+   "sha256": "cd36d358e0a0ab5f654816a0e3d606e1267aa6014ff9f11462b3b4ede5f59487",
+   "size": 479
+  },
+  "rooms.lst": {
+   "sha256": "521849d70e2a7927e119e8c1fd438f4d43a80a68f447b4f1e85a01eea4f6b734",
+   "size": 198
+  },
+  "server.cfg": {
+   "sha256": "4f27bc35d508c4b7226ebe6d529b00f2cabd3ee989aafe7ce2f23703e98c214e",
+   "size": 478
+  },
+  "settings.scr": {
+   "sha256": "837091d76e885116a38949012bbbc99d2a5d46438586e76c6983c3a02a21d008",
+   "size": 1988
+  },
+  "spraypaint.wad": {
+   "sha256": "bff7ad40b9b6ff446d56cf3fd05fd2e50c8d8d186dade45549e3313680815e82",
+   "size": 87988
+  },
+  "sprites/hud.txt": {
+   "sha256": "ccd07f0ddf0226f3207d4f36603ff4065b0e798e0dfcf4ff69c24aec0d2ee91a",
+   "size": 4635
+  },
+  "sprites/shellchrome.spr": {
+   "sha256": "7c6d3b5719cadce1f5ea55df021c4e5941c55d550e0686bb03a5ac78f0c350bc",
+   "size": 4926
+  },
+  "user.scr": {
+   "sha256": "1a5071189aa2596d488e3801c63b1e742cddd1f49da0f06c30643f40b641d020",
+   "size": 1098
+  },
+  "valve.rc": {
+   "sha256": "5b1b2dd68c2ff1fc6cda3f415cfa7087884ca075c371574aa19c1e4474c4d540",
+   "size": 356
+  },
+  "woncomm.lst": {
+   "sha256": "d3ba954b025ecb357b32f4f0e560121b94bf496cbee32ca652f5271a5e7d3a81",
+   "size": 329
+  },
+  "xeno.wad": {
+   "sha256": "d63e152db6d950f671356c4da0d8a1966e0d940a2166b61678e3a6d46644cd7c",
+   "size": 6514528
+  }
+ }
+}
