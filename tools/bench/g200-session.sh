@@ -5,10 +5,10 @@
 #   tools/bench/g200-session.sh PC [PHASE...]     (default: all phases, in order)
 #
 # PC is bench-g400 with the G200 swapped in (or vbench-g200 for the dry run
-# in 86Box). Runs on the build host. Builds come from these checkouts
-# (environment overrides): MGA_GLIDE (this one), DOSGL, DOSBENCH, FIFTHWHEEL,
-# DGK; DOS-GL, DOSBench and Fifth Wheel are built against MGA_GLIDE's HAL and
-# DOSGL (no pins, no copies). Each phase prints its outcomes on lines of its
+# in 86Box). Runs on the build host. Builds come from this tree (RetroGPU:
+# the HAL, Glide and DOS-GL in gl/) and these checkouts (environment
+# overrides): DOSBENCH, FIFTHWHEEL, DGK; DOSBench and Fifth Wheel are built
+# against this tree (RETROGPU; no pins, no copies). Each phase prints its outcomes on lines of its
 # own; the results stay under out/bench/PC/ and out/g200-session/.
 #
 # Phases (each answers questions in docs/g200-warp.md, "Open, for the card"):
@@ -26,12 +26,13 @@
 set -uo pipefail
 pc=${1:?PC}; shift
 phases=${*:-warptri conform scenes fifth glide agp}
-MGA=${MGA_GLIDE:-$(cd "$(dirname "$0")/../.." && pwd)}
-DOSGL=${DOSGL:-$HOME/DOSGL}
+MGA=$(cd "$(dirname "$0")/../.." && pwd)
+DOSGL=$MGA/gl
 DOSBENCH=${DOSBENCH:-$HOME/DOSBench}
 FW=${FIFTHWHEEL:-$HOME/FifthWheel}
 DGK=${DGK:-$HOME/dgk}
-export MGA_GLIDE=$MGA
+export RETROGPU=$MGA
+unset MGA_GLIDE
 out=$MGA/out/g200-session/$pc
 mkdir -p "$out"
 say() { printf '%-9s %s\n' "$1" "$2" | tee -a "$out/summary.txt"; }
@@ -66,10 +67,10 @@ PY
 
 build() {
     (cd "$MGA" && make -s hal-djgpp runtime build/djgpp/WARPTRI.EXE dostests) >> "$out/build.log" 2>&1 || return 1
-    (cd "$DOSGL" && make -s MGA_GLIDE="$MGA" lib conform-dos) >> "$out/build.log" 2>&1 || return 1
-    [ -f "$DOSGL/build/sdl/dos/lib/libSDL3.a" ] || (cd "$DOSGL" && make -s MGA_GLIDE="$MGA" sdl) >> "$out/build.log" 2>&1 || return 1
-    (cd "$DOSBENCH" && make -s MGA_GLIDE="$MGA" DOSGL="$DOSGL") >> "$out/build.log" 2>&1 || return 1
-    (cd "$FW" && make -s MGA_GLIDE="$MGA" DOSGL="$DOSGL" DGK="$DGK" dos) >> "$out/build.log" 2>&1 || return 1
+    (cd "$DOSGL" && make -s lib conform-dos) >> "$out/build.log" 2>&1 || return 1
+    [ -f "$DOSGL/build/sdl/dos/lib/libSDL3.a" ] || (cd "$DOSGL" && make -s sdl) >> "$out/build.log" 2>&1 || return 1
+    (cd "$DOSBENCH" && make -s RETROGPU="$MGA") >> "$out/build.log" 2>&1 || return 1
+    (cd "$FW" && make -s RETROGPU="$MGA" DGK="$DGK" dos) >> "$out/build.log" 2>&1 || return 1
 }
 
 phase_warptri() {
@@ -85,7 +86,7 @@ phase_warptri() {
 phase_conform() {
     local w
     # (make conform-bench's steps: its PRE is one line, and these need two)
-    (cd "$DOSGL" && make -s MGA_GLIDE="$MGA" conform-dos && "$MGA/tools/dev" sh -c 'make -s conform-host && python3 tools/conform/run.py --refs') \
+    (cd "$DOSGL" && make -s conform-dos && "$MGA/tools/dev" sh -c 'make -s conform-host && python3 tools/conform/run.py --refs') \
         > "$out/conform-refs.log" 2>&1
     for w in 1 0; do
         (cd "$DOSGL" && python3 tools/conform/run.py --bench "$pc" --pre "SET DGL_WARP=$w" --pre "SET DGL_AGP=0") > "$out/conform-$w.log" 2>&1
@@ -163,7 +164,7 @@ phase_agp() {
 }
 
 : > "$out/summary.txt"
-say build "MGA-Glide $(git -C "$MGA" describe --always --dirty), DOS-GL $(git -C "$DOSGL" describe --always --dirty)"
+say build "RetroGPU $(git -C "$MGA" describe --always --dirty)"
 build || { say build "FAILED: $out/build.log"; exit 1; }
 for p in $phases; do "phase_$p"; done
 say done "$out/summary.txt"

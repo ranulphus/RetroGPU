@@ -3,7 +3,7 @@
 docs/silicon-experiments.md).
 
   g4exp.py loopa [--card g450,g400,g200]   emulator baselines in out/g4exp-CARD/
-  g4exp.py bench --pc NAME                 a bench PC through MGA-Glide's
+  g4exp.py bench --pc NAME                 a bench PC through RetroGPU's
                                            tools/bench/run.py (vbench-* for a dry run)
   g4exp.py report DIR...                   the verdict table from each DIR/serial.log
 

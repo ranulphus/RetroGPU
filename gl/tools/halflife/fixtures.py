@@ -6,7 +6,7 @@
   fixtures.py --update   rewrite fixtures.json from ~/VALVE (a new copy of the data)
 
 Source: the owner's Half-Life CD (WON), its valve/ directory copied to
-~/VALVE (HL_VALVE). Installed into MGA-Glide's fixture cache, which the dev
+~/VALVE (HL_VALVE). Installed into the platform's fixture cache, which the dev
 container mounts, as $MGA_CACHE/fixtures/games/halflife/VALVE; Loop A puts it
 on D: as D:\\HL\\VALVE (games.json). Every file is checked against
 tools/halflife/fixtures.json (sizes and sha256 only).

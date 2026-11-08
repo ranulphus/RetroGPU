@@ -4,7 +4,7 @@
 the bench PCs are not set up yet. A Linux machine with a Matrox chip can
 still run DOS-GL's own code on silicon: `make rig` builds DOS-GL for 32-bit
 Linux, with x87 maths as DJGPP's code uses, on the HAL's Linux port, which
-reaches the card through its sysfs resource files (MGA-Glide's Loop C,
+reaches the card through its sysfs resource files (RetroGPU's Loop C,
 `docs/loop-c-results.md` there, drives a G200eR2 the same way).
 
 ## What the rig build changes (`DGL_RIG`)
@@ -34,7 +34,7 @@ tools/rig/run.py info --host retro@devserver --bdf 0000:09:00.0        # read-on
 tools/rig/run.py smoke conform bench --host ... --bdf ... --unbind     # writes: agreed window only
 ```
 
-Stages stop at the first anomaly. `smoke` runs MGA-Glide's `mgarig` (read
+Stages stop at the first anomaly. `smoke` runs RetroGPU's `mgarig` (read
 registers, DWGSYNC, one fill, one triangle) before DOS-GL touches the card.
 `--unbind` detaches the host's driver for the session and binds it again at
 the end, whatever happens; without it, pass `--vram-base-kb` above the

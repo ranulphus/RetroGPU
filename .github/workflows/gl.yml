@@ -1,4 +1,6 @@
-name: ci
+name: gl
+# DOS-GL (gl/): its host tests, the DJGPP build and a Loop A boot on each
+# card. Runs on every push, like ci.yml: a HAL change is tested by both.
 on:
   push:
   pull_request:
@@ -8,9 +10,12 @@ env:
   MGA_CACHE: ${{ github.workspace }}/.mga-cache
   DJGPP_PREFIX: ${{ github.workspace }}/.mga-opt/djgpp
   WATCOM: ${{ github.workspace }}/.mga-opt/watcom
-  # The Matrox HAL and harness: MGA-Glide's main, checked out beside the build (PRD D15).
-  MGA_GLIDE: ${{ github.workspace }}/mga-glide
+  # GLOS's API header (gl/src/dgl/glos.c): its main, checked out beside the build.
   GLOS: ${{ github.workspace }}/glos
+
+defaults:
+  run:
+    working-directory: gl
 
 jobs:
   host:
@@ -18,8 +23,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { submodules: true }
-      - uses: actions/checkout@v4
-        with: { repository: ranulphus/MGA-Glide, path: mga-glide }
       - uses: actions/checkout@v4
         with: { repository: ranulphus/GLOS, path: glos }
       - run: make tests-host
@@ -29,15 +32,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
-        with: { repository: ranulphus/MGA-Glide, path: mga-glide }
-      - uses: actions/checkout@v4
         with: { repository: ranulphus/GLOS, path: glos }
       - uses: actions/cache@v4
-        with: { path: .mga-opt/djgpp, key: "djgpp-${{ hashFiles('mga-glide/tools/setup/versions.mk') }}" }
+        with: { path: .mga-opt/djgpp, key: "djgpp-${{ hashFiles('tools/setup/versions.mk') }}" }
       - run: make setup-djgpp
       - run: make
       - uses: actions/upload-artifact@v4
-        with: { name: dos-binaries, path: "build/lib/libGL.a\nbuild/exe/*.EXE" }
+        with: { name: dos-binaries, path: "gl/build/lib/libGL.a\ngl/build/exe/*.EXE" }
 
   loopa:
     runs-on: ubuntu-24.04
@@ -47,22 +48,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
-        with: { repository: ranulphus/MGA-Glide, path: mga-glide }
-      - uses: actions/checkout@v4
         with: { repository: ranulphus/GLOS, path: glos }
-      - run: sudo apt-get update && xargs -a mga-glide/tools/docker/packages.txt sudo apt-get install -y --no-install-recommends
+      - run: sudo apt-get update && xargs -a ../tools/docker/packages.txt sudo apt-get install -y --no-install-recommends
       - uses: actions/cache@v4
-        with: { path: .mga-opt/djgpp, key: "djgpp-${{ hashFiles('mga-glide/tools/setup/versions.mk') }}" }
+        with: { path: .mga-opt/djgpp, key: "djgpp-${{ hashFiles('tools/setup/versions.mk') }}" }
       # Open Watcom builds the DOS helpers in C:\HX and supplies DOS4GW.EXE, which Loop A puts in every VM.
       - uses: actions/cache@v4
-        with: { path: .mga-opt/watcom, key: "ow-${{ hashFiles('mga-glide/tools/setup/versions.mk') }}" }
+        with: { path: .mga-opt/watcom, key: "ow-${{ hashFiles('tools/setup/versions.mk') }}" }
       - uses: actions/cache@v4
         with:
           path: .mga-cache/86box
-          key: "86box-${{ hashFiles('mga-glide/tools/setup/versions.mk', 'mga-glide/tools/86box/series', 'mga-glide/tools/86box/patches/**') }}"
+          key: "86box-${{ hashFiles('tools/setup/versions.mk', 'tools/86box/series', 'tools/86box/patches/**') }}"
       - run: make setup-djgpp setup-ow
       - run: make 86box
       - run: make loopa TEST=hello CARD=${{ matrix.card }}
       - if: always()
         uses: actions/upload-artifact@v4
-        with: { name: "loopa-out-${{ matrix.card }}", path: out/ }
+        with: { name: "loopa-out-${{ matrix.card }}", path: gl/out/ }

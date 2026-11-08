@@ -3,7 +3,7 @@
 
 Stages, each writing to the card only when run; stop at the first anomaly:
   info      read-only: identity, BARs, bound driver (no card access)
-  smoke     MGA-Glide's mgarig: read registers, DWGSYNC, one fill, one triangle
+  smoke     RetroGPU's mgarig: read registers, DWGSYNC, one fill, one triangle
   conform   DOS-GL's conformance tests; frames compared with Mesa's (tools/conform)
   bench     tests/rig/rigbench: chip time per triangle, fill rate, register write rate
 

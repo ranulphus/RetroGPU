@@ -11,17 +11,19 @@ on its GL 1.1 backend. Real-hardware verification (the bench) and Pentium II
 performance numbers are pending. See `docs/porting.md` for using the library
 and `docs/testing.md` for the test loops.
 
-DOS-GL shares its Matrox hardware layer, test harness, bench tooling and
-86Box patches with [MGA-Glide](https://github.com/ranulphus/MGA-Glide), built
-from its checkout beside this one (`MGA_GLIDE`, default `~/MGA-Glide`), on main.
+DOS-GL is part of RetroGPU: its Matrox hardware layer (`hal/`), test
+harness, bench tooling and 86Box patches are the repository's, in this
+directory's parent, and the Glide runtime beside it (`glide/`) shares them.
+Until 2026-11-08 it was a repository of its own (github.com/ranulphus/DOSGL);
+its history is here.
 
 ## Building
 
 ```
 make setup-djgpp          # pinned DJGPP gcc 12.2 + CWSDPMI into ~/.local/opt
-make                      # build/lib/libGL.a and build/exe/*.EXE
+make                      # build/lib/libGL.a and build/exe/*.EXE (run in gl/, or make gl-TARGET at the root)
 make tests-host           # host unit tests (incl. gl.h against ClassiCube's declarations)
-make 86box                # the pinned, locally patched 86Box (shared cache with MGA-Glide)
+make 86box                # the pinned, locally patched 86Box (the platform's, in ~/.cache/mga-glide)
 make loopa TEST=hello CARD=g450      # run an example in 86Box: out/hello/
 ```
 

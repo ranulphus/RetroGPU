@@ -4,7 +4,7 @@ texture coordinates through the CPU's triangle setup against the G400's WARP.
 
   texexp.py loopa [--card g400]   86Box (BOX86_DIR: an emulator with the WARP
                                   model) in out/texexp-CARD/
-  texexp.py bench --pc NAME       a bench PC through MGA-Glide's tools/bench/run.py
+  texexp.py bench --pc NAME       a bench PC through RetroGPU's tools/bench/run.py
   texexp.py report CARD_DIR [REF_DIR]
                                   per cell, the share of pixels more than 32
                                   apart: CPU against WARP, and each against REF_DIR

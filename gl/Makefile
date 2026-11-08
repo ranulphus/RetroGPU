@@ -35,7 +35,7 @@ DJ_CFLAGS += -DMGA_PROF=1
 endif
 
 # The shared HAL (PRD D15) goes into libGL.a so consumers link only -lGL. Its
-# objects are built here, under build/*/mgahal/ (MGA-Glide's tree is only read).
+# objects are built here, under build/*/mgahal/ (the root's hal/ is only read).
 HAL_SRCS := $(addprefix $(MGAHAL)/hal/,src/debug/serial.c src/pci.c src/chip.c src/vbe.c src/fifo.c \
               src/engine.c src/dac.c src/texhw.c src/present.c src/debug/regtrace.c src/setup/trap.c src/warp.c port/djgpp.c)
 hal_objs = $(patsubst $(MGAHAL)/%.c,build/$(1)/mgahal/%.o,$(2))
@@ -141,7 +141,7 @@ conform-host: $(foreach t,$(CONFORM),build/host/conform/$(t))
 conform: conform-dos dostools
 	$(MGAHAL)/tools/dev sh -c '$(MAKE) conform-host && python3 tools/conform/run.py --card $(CARD) \
 	  $(if $(PRE),--pre "$(PRE)") $(TESTS)'
-# The same on a bench PC (MGA-Glide's tools/bench/run.py, on the host: the PC must reach it).
+# The same on a bench PC (RetroGPU's tools/bench/run.py, on the host: the PC must reach it).
 conform-bench: conform-dos
 	$(MGAHAL)/tools/dev sh -c '$(MAKE) conform-host && python3 tools/conform/run.py --refs $(TESTS)'
 	python3 tools/conform/run.py --bench $(PC) $(if $(PRE),--pre "$(PRE)") $(TESTS)
@@ -244,8 +244,8 @@ loopa: examples dostools
 	  --exe build/exe/$(shell echo $(TEST) | tr a-z A-Z).EXE --card $(CARD) --out $(CURDIR)/out/$(TEST) \
 	  $(if $(ARGS),--args="$(ARGS)")
 
-# Toolchain and emulator come from MGA-Glide's harness (its tools/setup/versions.mk;
-# cached in ~/.cache/mga-glide). dostools and 86box build in MGA-Glide's checkout.
+# Toolchain and emulator come from RetroGPU's harness (its tools/setup/versions.mk;
+# cached in ~/.cache/mga-glide). dostools and 86box build at the repository root.
 setup-djgpp:
 	$(MAKE) -C $(MGAHAL) setup-djgpp DJGPP_PREFIX=$(DJGPP_PREFIX)
 setup-ow:

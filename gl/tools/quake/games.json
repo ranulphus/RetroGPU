@@ -1,5 +1,5 @@
 {
- "_about": "Game disks for the Quake ports in Loop A (MGA-Glide tools/loopa/run.py --games-file). Fixtures come from tools/quake/fixtures.py; cylinders size the D: image (63 x 16 x cylinders sectors).",
+ "_about": "Game disks for the Quake ports in Loop A (RetroGPU's tools/loopa/run.py --games-file). Fixtures come from tools/quake/fixtures.py; cylinders size the D: image (63 x 16 x cylinders sectors).",
  "quake": {
   "title": "Quake 1.06 (registered, retail)",
   "fixture": "games/quake",

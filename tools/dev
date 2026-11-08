@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run a command inside the MGA-Glide dev container with the repo, the
+# Run a command inside the RetroGPU dev container with the repo, the
 # toolchains and the cache mounted at identical paths.
 # Inside the container (or when MGA_NO_DOCKER=1) it just runs the command.
 # MGA_DOCKER_NETWORK=host shares the host's network (the Loop B dry run:
@@ -12,8 +12,8 @@ if ! docker image inspect "$img" >/dev/null 2>&1; then
   docker build -q -t "$img" "$repo/tools/docker" >&2
 fi
 opt=${MGA_OPT:-$HOME/.local/opt}; cache=${MGA_CACHE:-$HOME/.cache/mga-glide}
-# A sibling project (DOS-GL, GLOS, Fifth Wheel, DOSBench) runs this harness
-# from its own tree: mount the caller's repository as well.
+# A sibling project (GLOS, Fifth Wheel, Echoes of the Void, DOSBench) runs
+# this harness from its own tree: mount the caller's repository as well.
 caller=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)
 extra=()
 if [ -n "$caller" ] && [ "$caller" != "$repo" ]; then extra=(-v "$caller:$caller"); fi

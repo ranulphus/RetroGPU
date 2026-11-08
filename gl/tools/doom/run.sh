@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run PrBoom-plus on DOS-GL in Loop A (86Box, MGA-Glide's runner).
+# Run PrBoom-plus on DOS-GL in Loop A (86Box, RetroGPU's runner).
 #
 #   run.sh MODE [CARD] [-- PRBOOMP ARGS...]
 #
@@ -42,7 +42,7 @@ card=g450
 if [ $# -gt 0 ] && [ "$1" != "--" ]; then card=$1; shift; fi
 [ "${1:-}" = "--" ] && shift
 hal=$(cd "$root/.." && pwd)   # the HAL and harness: RetroGPU, this tree's parent
-# The DOS helpers Loop A puts in C:\HX (built in MGA-Glide's checkout).
+# The DOS helpers Loop A puts in C:\HX (built at the repository root).
 [ -f "$hal/build/ow/dos/UTEXIT.COM" ] || make -C "$root" -s dostools
 b=${DOOM_BUILD:-$root/build/doom}
 [ -f "$b/PRBOOMP.EXE" ] || { echo "run.sh: no $b/PRBOOMP.EXE (tools/doom/build.sh)" >&2; exit 2; }

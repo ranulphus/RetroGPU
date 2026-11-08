@@ -1,5 +1,9 @@
 # DOS-GL handoff (PRD Appendix B)
 
+*Historical:* written while DOS-GL was a separate repository. Since
+2026-11-08 it is `gl/` in RetroGPU, beside this runtime, and builds the HAL
+and harness from the repository root.
+
 What MGA-Glide delivers to DOS-GL, item by item against PRD Appendix B,
 with the evidence behind each answer. "Emulated" means 86Box with the local
 patch series; "silicon" results wait for the bench (PRD milestone S) and

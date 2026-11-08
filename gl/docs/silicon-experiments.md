@@ -2,7 +2,7 @@
 
 A few things DOS-GL does on the G400/G450, and one on the G200, rest on
 readings of the specification that no public driver confirms. The open
-questions are listed in MGA-Glide's `docs/g400-dual-texture.md` §7. 86Box
+questions are listed in RetroGPU's `docs/g400-dual-texture.md` §7. 86Box
 models the readings DOS-GL chose (local patches 0009 and 0010), so in the
 emulator every experiment passes by construction. Only the silicon can say
 whether they hold.
@@ -22,13 +22,13 @@ tools/silicon/g4exp.py bench --pc bench-g400           # a bench PC (run on the 
 tools/silicon/g4exp.py report DIR...                   # the table again, from DIR/serial.log
 ```
 
-`bench` publishes the job through MGA-Glide's `tools/bench/run.py` (the checkout
-in `MGA_GLIDE`, default `~/MGA-Glide`). The results land in that checkout's
+`bench` publishes the job through RetroGPU's `tools/bench/run.py` (at the
+repository root). The results land in the root's
 `out/bench/<pc>/g4exp-*/`. On silicon a FAIL job is an answer, not an error.
 
 To dry-run without hardware, use the virtual bench PC:
-`MGA_DOCKER_NETWORK=host tools/dev python3 tools/bench/vpc.py start g450` in
-MGA-Glide, then `--pc vbench-g450`.
+`MGA_DOCKER_NETWORK=host tools/dev python3 tools/bench/vpc.py start g450` at
+the repository root, then `--pc vbench-g450`.
 
 One job runs G4EXP six times, each under one DOS-GL switch. The tag names
 the run's pictures (`E2C.PPM` is E2 under `DGL_COMBINER=1`):
@@ -154,7 +154,7 @@ TEXCTL2 write. The report compares each T picture's CRC with D's.
 
 When the Linux kernel leaves the dual-texture pipe (`mga_g400_emit_pipe`), it
 runs a sequence of its own: a dummy draw, DWGSYNC, then TEXCTL2 toggling
-dualtex. MGA-Glide's `docs/g400-dual-texture.md` §4 lists the steps. DOS-GL
+dualtex. RetroGPU's `docs/g400-dual-texture.md` §4 lists the steps. DOS-GL
 just rewrites TEXCTL2.
 
 The scene is a grid of 32 cells, dual and single interleaved with no sync
@@ -255,14 +255,14 @@ to this document. Turn each FAIL into three things:
 - an 86Box patch update, so the emulator models the silicon;
 - a new `g4exp.py loopa` baseline.
 
-Record each answer in MGA-Glide's `docs/g400-dual-texture.md` §7 as well.
+Record each answer in RetroGPU's `docs/g400-dual-texture.md` §7 as well.
 
 ## Results
 
 ### bench-g400: a G400 (2026-10-26)
 
 The card: an AGP G400 16 MB (`102B:0525` revision 05, subsystem `0338102B`, VBE 2.0 BIOS) in an IBM PC 300PL
-(Pentium II, 440BX) under GLOS on MS-DOS 7.1. DOS-GL main 6fd0969; the job is MGA-Glide's
+(Pentium II, 440BX) under GLOS on MS-DOS 7.1. DOS-GL main 6fd0969; the job was MGA-Glide's
 `out/bench/bench-g400/g4exp-1793037525`.
 
 E7 reads OPTION `50040120`, the value 86Box gives. It also reads OPTION2 `01003000` and OPTION3 `0190A419`;

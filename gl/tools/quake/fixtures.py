@@ -9,7 +9,7 @@ Sources:
   quake2  retail Quake 2, the owner's install:                   ~/BASEQ2 (QUAKE2_BASEQ2)
   lq      LibreQuake v0.09-beta lite.zip (BSD-3 art, GPL-2 progs), fetched and pinned
 
-Installed into MGA-Glide's fixture cache, which the dev container mounts:
+Installed into the platform's fixture cache, which the dev container mounts:
   $MGA_CACHE/fixtures/games/{quake/ID1, quake2/BASEQ2, lq/ID1}
 Every file is checked against tools/quake/fixtures.json (sizes and sha256 only).
 Files the ports do not use (the owner's CONFIG.CFG, Quake 2's Windows GAMEX86.DLL)

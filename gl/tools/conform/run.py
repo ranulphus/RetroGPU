@@ -11,8 +11,7 @@ and out/conform/summary-<card>.json. Exit status 0 when every test passes.
 
 On a bench PC (make conform-bench PC=bench-g400): --refs makes the Mesa
 references in the dev container, then --bench PC runs each test on the PC
-through MGA-Glide's tools/bench/run.py (the checkout in MGA_GLIDE, default
-~/MGA-Glide) on the host, one job per test, and compares as above. Results:
+through RetroGPU's tools/bench/run.py (this tree's parent) on the host, one job per test, and compares as above. Results:
 out/conform/<pc>/<test>/ and out/conform/summary-<pc>.json.
 """
 import argparse

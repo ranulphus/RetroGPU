@@ -8,7 +8,7 @@
 | Last updated | 2026-09-25 |
 | Supersedes | v0.1 (initial draft). Corrections are listed in Appendix A |
 | Licence | MIT |
-| Companion project | DOS-GL (`~/DOSGL`), which shares the Matrox HAL and test harness (D3) and is implemented after this project (D16, Appendix B) |
+| Companion project | DOS-GL (`gl/` in RetroGPU since 2026-11-08; `~/DOSGL` before), which shares the Matrox HAL and test harness (D3) and is implemented after this project (D16, Appendix B) |
 
 > Glide and 3dfx are trademarks of their respective owners. MGA-Glide is an independent, Glide-compatible implementation. It is not affiliated with or endorsed by 3dfx or its successors, and it contains no 3dfx code (D14).
 
@@ -77,7 +77,7 @@ Decisions taken during PRD refinement, recorded with rationale so they are revis
 |---|---|---|---|
 | **D1** | **Card order: G100 (proof of concept) → G200 → G450. Mystique-class parts are dropped.** | The G100 is the only Matrox part 86Box emulates with a usable 3D engine, and a physical G100 is on the bench, so one code path runs in the emulator and on silicon. The G100 cannot do true alpha blending (hardware limit, §5.3), so the G200 is the first card where games are expected to look right. The G450 adds dual texturing and more mip levels. | After M5 |
 | **D2** | **Host-side triangle setup on every chip in v1.0. WARP is an optional post-1.0 path for G200/G450.** *Amended:* the WARP drives the G400 family since the speed plan (W0-W6, `docs/g400-warp.md`). The owner brought the G200 forward on 2026-11-01, for DOS-GL's games; it passed on the real card on 2026-11-03 and is on by default, by PCI (`docs/g200-warp.md`). The CPU's setup stays on every chip as the fallback. | Host setup is fully documented in the public specs and is proven to work without WARP: X.org's `mga_exa.c` drives G400 `TEXTURE_TRAP` directly. The WARP instruction set was never published; only the microcode exists. The microcode is redistributable under Matrox's MIT-style `LICENSE.mga` (linux-firmware `matrox/g200_warp.fw`, `g400_warp.fw`), so licensing is not the blocker; debuggability is. | M3 exit, against measured triangle throughput |
-| **D3** | **A shared Matrox HAL and test harness with DOS-GL**, extracted into its own repository and consumed by both projects as a git submodule. **MGA-Glide builds the HAL first, for all three chips** (D16); DOS-GL adopts it afterwards. | PCI probing, aperture mapping, FIFO pacing, trapezoid setup, mode setting, crash recovery and both test loops are the same problem in both projects. **Consequence:** MGA-Glide must build with Open Watcom (D11) while DOS-GL builds with DJGPP, so the HAL is written in toolchain-neutral C with a thin per-toolchain shim for DPMI calls, port I/O and inline assembly, and CI builds it with both compilers. | M0 |
+| **D3** | **A shared Matrox HAL and test harness with DOS-GL**, extracted into its own repository and consumed by both projects as a git submodule. **MGA-Glide builds the HAL first, for all three chips** (D16); DOS-GL adopts it afterwards. *Amended 2026-11-08:* one repository, RetroGPU, holds the HAL and the harness at its root, DOS-GL in `gl/` and this runtime in `glide/` (the owner's decision, 2026-11-06): no submodule and no copy, and a HAL change passes both APIs' regression (`tools/regress.sh`) in one commit. | PCI probing, aperture mapping, FIFO pacing, trapezoid setup, mode setting, crash recovery and both test loops are the same problem in both projects. **Consequence:** MGA-Glide must build with Open Watcom (D11) while DOS-GL builds with DJGPP, so the HAL is written in toolchain-neutral C with a thin per-toolchain shim for DPMI calls, port I/O and inline assembly, and CI builds it with both compilers. | M0 |
 | **D4** | **86Box work is a project deliverable, carried as local patches only and never upstreamed:** G100 bug fixes and an emulated G200 device, applied to a pinned upstream commit. | Makes G200-specific code (true alpha blending, alpha test, texture LUT, mip levels, specular) developable without silicon. 86Box's contribution rules require a human author who owns each change, so the patches stay local. §12 defines the work package. | M4 |
 | **D5** | **Voodoo fidelity by default; enhancements available in v1.0 through a config file.** | Faithful output is the correctness baseline and what the reference-frame comparison (§11.4) checks. Enhancements such as higher resolutions, forced bilinear filtering, 32-bit Z and true colour are opt-in (§8). | — |
 | **D6** | **Performance reference: Pentium II 266–450 MHz.** | Era-matched to G100 and G200. Same reference class as DOS-GL, so HAL optimisation benefits both. | — |
@@ -661,7 +661,7 @@ Resolved during refinement: the binary format and toolchain (§6, D11), header l
 
 ## Appendix B: DOS-GL Follow-Up (D16)
 
-DOS-GL is implemented after MGA-Glide. When MGA-Glide's HAL, harness and 86Box work land, DOS-GL's PRD (`~/DOSGL/PRD.md`) is revised as follows. Each item names the DOS-GL section it affects.
+DOS-GL is implemented after MGA-Glide. When MGA-Glide's HAL, harness and 86Box work land, DOS-GL's PRD (now `gl/PRD.md`) is revised as follows. Each item names the DOS-GL section it affects.
 
 | # | DOS-GL item | Change after MGA-Glide lands |
 |---|---|---|
@@ -674,7 +674,7 @@ DOS-GL is implemented after MGA-Glide. When MGA-Glide's HAL, harness and 86Box w
 | B7 | D1, R1, §10: host-setup throughput unknown | Carry across MGA-Glide's measured triangle throughput and per-call overhead from M3 and M6, and its WARP decision. |
 | B8 | Open questions: BAR layout, G450 revision ID, VBE mode list, FIFO depth | Carry across MGA-Glide's answers (§4.2 on all three cards, Q6, Q8). |
 | B9 | §4.4, §9.3: CWSDPMI, near pointers, crash handlers owned by the program | The HAL's DPMI shim has a DJGPP/CWSDPMI variant. Its crash handling chains to previous handlers, which DOS-GL keeps as its own top-level handler. |
-| B10 | §12: DJGPP only | DOS-GL stays on DJGPP but consumes the HAL as a submodule. Note that the HAL is also built by Open Watcom and must stay toolchain-neutral. |
+| B10 | §12: DJGPP only | DOS-GL stays on DJGPP but consumes the HAL as a submodule (since 2026-11-08: the same repository, D3). Note that the HAL is also built by Open Watcom and must stay toolchain-neutral. |
 | B11 | D14: no Linux register harness | The `cuda6` G200eR2 (§4.4) is a Linux-accessible G200-family register reference, with MGA-Glide's rig tools in `tools/rig/`. |
 | B12 | §11.5 conformance suite | Share test infrastructure: the reference-frame comparison, the serial-log parser and the screenshot tooling are in the shared harness. |
 

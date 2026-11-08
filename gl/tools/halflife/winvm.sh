@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A ready-to-boot 86Box machine with Half-Life on DOS-GL, for MGA-Glide's
+# A ready-to-boot 86Box machine with Half-Life on DOS-GL, for RetroGPU's
 # patched 86Box (the Windows kit, or make 86box on Linux).
 #
 #   winvm.sh [CARD]          (default g450) -> dist/halflife-CARD-vm.zip

@@ -121,6 +121,14 @@ help:
 	@echo "header         regenerate glide/include/glide/glide2.h from glide/abi/"
 	@echo "setup-ow|setup-djgpp        install pinned toolchains"
 	@echo "loopa TEST=..  run a DOS test in 86Box (see tools/loopa)"
+	@echo "conform-ci     the Glide conformance suite on every card (glide/tools/conform)"
+	@echo "86box          the pinned, locally patched 86Box every part's Loop A runs"
+	@echo "gl-TARGET      a DOS-GL target in gl/ (make gl-lib, make gl-conform CARD=g400; make gl-help lists them)"
+	@echo "tools/regress.sh host|smoke|merge   the regression of every part"
+
+# DOS-GL (gl/) has its own Makefile: gl-TARGET runs TARGET there.
+gl-%:
+	$(MAKE) -C gl $*
 
 -include $(shell find build -name '*.d' 2>/dev/null)
 

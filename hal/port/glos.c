@@ -1,7 +1,7 @@
 /* glos.c - HAL port for GLOS's kernel (GLOS M7; PRD Appendix B).
  *
  * Built only inside GLOS, against its kernel headers, from this checkout
- * (GLOS's MGA_GLIDE), with the part of the HAL that uses
+ * (GLOS's RETROGPU), with the part of the HAL that uses
  * no FPU: PCI, the chip's capabilities, the FIFO, the engine, 2D drawing,
  * the cursor, the display start and the VRAM allocator. GLOS sets modes
  * with its own VBE code, so the real-mode calls and conventional memory

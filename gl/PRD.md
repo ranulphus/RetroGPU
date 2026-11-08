@@ -9,7 +9,7 @@
 | Primary consumer | ClassiCube (MS-DOS build) |
 | Licence | MIT/X11 |
 | Toolchain | DJGPP (GCC) cross-compiler, CWSDPMI |
-| Companion project | MGA-Glide (`~/MGA-Glide`), which built the shared Matrox HAL, test harness and 86Box work DOS-GL uses (D15; MGA-Glide PRD D16, Appendix B) |
+| Companion project | MGA-Glide (`glide/` in RetroGPU since 2026-11-08; `~/MGA-Glide` before), which built the shared Matrox HAL, test harness and 86Box work DOS-GL uses (D15; MGA-Glide PRD D16, Appendix B) |
 
 ---
 
@@ -90,7 +90,7 @@ Decisions taken during PRD refinement, recorded with rationale so they can be re
 | **D12** | **Serial logging, register write-trace/replay, and crash recovery are in-scope requirements**, not nice-to-haves. | On a platform with no memory protection and no debugger, these *are* the development environment. | — |
 | **D13** | **The Matrox G100 (`102B:1000`/`1001`) is a development-only HAL target: supported in the tree, exercised in 86Box, never listed as a supported card.** | It is the newest MGA part stock 86Box emulates (a `DEV_BRANCH` build), with textured trapezoids, z, dither and fog; its `ALPHACTRL` is **stipple alpha only**, in 86Box and on silicon, so it cannot provide GL blending. It shares the `AR`/`DR`/`TMR`/`DWGCTL` model the G400 inherits, so setup code developed against it transfers. It is not shipped because 8 MB, an older engine and no G400 features are not what the product promises. The chip-capability table it forces is needed for G200 anyway. | — |
 | **D14** | **Superseded (2026-09-27).** A Linux register harness exists after all: the cuda6 server's G200eR2 (`102B:0534`), reached through sysfs by MGA-Glide's `mgarig` (Loop C, §11.3a). It keeps its 3D engine and serves as a G200-family register reference; the G400 family stays on the DOS bench. | — |
-| **D15** | **The Matrox HAL, test harness, bench tooling and 86Box patches come from MGA-Glide.** DOS-GL builds them from MGA-Glide's checkout beside it (`MGA_GLIDE`, default `~/MGA-Glide`), from its main as it is: no copy, no pinned version (the owner's decision, 2026-11-02: before alpha everything is on main trunk). HAL changes are made in MGA-Glide and pass its regression, and DOS-GL's, first. | Built and tested once, shared by both projects (MGA-Glide PRD D3/D16). One version in flight: a HAL fix reaches DOS-GL at its next build. | HAL publication |
+| **D15** | **The Matrox HAL, test harness, bench tooling and 86Box patches come from MGA-Glide.** DOS-GL builds them from MGA-Glide's checkout beside it (`MGA_GLIDE`, default `~/MGA-Glide`), from its main as it is: no copy, no pinned version (the owner's decision, 2026-11-02: before alpha everything is on main trunk). HAL changes are made in MGA-Glide and pass its regression, and DOS-GL's, first. *Amended 2026-11-08:* DOS-GL is `gl/` in RetroGPU (the owner's decision, 2026-11-06), which holds the HAL and the harness at its root and the Glide runtime in `glide/`; DOS-GL builds them from its parent directory, and a HAL change passes the whole repository's regression (`tools/regress.sh`) before it reaches main. | Built and tested once, shared by both projects (MGA-Glide PRD D3/D16). One version in flight: a HAL fix reaches DOS-GL at its next build. | HAL publication |
 | **D16** | **Conformance references come from host OpenGL (Mesa OSMesa).** Each conformance program is plain GL 1.1 C, built for DOS against DOS-GL and for the Linux host against OSMesa; the host render is the reference. | An independent implementation of the same API, as the Voodoo is for MGA-Glide; references are regenerated rather than blessed by eye. The G450 readback becomes the release baseline once the bench runs. | — |
 
 ---
@@ -564,7 +564,7 @@ ClassiCube built with `CC_BUILD_GL11` against DOS-GL, replacing `CC_GFX_BACKEND_
 | Other toolchains | Open Watcom / DOS4GW explicitly out of scope for v1.0 |
 | Build system | Makefile; no autotools, no CMake |
 | Output | `libGL.a`, plus `GL/gl.h`, `GL/glext.h` (minimal) and `GL/dosgl.h` |
-| Shared code | Matrox HAL, harness, bench tooling and 86Box patches from MGA-Glide's checkout beside DOS-GL (D15). The HAL is also built by Open Watcom for MGA-Glide and stays toolchain-neutral |
+| Shared code | Matrox HAL, harness, bench tooling and 86Box patches from RetroGPU's root, this tree's parent (D15). The HAL is also built by Open Watcom for MGA-Glide and stays toolchain-neutral |
 | CI | GitHub Actions: cross-build, host-side unit tests, Loop A (patched 86Box, emulated G450/G400) running the conformance suite with screenshot and log artefacts |
 
 Consumers link with `-lGL` and include `<GL/gl.h>`. No dynamic symbol resolution — `GLContext_GetAddress` returns `NULL` and the consumer links directly.
@@ -580,7 +580,7 @@ Defined by verifiable exit criteria rather than dates (D11). Each milestone's ex
 ### M0 — Scaffolding
 
 - Repository layout, MIT licence with upstream attribution file, Makefile, DJGPP cross-toolchain setup documented and reproducible.
-- Shared HAL and harness from MGA-Glide's checkout (D15); the guest test shim and bench jobs work for DJGPP programs.
+- Shared HAL and harness from RetroGPU's root (D15); the guest test shim and bench jobs work for DJGPP programs.
 - Loop A (§11.2) and Loop B tooling (§11.3) from the shared harness; the bench dry run in 86Box.
 - Host-side unit test harness running in CI.
 

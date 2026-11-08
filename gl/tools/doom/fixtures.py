@@ -6,7 +6,7 @@
   fixtures.py --update   rewrite fixtures.json from ~/DOOM (a new copy of the data)
 
 Source: the owner's IWADs (DOOM.WAD, DOOM2.WAD, TNT.WAD, PLUTONIA.WAD...) in
-~/DOOM (DOOM_IWADS). Installed into MGA-Glide's fixture cache, which the dev
+~/DOOM (DOOM_IWADS). Installed into the platform's fixture cache, which the dev
 container mounts, as $MGA_CACHE/fixtures/games/doom/DOOM; Loop A puts it on D:
 as D:\\DOOM (games.json). Every file is checked against
 tools/doom/fixtures.json (sizes and sha256 only). Standard library only.

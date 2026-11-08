@@ -1,6 +1,6 @@
 /* combine.c - GL texture environments as the G400's combiner words
  * (TDUALSTAGE0/1). The values are Mesa's G400 driver's, which ran on real
- * G400s, collected with their sources in MGA-Glide's
+ * G400s, collected with their sources in RetroGPU's
  * docs/g400-dual-texture.md; unit 1's GL_BLEND words are derived there
  * (Mesa used the diffuse colour where GL means the previous unit). Stage 0
  * works on texture 0 and the iterated colour, stage 1 on texture 1 and

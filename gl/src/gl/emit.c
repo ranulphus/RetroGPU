@@ -41,13 +41,13 @@ static uint32_t tc2_extra;
  * reach before triangles are clipped (default 2000, the setup's range);
  * smaller clips more but keeps edge and texture gradients shorter. Edges
  * stay within 4000 pixels, which the HAL fits into the G200's 18-bit AR
- * fields (up to 8191; MGA-Glide docs/loop-c-results.md). */
+ * fields (up to 8191; RetroGPU's docs/loop-c-results.md). */
 static float guard_px = 2000.0f;
 static int skip_all;                  /* depth or alpha function NEVER, or no context */
 static float tri_offset;              /* glPolygonOffset for the triangle being drawn (depth steps) */
 static float guard_x, guard_y;
 /* The G200 and the G400 family: triangles set up by the chip's WARP engine
- * from the projected vertices instead of by setup_triangle (MGA-Glide
+ * from the projected vertices instead of by setup_triangle (RetroGPU's
  * docs/g400-warp.md, docs/g200-warp.md), unless DGL_WARP=0. Lines and
  * points, and any triangle after the WARP fails, go through setup_triangle. */
 static int warp_on;                   /* asked for, on a chip with a WARP */

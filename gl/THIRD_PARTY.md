@@ -6,6 +6,7 @@
 | `third_party/sdl/` | SDL3, pinned upstream submodule; `tools/sdl/patches/` adds OpenGL through DOS-GL and DOS fixes (`docs/sdl.md`) | zlib (SDL's own licence); the patches are offered under the same terms |
 
 Derived register definitions inside the HAL carry their upstream notices
-(X.org `mga` and Mesa/DRI `mga` drivers, MIT), as recorded in MGA-Glide.
+(X.org `mga` and Mesa/DRI `mga` drivers, MIT), as recorded in the HAL's sources
+(`hal/` at the repository root).
 No Matrox BIOS images, retail software or game data are committed; the
 86Box ROM set and Matrox's BIOS package are fetched into the local cache.
