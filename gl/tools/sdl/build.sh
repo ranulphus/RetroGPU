@@ -17,7 +17,7 @@ work=$root/build/sdl/src-$target
 prefix=$root/build/sdl/$target
 [ -f "$src/CMakeLists.txt" ] || { echo "sdl: submodule missing (git submodule update --init third_party/sdl)" >&2; exit 1; }
 # The installed library stays in place until the new one is ready: programs
-# that link against it while it rebuilds (Fifth Wheel builds against ~/DOSGL)
+# that link against it while it rebuilds (Fifth Wheel and Echoes build against RetroGPU's gl/)
 # see the old or the new, never none. Installed into $prefix.new, then swapped.
 rm -rf "$work" "$prefix.new"; mkdir -p "$work"
 (cd "$src" && git archive HEAD) | tar -x -C "$work"
