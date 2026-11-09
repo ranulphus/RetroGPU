@@ -17,6 +17,13 @@ opt=${MGA_OPT:-$HOME/.local/opt}; cache=${MGA_CACHE:-$HOME/.cache/mga-glide}
 caller=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)
 extra=()
 if [ -n "$caller" ] && [ "$caller" != "$repo" ]; then extra=(-v "$caller:$caller"); fi
+# A worktree's git data (and its submodules') lives in the main checkout's
+# .git: mount that as well, or git fails inside (build IDs, the submodules'
+# git archive). Nothing extra for a main checkout, whose .git is inside it.
+for top in "$repo" ${caller:+"$caller"}; do
+  common=$(git -C "$top" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+  case $common in ""|"$top"/*) ;; *) extra+=(-v "$common:$common");; esac
+done
 mkdir -p "$opt" "$cache"
 tty=(); [ -t 0 ] && [ -t 1 ] && tty=(-it)
 envs=()
