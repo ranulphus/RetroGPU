@@ -11,6 +11,9 @@
 #                             Glide game replays and the DOS-GL game ports:
 #                             before a merge to main; run it alone on the host
 #
+# ONLY="PATTERN ..." runs only the steps whose names match (shell patterns:
+# ONLY="replay-*" after a replay failed), with the tier's other steps skipped.
+#
 # Each step's log is out/regress/TIER-STAMP/STEP.log; the summary, with each
 # step's time, is printed and kept there as summary.txt. Exit status 0 when
 # every step passes. Steps run one at a time (Loop A's idle timeouts are
@@ -18,7 +21,7 @@
 # missing (the replays' traces in ~/.cache/mga-glide) is SKIP, not PASS.
 set -u
 tier=${1:-}
-case "$tier" in host|smoke|merge) ;; *) sed -n '2,19p' "$0" >&2; exit 2 ;; esac
+case "$tier" in host|smoke|merge) ;; *) sed -n '2,22p' "$0" >&2; exit 2 ;; esac
 root=$(cd "$(dirname "$0")/.." && pwd -P)
 cd "$root" || exit 1
 unset BOX86_DIR MGAHAL_DIR MGA_GLIDE
@@ -29,9 +32,14 @@ summary=$out/summary.txt
 fails=0
 echo "regress $tier: $(git log -1 --format='%h %s' | cut -c1-70)$(git diff --quiet HEAD -- || echo ' (dirty)')" | tee "$summary"
 
-# step NAME COMMAND...: run, time, log and record PASS/FAIL.
+# step NAME COMMAND...: run, time, log and record PASS/FAIL (unless ONLY leaves it out).
 step() {
     local name=$1; shift
+    if [ -n "${ONLY:-}" ]; then
+        local p hit=
+        for p in $ONLY; do case $name in $p) hit=1;; esac; done
+        [ -n "$hit" ] || return 0
+    fi
     local s=$SECONDS rc
     "$@" > "$out/$name.log" 2>&1; rc=$?
     local t=$(( SECONDS - s )) res=PASS
@@ -40,6 +48,24 @@ step() {
     [ $rc -eq 0 ] || tail -3 "$out/$name.log" | sed 's/^/      /' | tee -a "$summary"
 }
 skip() { printf '  %-28s %-10s %s\n' "$1" SKIP "$2" | tee -a "$summary"; }
+
+# replays NAME TRACE OVL FRAMES: one game's trace on the G200, G400 and G450
+# at once (each card's VM and its Voodoo reference run side by side; the
+# cards do not slow each other on this host), each card's result in the log.
+replays() {
+    local name=$1 trace=$2 ovl=$3 frames=$4 card pids=() rc=0
+    for card in g200 g400 g450; do
+        MGA_CARD=$card timeout 3000 tools/dev python3 tools/games/replay.py "$trace" --ovl-ref "$ovl" \
+            --frames "$frames" --name "regress-$name-$card" > "$out/replay-$name-$card.log" 2>&1 &
+        pids+=($!)
+    done
+    for card in g200 g400 g450; do
+        wait "${pids[0]}" || rc=1
+        pids=("${pids[@]:1}")
+        echo "$card: $(tail -1 "$out/replay-$name-$card.log")"
+    done
+    return $rc
+}
 
 # Loop A's status file for a run.py --name: PASS wanted.
 loopa_pass() {
@@ -73,18 +99,18 @@ if [ "$tier" = merge ]; then
     step loopa-twodtest     tools/dev make -s loopa-twodtest
     step hreplay-check      tools/dev make -s hreplay-check
     step glide-conform-ci   tools/dev make -s conform-ci
-    for card in g200 g400 g450; do
-        if [ -f "$cache/traces/gta-voodoo-300.bin" ] && [ -f "$cache/fixtures/ovl/gta.ovl" ]; then
-            step replay-gta-$card env MGA_CARD=$card timeout 3000 tools/dev python3 tools/games/replay.py \
-                "$cache/traces/gta-voodoo-300.bin" --ovl-ref "$cache/fixtures/ovl/gta.ovl" \
-                --frames 60,150,240,295 --name regress-gta-$card
-        else skip replay-gta-$card "no GTA trace or OVL in $cache"; fi
-        if [ -f "$cache/traces/sr-389.bin" ] && [ -f "$cache/fixtures/ovl/sr.ovl" ]; then
-            step replay-sr-$card env MGA_CARD=$card timeout 3000 tools/dev python3 tools/games/replay.py \
-                "$cache/traces/sr-389.bin" --ovl-ref "$cache/fixtures/ovl/sr.ovl" \
-                --frames 60,150,250,300,340,380 --name regress-sr-$card
-        else skip replay-sr-$card "no Screamer Rally trace or OVL in $cache"; fi
-    done
+    # The acceptance games' traces through Glide, three cards at once. Screamer
+    # Rally's 389 frames stop at 240 (the owner's choice, 2026-11-09): loading
+    # screens to frame 95, the race from 96; every call pattern of the trace has
+    # appeared by frame 99, and its first textures written over older ones (the
+    # runtime must see the change) are at frames 197-234. Frames 241-389 repeat
+    # those with more track at about 3 s a frame in 86Box's Matrox model.
+    if [ -f "$cache/traces/gta-voodoo-300.bin" ] && [ -f "$cache/fixtures/ovl/gta.ovl" ]; then
+        step replay-gta replays gta "$cache/traces/gta-voodoo-300.bin" "$cache/fixtures/ovl/gta.ovl" 60,150,240,295
+    else skip replay-gta "no GTA trace or OVL in $cache"; fi
+    if [ -f "$cache/traces/sr-389.bin" ] && [ -f "$cache/fixtures/ovl/sr.ovl" ]; then
+        step replay-sr replays sr "$cache/traces/sr-389.bin" "$cache/fixtures/ovl/sr.ovl" 60,150,200,240
+    else skip replay-sr "no Screamer Rally trace or OVL in $cache"; fi
     step gl-build-ports     make -s -C gl rig sdl sdl-examples sdl-host quake halflife doom classicube
     for card in g450 g400 g200; do
         step gl-conform-$card make -s -C gl conform CARD=$card
