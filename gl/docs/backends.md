@@ -1,7 +1,7 @@
 # DOS-GL with more than one back end: the software renderer first, a plan
 
-**Status (2026-11-06): plan v1, approved by the owner. B0 next, beside GLOS's phase A; B1 once DOS-GL's merge into
-MGA-Glide has landed. Nothing built yet.**
+**Status (2026-11-09): plan v1, approved by the owner. B0 written and reviewed (`docs/backend-interface.md`); the
+merge into RetroGPU has landed (2026-11-08), so B1 can start here. Nothing built yet.**
 
 The owner's decision (2026-11-06), from GLOS's v1 route (GLOS `docs/v1-route.md`): **DOS-GL gains a software
 renderer**, so that DOS-GL programs run on any graphics card. GLOS v1 needs it for two things:
@@ -30,8 +30,9 @@ those back ends too, and built alongside GLOS v1's phases B and C, so that it is
 - **`dglInit` refuses to start without a Matrox card** (D4).
 - **Conformance (D16)** compares each test's DOS render with the same test built on the host against Mesa's OSMesa,
   so the references don't depend on the card. A software renderer is judged the same way.
-- **DOS-GL is about to merge into MGA-Glide** (the owner's choice, 2026-11-06). This plan's file moves have to fit
-  around that merge (see [Order](#order-and-coordination)).
+- **DOS-GL is RetroGPU's `gl/`** since 2026-11-08 (the owner's choice: one repository for the HAL, GL and Glide).
+  B1 works here, and its device level sits beside the HAL at RetroGPU's root (B0, the owner's answer of
+  2026-11-09).
 
 ## The design: a back-end interface
 
@@ -59,7 +60,7 @@ include the WARP, AGP, dual texture, the HAL's 2D engine and GLOS's GPU lock. Th
 - **B0, the interface in detail (a document):** every call the GL layer makes into Matrox code today, listed, and
   the interface's calls each maps to. Reviewed with the owner before B1.
 - **B1, the Matrox code behind the interface, with nothing changed:**
-  - `src/backend/mga/` (or the merged repository's equivalent): the register validation, the texture layouts, the
+  - `gl/src/backend/mga/` and the Matrox device beside the HAL (B0's two levels): the register validation, the texture layouts, the
     triangle hand-off, the surfaces and present.
   - **The test: pixel for pixel the same.** DOS-GL's conformance on the G200, G400 and G450 in Loop A; the games
     (ClassiCube, GLQuake, Quake 2, Half-Life); GLOS's windowed suites; DOSBench's DOS-GL timings within noise.
@@ -109,13 +110,12 @@ include the WARP, AGP, dual texture, the HAL's 2D engine and GLOS's GPU lock. Th
 
 ## Order and coordination
 
-- **After the merge into MGA-Glide:** B1 moves files across the GL layer, so it waits for that merge to land, and
-  works in the merged repository. B0 can be written before.
+- **In RetroGPU:** the merge has landed (2026-11-08), so B1 moves files across the GL layer there.
 - **With GLOS's API 2.0:** GLOS's phase B moves DOS-GL's GLOS path to API 2.0 at the same time. B1 and that move
   touch the same files (`src/dgl/glos.c`, the window surfaces). Doing B1 first gives GLOS's phase B a cleaner place
   to change (the GLOS window surface in one back-end call).
 - **Ready by GLOS's phase D,** for the screensavers.
-- **Merges and pushes** in DOS-GL (or MGA-Glide) with the owner's approval, each after the full regression (B1:
+- **Merges and pushes** in RetroGPU with the owner's approval, each after the full regression (B1:
   pixel-identical on every card).
 
 ## The owner's answers (2026-11-06)

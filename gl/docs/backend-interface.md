@@ -1,6 +1,8 @@
 # DOS-GL's back-end interface (step B0)
 
-**Status (2026-11-06): B0 v1, reviewed with the owner with GLOS's phase A; their answers written in.**
+**Status (2026-11-09): B0 v2.** Reviewed with the owner with GLOS's phase A, and their answers written in: the seam
+in clip space, stencil in B2, and the interface in two levels, a device beside the HAL and GL's drawing back end
+(2026-11-09, after the merge into RetroGPU).
 
 Step B0 of the software renderer's plan (`docs/backends.md`):
 - every call DOS-GL's GL layer makes into Matrox code today, listed;
@@ -10,7 +12,8 @@ B1 then moves the Matrox code behind this interface, pixel for pixel the same. B
 against it.
 
 The census is of DOS-GL main 7a277d1: `src/gl` and `src/dgl`, against MGA-Glide main's HAL headers
-(`hal/include/mga/`).
+(`hal/include/mga/`). These are now RetroGPU's `gl/src/gl`, `gl/src/dgl` and `hal/include/mga/`, unchanged by the
+merge.
 
 ## What the census found
 
@@ -31,7 +34,7 @@ The census is of DOS-GL main 7a277d1: `src/gl` and `src/dgl`, against MGA-Glide 
    - `prof.h`: profiling stages;
    - `serial.h`: the log on COM1.
 
-   In the merged repository they are the HAL's platform part, not Matrox code.
+   In RetroGPU they are the HAL's platform part, not Matrox code.
 3. **Sixteen-bit colour is assumed outside the back end in three places:**
    - `glClear` packs RGB565 (`emit.c`);
    - `glReadPixels` decodes it from the framebuffer (`readpix.c`; `glCopyTex*Image2D` and snapshots read through
@@ -54,32 +57,104 @@ The census is of DOS-GL main 7a277d1: `src/gl` and `src/dgl`, against MGA-Glide 
    Both run without it, as they do today. The owner chose stencil in B2 from its start all the same
    ([Stencil in B2](#stencil-in-b2)), for those two programs' sake.
 
-## The interface
+## The interface: two levels (the owner's answer, 2026-11-09)
 
-One table of functions, `dgl_backend` (in `src/gl/backend.h`, beside `gl_draw.h`), chosen at `dglInit`. Each back
-end lives in its own folder:
-- `src/backend/mga/` (B1);
-- `src/backend/soft/` (B2);
-- later `src/backend/tnt2/`.
+RetroGPU's GL, Glide and GLOS's desktop all use the same HAL calls for the card itself:
+- **GL** (this census): finding the card, modes, buffers, flips and scaled presents, video memory, fills, sync,
+  teardown.
+- **Glide** (`glide/src`): the same groups (`mga_find`, `vbe_plan_mode`, `vbe_set_display_start`, `engine_fill`,
+  `engine_present`, `engine_sync`, `engine_reset`, `dac_set_ramp`), and the same triangle setup and WARP.
+- **GLOS's desktop** (`kernel/gfx`): the card, the display, VRAM, the 2D engine (fills, copies, image uploads, mono
+  expansion) and the cursor.
 
-In the merged repository, the same under its GL tree.
+So the interface has two levels:
+- **The device**, beside the HAL, for all three;
+- **GL's drawing back end**, in `gl/`, on top of a device.
+
+```
+  GL (gl/src/gl, gl/src/dgl)        Glide (glide/)        GLOS's desktop (GLOS)
+        |                                 |                       |
+  GL's drawing back end (gl/):            |   (later)             |   (later)
+  clip-space triangles, state, textures   |                       |
+        |                                 |                       |
+  ------+---------------------------------+-----------------------+------
+  the device (hal/): the card, modes, surfaces, present, memory, 2D, cursor, sync, teardown
+  ----------------------------------------------------------------------
+     Matrox (today's HAL)      software (VBE, a GLOS window)      later: TNT2, Rage
+```
+
+### The device (`hal/`)
+
+One table of functions a device gives, chosen when a program opens one. The `rg_` prefix (RetroGPU's) and the
+structures' fields are settled in B1. The software device and the Matrox one come
+first. The exact folders are settled in B1, beside the merge plan's later move of the Matrox HAL to `hal/mga/`.
+
+```c
+typedef struct rg_device {
+    const char *name;                         /* "mga", "soft": DGL_DEVICE's names */
+
+    /* Finding and capabilities */
+    int  (*probe)(void);                      /* 0: it can run on this PC */
+    void (*caps)(rg_caps *c);                 /* memory, colour formats, flips, scaling, a hardware cursor, 2D */
+
+    /* Modes and surfaces */
+    int  (*modes)(rg_mode *out, int max);     /* full-screen modes, with the device's rules (pitches, memory, scaling) */
+    int  (*open)(const rg_open *o);           /* full screen: the mode, colour buffers (and a render buffer for scaled
+                                                 modes), a depth buffer, cleared; 0, or -1 with the reason */
+    int  (*open_glos)(const rg_open *o);      /* in a GLOS window; 1: not possible here, try full screen */
+    void (*close)(void);                      /* the program's end and the fault path's teardown: safe twice */
+    int  (*alloc)(uint32_t bytes, rg_mem *m); /* the device's memory: VRAM on a card, system memory in software */
+    void (*free)(rg_mem *m);
+
+    /* Showing */
+    void (*swap)(int vsync);                  /* show the back buffer: a flip, a scaled present, or a copy to a window */
+    void (*present_front)(void);              /* single-buffered drawing in a scaled mode */
+    void (*gamma)(const uint16_t ramp[3][256]);
+
+    /* 2D, on any surface the device has */
+    void (*target)(const rg_surface *s);
+    void (*fill)(int x, int y, int w, int h, uint32_t colour);
+    void (*copy)(int sx, int sy, int dx, int dy, int w, int h);
+    void (*image)(int x, int y, int w, int h, const void *pixels, int pitch);   /* system memory to the surface */
+    void (*mono)(int x, int y, int w, int h, const uint8_t *bits, uint32_t fg, uint32_t bg);
+    void (*cursor)(const rg_cursor *c);       /* load, colours, show, move: NULL where the device has none */
+
+    /* Order and ownership */
+    int  (*sync)(void);                       /* everything drawn: 0, or -1 timed out */
+    void (*resync)(void);                     /* someone else had the device (GLOS's lock): forget what is cached */
+    void (*enter)(void);                      /* GLOS's GPU lock taken, before work with the device */
+    void (*quiet)(void);                      /* ... and no device work for a while: the lock may go */
+
+    /* Reading and diagnostics */
+    int  (*read)(const rg_surface *s, int x, int y, int w, int h, uint8_t *rgba, int stride);  /* RGBA8 */
+    void (*stats)(rg_stats *s);
+    void (*crash)(void);                      /* the fault report's device lines */
+    void (*info)(rg_info *i);                 /* dglGetDeviceInfo's fields, and Glide's and GLOS's */
+} rg_device;
+```
+
+- **The software device** draws its 2D with the CPU:
+  - full screen on a VBE linear or banked framebuffer;
+  - in a GLOS window through API 2.0's DRAW SOFT.
+- **The Matrox device** is today's HAL behind the table: no new code, only adapters, so nothing that draws changes.
+- **Who uses it:**
+  - **In B1:** GL only.
+  - **Later:** Glide's and GLOS's desktop's moves onto it each have their own plans, when a second vendor's card makes
+    them worth it. Until then both keep calling the Matrox HAL directly, as today.
+
+### GL's drawing back end (`gl/`)
+
+One table of functions for GL's drawing, chosen with the device at `dglInit`. In clip space, as today's sink
+(settled at the review):
+- `gl/src/backend/mga/` (B1);
+- `gl/src/backend/soft/` (B2);
+- later `gl/src/backend/tnt2/`.
 
 ```c
 typedef struct dgl_backend {
-    const char *name;                         /* "mga", "soft": DGL_DEVICE's names */
-
-    /* Capabilities */
-    int  (*probe)(void);                      /* 0: it can run on this PC */
-    void (*caps)(dgl_caps *c);                /* after open: what glGet and the extensions report */
-
-    /* Modes and surfaces */
-    int  (*modes)(DGLMode *out, int max);     /* full-screen modes (dglEnumModes) */
-    int  (*open)(const DGLConfig *cfg);       /* full screen: mode, buffers, cleared; 0 or -1 with dgl_set_error */
-    int  (*open_glos)(const DGLConfig *cfg);  /* in a GLOS window; 1: not possible here, try full screen */
-    void (*close)(void);                      /* dglShutdown, and the fault path's teardown: safe twice */
-    void (*swap)(void);                       /* show the back buffer (vsync as dgl_ctx says) */
-    void (*present_front)(void);              /* single-buffered or GL_FRONT drawing in a scaled mode */
-    void (*draw_buffer)(int front);           /* glDrawBuffer: where drawing goes */
+    const char *name;
+    const rg_device *dev;                     /* the device it draws on */
+    void (*caps)(dgl_caps *c);                /* what glGet and the extensions report */
 
     /* Drawing: today's sink, in clip space */
     int  (*begin)(void);                      /* validate dgl_gl (its dirty groups); 0: draw nothing */
@@ -88,22 +163,14 @@ typedef struct dgl_backend {
     void (*point)(const dgl_cvtx *a);
     void (*end)(void);
     int  (*fast)(GLenum mode, GLsizei count, const GLint *idx, GLint first);   /* optional (NULL) */
-    void (*clear)(GLbitfield mask);           /* colour, depth (and stencil): dgl_gl's values, scissor, masks */
-    int  (*finish)(void);                     /* everything drawn: 0, or -1 timed out (glFinish, before reads) */
+    void (*clear)(GLbitfield mask);           /* colour, depth, stencil: dgl_gl's values, scissor, masks */
+    void (*draw_buffer)(int front);           /* glDrawBuffer: where drawing goes */
 
     /* Textures */
     int  (*tex_ready)(dgl_texture *t);        /* made drawable from its levels: 0 drawable */
     void (*tex_sub)(dgl_texture *t, int level, int x, int y, int w, int h);    /* a rectangle changed */
     void (*tex_free)(dgl_texture *t);         /* its back-end part gone */
     void (*tex_reset)(void);                  /* every texture's back-end part gone (context made again) */
-
-    /* Reading */
-    int  (*read)(int front, int x, int y, int w, int h, unsigned char *rgba, int stride);  /* RGBA8, GL rows */
-
-    /* Diagnostics */
-    void (*stats)(dgl_be_stats *s);           /* DGL_STATS, DGL_FRAMES, dglGetStats */
-    void (*crash)(void);                      /* the fault report's back-end lines */
-    void (*device_info)(DGLDeviceInfo *d);    /* dglGetDeviceInfo */
 } dgl_backend;
 ```
 
@@ -112,10 +179,15 @@ typedef struct dgl_backend {
   - texture units (1, or 2), the largest texture, mipmap levels, paletted textures;
   - colour bits per channel, depth bits, stencil bits;
   - what is exact and what is approximated (fog per pixel or per vertex), for the conformance tolerances.
-- **The GL layer reads `caps` and never the HAL's `mga` record.**
-- **GLOS's GPU lock** (`DGL_GPU_ENTER`, `DGL_GPU_QUIET`) becomes the Matrox back end's own business inside its
-  calls. The GL layer's two uses (`texture.c`'s conversions, `readpix.c`'s read) are inside `tex_ready`, `tex_sub`
-  and `read`.
+- **The GL layer reads `caps` (and the device's) and never the HAL's `mga` record.**
+- **What GL asks of the device directly:**
+  - modes (`dglEnumModes`), opening and closing;
+  - swaps (`dglSwapBuffers`) and the scaled present (`glFlush`, `glFinish`);
+  - `sync` (`glFinish`, before reads);
+  - `read` (`glReadPixels`, snapshots), the crash lines, `dglGetDeviceInfo`.
+- **GLOS's GPU lock** (`DGL_GPU_ENTER`, `DGL_GPU_QUIET`) becomes the device's `enter` and `quiet`, called inside the
+  back end's and the device's own calls. The GL layer's two uses (`texture.c`'s conversions, `readpix.c`'s read)
+  are inside `tex_ready`, `tex_sub` and `read`.
 
 ### Shared helpers (the GL layer's, for any back end)
 
@@ -135,11 +207,18 @@ typedef struct dgl_backend {
 
 ## The census, file by file
 
-Every HAL name the GL layer uses today, and where it goes. "Platform" means it stays shared.
+Every HAL name the GL layer uses today, and where it goes. "Platform" means it stays shared. The calls named
+below are of the two levels:
+- the device's: `probe`, `modes`, `open`, `open_glos`, `close`, `swap`, `present_front`, `sync`, `read`, `crash`,
+  `info` and the device part of `stats`;
+- GL's drawing back end's: the rest.
+
+`finish` below is the device's `sync`, and `device_info` its `info`. The census's paths are `gl/`'s (`src/gl/emit.c`
+is RetroGPU's `gl/src/gl/emit.c`).
 
 ### `src/gl/emit.c` (1,350 lines): the drawing back end today
 
-- **Moves whole to `src/backend/mga/`.** Its functions become the back end's begin, triangle, line, point, end,
+- **Moves whole to `gl/src/backend/mga/`.** Its functions become the back end's begin, triangle, line, point, end,
   fast and clear.
 - **Its HAL names:**
   - the WARP: `warp_now`, `warp_since_cpu`, `warp_on`, `warp_form`, `warp_vertices`, `warp_tex`, `warp_tex_sizes`,
