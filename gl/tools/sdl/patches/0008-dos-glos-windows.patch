@@ -113,7 +113,7 @@ index 0000000..1c7f9c1
 +#endif // SDL_PLATFORM_DOS
 diff --git m/src/core/dos/SDL_glos.h m/src/core/dos/SDL_glos.h
 new file mode 100644
-index 0000000..3aad7a8
+index 0000000..881fcdb
 --- /dev/null
 +++ m/src/core/dos/SDL_glos.h
 @@ -0,0 +1,230 @@
@@ -304,7 +304,7 @@ index 0000000..3aad7a8
 +    unsigned size, handle, pixels, pitch;
 +    int w, h;
 +    GLOS_Format format;
-+} GLOS_Pixels;
++} GLOS_PixelsInfo;
 +
 +typedef struct
 +{
@@ -437,7 +437,7 @@ index 9d0cf9f..5b4a01d 100644
  #endif // SDL_dosvideo_h
 diff --git m/src/video/dos/SDL_glosvideo.c m/src/video/dos/SDL_glosvideo.c
 new file mode 100644
-index 0000000..67a0140
+index 0000000..11121c7
 --- /dev/null
 +++ m/src/video/dos/SDL_glosvideo.c
 @@ -0,0 +1,643 @@
@@ -586,7 +586,7 @@ index 0000000..67a0140
 +static bool GLOS_Pixels(SDL_Window *window)
 +{
 +    SDL_WindowData *wd = window->internal;
-+    GLOS_Pixels g;
++    GLOS_PixelsInfo g;
 +    SDL_zero(g);
 +    g.size = sizeof(g);
 +    g.handle = wd->glos_id;
