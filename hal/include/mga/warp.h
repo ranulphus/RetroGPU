@@ -89,7 +89,7 @@ extern uint32_t warp_tris, warp_failures, warp_dma_kicks, warp_seqs, warp_seqs_t
  * window by the CPU. Read at the first warp_select. */
 extern int warp_use_dma;
 /* 1 (default): write-combining rings fetched by AGP cycles when GLOS gives
- * them (GLOS_FN_CACHE, docs/g400-warp.md); 0: cached rings, PCI cycles. The
+ * them (GLOS's DRAW CACHE, docs/g400-warp.md); 0: cached rings, PCI cycles. The
  * G200 keeps cached rings and PCI unless warp_agp_rate is set (its AGP drew
  * nothing on the real card: docs/g200-warp.md). */
 extern int warp_use_agp;

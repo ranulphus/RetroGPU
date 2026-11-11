@@ -365,8 +365,10 @@ void sys_unhook_exit(void)
     exit_on = 0;
 }
 
-/* GLOS_FN_CACHE (sys.h): through the entry DPMI 0A00h "GLOS" gives (DOS/4GW
- * is then GLOS's DPMI client). */
+/* GLOS's DRAW CACHE (sys.h; API 2.0, for any program): through the entry DPMI
+ * 0A00h "GLOS" gives (DOS/4GW is then GLOS's DPMI client). EAX the call (2.0's
+ * GLOS_FN(DRAW, 10)), EBX its structure: its size, the address, the bytes, the
+ * type (1: write-combining). */
 static struct { uint32_t off; uint16_t sel; } glos_entry;
 static int glos_found;                  /* 1 GLOS, -1 none */
 int sys_cache_wc_err;
@@ -399,6 +401,10 @@ int sys_cache_wc(uint32_t lin, uint32_t bytes)
         sys_cache_wc_err = -1;
         return -1;
     }
-    sys_cache_wc_err = glos_far(&glos_entry, 33, lin, bytes, 1);   /* GLOS_FN_CACHE, GLOS_CACHE_WC */
+    {
+        static struct { uint32_t size, address, bytes, type; } q;
+        q.size = sizeof q, q.address = lin, q.bytes = bytes, q.type = 1;       /* GLOS_CACHE_WC */
+        sys_cache_wc_err = glos_far(&glos_entry, 0x0002020Aul, (uint32_t)&q, 0, 0);    /* GLOS_DRAW_CACHE */
+    }
     return sys_cache_wc_err ? -1 : 0;
 }

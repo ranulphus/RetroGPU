@@ -216,14 +216,17 @@ void sys_unhook_exit(void)
 
 void sys_terminate(int code) { exit(code); }
 
-/* GLOS_FN_CACHE (sys.h): through the entry DPMI 0A00h "GLOS" gives. */
+/* GLOS's DRAW CACHE (sys.h; API 2.0, for any program): through the entry DPMI 0A00h "GLOS" gives. EAX the
+   call (2.0's GLOS_FN(DRAW, 10)), EBX its structure: its size, the address, the bytes, the type (1: write-
+   combining); the carry flag says it failed, with GLOS's error in EAX. */
 int sys_cache_wc_err;
 int sys_cache_wc(uint32_t lin, uint32_t bytes)
 {
     static struct { unsigned long off; unsigned short sel; } __attribute__((packed)) entry;
     static int found;                   /* 1 GLOS, -1 none */
     __dpmi_paddr p;
-    unsigned a = 33, b = lin, c = bytes, d = 1;     /* GLOS_FN_CACHE, GLOS_CACHE_WC */
+    static struct { unsigned size, address, bytes, type; } q;
+    unsigned a = 0x0002020Au, b = (unsigned)&q, c = 0, d = 0;      /* GLOS_DRAW_CACHE */
     unsigned char failed;
     if (!found) {
         found = -1;
@@ -237,6 +240,7 @@ int sys_cache_wc(uint32_t lin, uint32_t bytes)
         sys_cache_wc_err = -1;
         return -1;
     }
+    q.size = sizeof q, q.address = lin, q.bytes = bytes, q.type = 1;       /* GLOS_CACHE_WC */
     __asm__ __volatile__("lcall *%[e]\n\tsetc %[f]"
                          : "+a"(a), "+b"(b), "+c"(c), "+d"(d), [f] "=m"(failed)
                          : [e] "m"(entry)

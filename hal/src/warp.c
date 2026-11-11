@@ -479,7 +479,7 @@ static void on_reset(void)
 }
 
 /* AGP (docs/g400-warp.md): the channels fetch by AGP cycles, which don't
- * snoop the CPU's caches, so only from write-combining rings (GLOS_FN_CACHE).
+ * snoop the CPU's caches, so only from write-combining rings (GLOS's DRAW CACHE).
  * On: the target (the host bridge's AGP capability) first, then the card
  * (AGP_CMD, F8h), at the fastest rate both have (2x or 1x) with sideband
  * addressing if both have it; the card's request queue the bridge's depth.
