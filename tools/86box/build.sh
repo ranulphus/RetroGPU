@@ -49,8 +49,10 @@ roms=$BOX86_DIR/roms
 # The BF6 and Matrox ROMs for the Pentium II profile; the Shuttle HOT-433A and
 # the S3 Trio64V2/DX for the 486 profiles (run.py --machine, --card vbe); the
 # Crystal CS423x cards' Plug and Play data (run.py --sound cs4232, cs4235,
-# cs4236b: 86Box offers them only when it is there; GLOS's crystal.c).
-rom_dirs="/machines/bf6/ /video/matrox/ /machines/hot433/ /video/s3/ /sound/crystal/"
+# cs4236b: 86Box offers them only when it is there; GLOS's crystal.c); the S3
+# ViRGE/DX's generic BIOS (run.py --card virge: bench C's card, the first non-Matrox
+# back end, gl/docs/backends.md).
+rom_dirs="/machines/bf6/ /video/matrox/ /machines/hot433/ /video/s3/ /sound/crystal/ /video/s3virge/"
 if [ "$(cat "$roms/.commit" 2>/dev/null)" != "$ROMS_COMMIT" ]; then
   rm -rf "$roms"
   git init -q "$roms"
@@ -82,7 +84,7 @@ if [ ! -s "$mbios/900-33.bin" ] || [ ! -s "$mbios/897-21.bin" ] || [ ! -s "$mbio
   echo "86box: Matrox BIOSes in $mbios"
 fi
 for f in machines/bf6/Beh_70.bin video/matrox/productiva8mbsdr.BIN video/matrox/mgaglide/900-33.bin \
-         machines/hot433/2A4X5H21.BIN video/s3/86c775_2.bin; do
+         machines/hot433/2A4X5H21.BIN video/s3/86c775_2.bin video/s3virge/86c375_1.bin; do
   [ -s "$roms/$f" ] || { echo "86box: missing ROM $f" >&2; exit 1; }
 done
 echo "86box: ready ($BOX86_DIR/bin/86Box, key $key)"

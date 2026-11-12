@@ -40,7 +40,9 @@ CWSDPMI = os.path.join(DJGPP_PREFIX, "dos", "CWSDPMI.EXE")
 # Video cards the harness can fit: 86Box internal name, config section. The
 # Matrox cards are AGP in 86Box, so only the BF6 takes them, except for the
 # PCI G200, G400 and G450 of local patch 0116 (GLOS D38), which any profile
-# takes; "vbe" is a generic VESA 2.0 card with a linear framebuffer.
+# takes; "vbe" is a generic VESA 2.0 card with a linear framebuffer; "virge" is
+# the S3 ViRGE/DX (86C375, PCI, generic BIOS, 4 MB): bench C's card, the first
+# non-Matrox back end (gl/docs/backends.md).
 CARDS = {
     "g100": ("productiva_g100", "Matrox Productiva G100"),
     "g200": ("millennium_g200", "Matrox Millennium G200 (MGA-Glide emulation)"),
@@ -50,6 +52,7 @@ CARDS = {
     "g400pci": ("millennium_g400_pci", "Matrox Millennium G400 PCI (MGA-Glide emulation)"),
     "g450pci": ("millennium_g450_pci", "Matrox Millennium G450 PCI (MGA-Glide emulation)"),
     "vbe": ("s3_trio64v2dx_pci", "S3 Trio64V2/DX PCI"),     # "Generic" BIOS: S3 86C775 with VBE 2.0
+    "virge": ("virge_dx_pci", "S3 ViRGE/DX PCI"),           # BIOS variant virge375_pci (the default)
 }
 MATROX = ("g100", "g200", "g400", "g450")                   # (AGP)
 MATROX_PCI = ("g200pci", "g400pci", "g450pci")
@@ -238,7 +241,7 @@ def config_text(a, serial, cimg, bootimg, extra_hdd, tail=""):
         "@VOODOO@": "1" if a.voodoo else "0",
         "@VOODOO_RECOMPILER@": str(a.voodoo_recompiler),
         "@VOODOO_THREADS@": str(a.voodoo_threads),
-        "@G100_MB@": str(4 if a.card == "vbe" else max(a.g100_mb, 16) if a.card in ("g400", "g450", "g400pci", "g450pci")
+        "@G100_MB@": str(4 if a.card in ("vbe", "virge") else max(a.g100_mb, 16) if a.card in ("g400", "g450", "g400pci", "g450pci")
                          else a.g100_mb),
         # vpc.py passes a minimal options object: these have defaults.
         "@MEM_KB@": str(getattr(a, "mem", 64) * 1024),

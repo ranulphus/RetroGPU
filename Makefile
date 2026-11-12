@@ -76,6 +76,8 @@ DJ_SRC_FPCHECK := tests/hal/fpcheck.c
 DJ_SRC_TWODTEST := tests/hal/twodtest.c tests/hal/sw2d.c
 DJ_SRC_WARPTRI := tests/hal/warptri.c
 DJ_SRC_CLOCKMON := tests/hal/clockmon.c
+# The S3 ViRGE/DX's bring-up (tests/virge, gl/docs/backends.md): PCI, IDs, the BIOS's VBE modes, the linear window.
+DJ_SRC_VPROBE := tests/virge/vprobe.c
 build/djgpp/HOOKS.EXE: tests/hal/hooks.c
 build/djgpp/SCALE.EXE: tests/hal/scale.c
 build/djgpp/HELLO.EXE: tests/shim/hello.c
@@ -83,6 +85,7 @@ build/djgpp/PROBE.EXE: tests/hal/probe.c
 build/djgpp/TWODTEST.EXE: tests/hal/twodtest.c tests/hal/sw2d.c tests/hal/sw2d.h
 build/djgpp/WARPTRI.EXE: tests/hal/warptri.c
 build/djgpp/CLOCKMON.EXE: tests/hal/clockmon.c
+build/djgpp/VPROBE.EXE: tests/virge/vprobe.c
 build/djgpp/STACKPG.EXE: tests/shim/stackpg.c
 build/djgpp/MOUSETST.EXE: tests/shim/mousetst.c
 build/djgpp/JOYTEST.EXE: tests/shim/joytest.c
