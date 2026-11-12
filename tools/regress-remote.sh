@@ -44,7 +44,8 @@ echo "regress-remote: syncing ${#present[@]} paths to $host"
 ( cd "$HOME" && rsync -aR --delete --exclude __pycache__ "${present[@]}" "$host:" )
 
 # ---- the commit, checked out there --------------------------------------------
-ssh -o BatchMode=yes "$host" '[ -d rgpu-regress.git ] || git init -q --bare rgpu-regress.git'
+ssh -o BatchMode=yes "$host" '[ -d rgpu-regress.git ] || git init -q --bare rgpu-regress.git
+    git --git-dir=rgpu-regress.git symbolic-ref HEAD refs/heads/regress'
 git push -q --force "$host:rgpu-regress.git" "$commit:refs/heads/regress"
 echo "regress-remote: $tier at $(git log -1 --format='%h %s' "$commit" | cut -c1-70) on $host" \
      "(lanes $jobs, emulators $vms, nice $niceness)"
@@ -55,7 +56,7 @@ ssh -o BatchMode=yes "$host" "set -e
     git fetch -q origin regress
     git checkout -q --detach $commit
     git clean -fdq
-    git submodule update -q --init --filter=blob:none
+    git submodule update -q --init --depth 1 || git submodule update -q --init   # (older git: no --filter)
     export MGA_EXTRA_DIR=\$HOME MGA_NICE=$niceness LOOPA_MAX_VMS=$vms
     tools/dev tools/86box/build.sh > /dev/null
     tools/dev env REGRESS_JOBS=$jobs ONLY='${ONLY:-}' tools/regress.sh $tier" || rc=$?
