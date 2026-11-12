@@ -234,6 +234,11 @@ It found six places where 86Box differed, and GLOS's tests found more. Local pat
   - The G400 reports PCI revision 05 (3 before).
   - Its AGP capability says AGP 2.0, 1x and 2x, sideband addressing and a request queue 32 deep (`1f000203`,
     the card's), not 1x only with a queue of 1, so the HAL's AGP start picks 2x as on the card.
+- **0127:** SLiRP's poll set had room for 16 sockets but counted its room in bytes (128), so the 17th socket and
+  those after it were written past the end of the allocation and the emulator's heap was spoiled: the guest's
+  frames stopped reaching SLiRP, with the emulator still running. Found by GLOS's network test, whose app
+  opens 16 connections at once (2026-11-12). 86Box's master has the same fix; the patch goes when the pin
+  moves past it.
 - **0003 dropped:** it indexed the 16-bit DAC palette by each component's top bits. A real G400 indexes it by the
   component's own value, the layout its BIOS loads, so the runtimes' ramps, written for 0003, put every frame on
   the card's monitor at an eighth of its brightness. `dac_set_ramp` now writes the BIOS's layout.
