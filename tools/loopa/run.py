@@ -72,6 +72,33 @@ PROFILES = {
 }
 
 
+_slot = None
+
+
+def vm_slot():
+    """LOOPA_MAX_VMS=N: at most N emulators at once on this host, whatever
+    started them (every run.py, in any session or container: the locks are
+    files in the shared cache). Waits for a free slot and holds it until
+    this process ends. Unset or 0: no limit."""
+    global _slot
+    n = int(os.environ.get("LOOPA_MAX_VMS", "0") or 0)
+    if n <= 0 or _slot is not None:
+        return
+    import fcntl
+    d = os.path.join(CACHE, "loopa-slots")
+    os.makedirs(d, exist_ok=True)
+    while True:
+        for i in range(n):
+            f = open(os.path.join(d, "slot%02d" % i), "a")
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                _slot = f
+                return
+            except OSError:
+                f.close()
+        time.sleep(2)
+
+
 def resolve_profile(a):
     """Fill in --card from the profile and refuse a card the board can't take."""
     prof = PROFILES[getattr(a, "machine", "bf6")]
@@ -480,6 +507,7 @@ def run(a):
         if os.path.isdir(nvr_cache):
             shutil.copytree(nvr_cache, os.path.join(vm, "nvr"), dirs_exist_ok=True)
         errf = open(os.path.join(out, "stderr.log"), "wb")
+        vm_slot()                               # (LOOPA_MAX_VMS: wait for room before the clocks start)
         xvfb, display = start_xvfb(errf)
         env = dict(os.environ, BOX86_MONITOR="1", HOME=vm, XDG_CONFIG_HOME=vm,
                    SDL_AUDIODRIVER="dummy", DISPLAY=display)

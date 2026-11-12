@@ -16,9 +16,14 @@
 #
 # Each step's log is out/regress/TIER-STAMP/STEP.log; the summary, with each
 # step's time, is printed and kept there as summary.txt. Exit status 0 when
-# every step passes. Steps run one at a time (Loop A's idle timeouts are
-# wall-clock, and a loaded host reads as a hang). A step whose fixtures are
-# missing (the replays' traces in ~/.cache/mga-glide) is SKIP, not PASS.
+# every step passes. A step whose fixtures are missing (the replays' traces
+# in ~/.cache/mga-glide) is SKIP, not PASS.
+#
+# REGRESS_JOBS=N runs the merge tier's Loop A steps N at a time (default 1:
+# one after another), after its builds; LOOPA_MAX_VMS caps the emulators
+# they start between them (tools/loopa/run.py), as Loop A's idle timeouts
+# are wall-clock and an overloaded host reads as a hang. On a machine of
+# its own: tools/regress-remote.sh.
 set -u
 tier=${1:-}
 case "$tier" in host|smoke|merge) ;; *) sed -n '2,22p' "$0" >&2; exit 2 ;; esac
@@ -29,7 +34,8 @@ cache=${MGA_CACHE:-$HOME/.cache/mga-glide}
 out=$root/out/regress/$tier-$(date +%Y%m%d-%H%M%S)
 mkdir -p "$out"
 summary=$out/summary.txt
-fails=0
+jobs_max=${REGRESS_JOBS:-1}
+mkdir -p "$out/.res"
 echo "regress $tier: $(git log -1 --format='%h %s' | cut -c1-70)$(git diff --quiet HEAD -- || echo ' (dirty)')" | tee "$summary"
 
 # step NAME COMMAND...: run, time, log and record PASS/FAIL (unless ONLY leaves it out).
@@ -43,11 +49,19 @@ step() {
     local s=$SECONDS rc
     "$@" > "$out/$name.log" 2>&1; rc=$?
     local t=$(( SECONDS - s )) res=PASS
-    if [ $rc -ne 0 ]; then res="FAIL rc=$rc"; fails=$((fails + 1)); fi
-    printf '  %-28s %-10s %5ds\n' "$name" "$res" "$t" | tee -a "$summary"
-    [ $rc -eq 0 ] || tail -3 "$out/$name.log" | sed 's/^/      /' | tee -a "$summary"
+    [ $rc -eq 0 ] || res="FAIL rc=$rc"
+    echo "$res" > "$out/.res/$name"
+    { printf '  %-28s %-10s %5ds\n' "$name" "$res" "$t"
+      [ $rc -eq 0 ] || tail -3 "$out/$name.log" | sed 's/^/      /'; } | tee -a "$summary"
+}
+# pstep NAME COMMAND...: a step in a lane of its own, REGRESS_JOBS at a time.
+pstep() {
+    if [ "$jobs_max" -le 1 ]; then step "$@"; return; fi
+    while [ "$(jobs -rp | wc -l)" -ge "$jobs_max" ]; do wait -n; done
+    step "$@" &
 }
 skip() { printf '  %-28s %-10s %s\n' "$1" SKIP "$2" | tee -a "$summary"; }
+pskip() { skip "$@"; }
 
 # replays NAME TRACE OVL FRAMES: one game's trace on the G200, G400 and G450
 # at once (each card's VM and its Voodoo reference run side by side; the
@@ -95,16 +109,18 @@ if [ "$tier" = smoke ]; then
 fi
 
 # ---- merge: everything ------------------------------------------------------
+# The DOS-GL ports' builds first; then every Loop A step, in REGRESS_JOBS lanes.
 if [ "$tier" = merge ]; then
-    step loopa-selftest     tools/dev make -s loopa-selftest
-    step loopa-selftest-ext tools/dev make -s loopa-selftest-ext
-    step loopa-twodtest     tools/dev make -s loopa-twodtest
+    step gl-build-ports     make -s -C gl rig sdl sdl-examples sdl-host quake halflife doom classicube
+    pstep loopa-selftest     tools/dev make -s loopa-selftest
+    pstep loopa-selftest-ext tools/dev make -s loopa-selftest-ext
+    pstep loopa-twodtest     tools/dev make -s loopa-twodtest
     # The S3 ViRGE/DX's layer (docs/virge.md): its probe, and its 2D, cursor and display start on both boards.
-    step virge-vprobe       loopa_pass regress-vprobe --machine 486dx4 --card virge --exe build/djgpp/VPROBE.EXE --idle 90 --timeout 400
-    step virge-vtwod-486    loopa_pass regress-vtwod-486 --machine 486dx4 --card virge --exe build/djgpp/VTWOD.EXE --idle 120 --timeout 900
-    step virge-vtwod-p2     loopa_pass regress-vtwod-p2 --machine bf6 --card virge --exe build/djgpp/VTWOD.EXE --idle 120 --timeout 900
-    step hreplay-check      tools/dev make -s hreplay-check
-    step glide-conform-ci   tools/dev make -s conform-ci
+    pstep virge-vprobe       loopa_pass regress-vprobe --machine 486dx4 --card virge --exe build/djgpp/VPROBE.EXE --idle 90 --timeout 400
+    pstep virge-vtwod-486    loopa_pass regress-vtwod-486 --machine 486dx4 --card virge --exe build/djgpp/VTWOD.EXE --idle 120 --timeout 900
+    pstep virge-vtwod-p2     loopa_pass regress-vtwod-p2 --machine bf6 --card virge --exe build/djgpp/VTWOD.EXE --idle 120 --timeout 900
+    pstep hreplay-check      tools/dev make -s hreplay-check
+    pstep glide-conform-ci   tools/dev make -s conform-ci
     # The acceptance games' traces through Glide, three cards at once. Screamer
     # Rally's 389 frames stop at 240 (the owner's choice, 2026-11-09): loading
     # screens to frame 95, the race from 96; every call pattern of the trace has
@@ -112,21 +128,22 @@ if [ "$tier" = merge ]; then
     # runtime must see the change) are at frames 197-234. Frames 241-389 repeat
     # those with more track at about 3 s a frame in 86Box's Matrox model.
     if [ -f "$cache/traces/gta-voodoo-300.bin" ] && [ -f "$cache/fixtures/ovl/gta.ovl" ]; then
-        step replay-gta replays gta "$cache/traces/gta-voodoo-300.bin" "$cache/fixtures/ovl/gta.ovl" 60,150,240,295
-    else skip replay-gta "no GTA trace or OVL in $cache"; fi
+        pstep replay-gta replays gta "$cache/traces/gta-voodoo-300.bin" "$cache/fixtures/ovl/gta.ovl" 60,150,240,295
+    else pskip replay-gta "no GTA trace or OVL in $cache"; fi
     if [ -f "$cache/traces/sr-389.bin" ] && [ -f "$cache/fixtures/ovl/sr.ovl" ]; then
-        step replay-sr replays sr "$cache/traces/sr-389.bin" "$cache/fixtures/ovl/sr.ovl" 60,150,200,240
-    else skip replay-sr "no Screamer Rally trace or OVL in $cache"; fi
-    step gl-build-ports     make -s -C gl rig sdl sdl-examples sdl-host quake halflife doom classicube
+        pstep replay-sr replays sr "$cache/traces/sr-389.bin" "$cache/fixtures/ovl/sr.ovl" 60,150,200,240
+    else pskip replay-sr "no Screamer Rally trace or OVL in $cache"; fi
     for card in g450 g400 g200; do
-        step gl-conform-$card make -s -C gl conform CARD=$card
+        pstep gl-conform-$card make -s -C gl conform CARD=$card
     done
-    step gl-g4exp           python3 gl/tools/silicon/g4exp.py loopa --card g450,g400,g200
-    step gl-sdl-g400        make -s -C gl loopa-sdl CARD=g400
-    step gl-classicube-g400 make -s -C gl loopa-classicube CARD=g400
-    step gl-quake-g400      make -s -C gl loopa-quake GAME=quake CARD=g400
-    step gl-quake2-g400     make -s -C gl loopa-quake GAME=quake2 CARD=g400
+    pstep gl-g4exp           python3 gl/tools/silicon/g4exp.py loopa --card g450,g400,g200
+    pstep gl-sdl-g400        make -s -C gl loopa-sdl CARD=g400
+    pstep gl-classicube-g400 make -s -C gl loopa-classicube CARD=g400
+    pstep gl-quake-g400      make -s -C gl loopa-quake GAME=quake CARD=g400
+    pstep gl-quake2-g400     make -s -C gl loopa-quake GAME=quake2 CARD=g400
 fi
+wait
 
+fails=$(grep -l "^FAIL" "$out"/.res/* 2>/dev/null | wc -l)
 echo "regress $tier: $([ $fails -eq 0 ] && echo PASS || echo "$fails FAILED"), $((SECONDS / 60)) min (logs: $out)" | tee -a "$summary"
 [ $fails -eq 0 ]

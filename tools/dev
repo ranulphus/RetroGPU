@@ -4,8 +4,12 @@
 # Inside the container (or when MGA_NO_DOCKER=1) it just runs the command.
 # MGA_DOCKER_NETWORK=host shares the host's network (the Loop B dry run:
 # the emulated PC's SLiRP traffic must reach tools/bench/run.py on the host).
+# MGA_NICE=N runs the command at that niceness inside the container (a
+# container's processes do not inherit the caller's): a shared machine's
+# other work comes first (tools/regress-remote.sh).
 set -euo pipefail
-if [ -f /.dockerenv ] || [ "${MGA_NO_DOCKER:-0}" = 1 ]; then exec "$@"; fi
+niced=(); [ -n "${MGA_NICE:-}" ] && [ -z "${MGA_NICED:-}" ] && niced=(env MGA_NICED=1 nice -n "$MGA_NICE")
+if [ -f /.dockerenv ] || [ "${MGA_NO_DOCKER:-0}" = 1 ]; then exec "${niced[@]}" "$@"; fi
 repo=$(cd "$(dirname "$0")/.." && pwd)
 img=mga-glide-dev:$(cat "$repo/tools/docker/Dockerfile" "$repo/tools/docker/packages.txt" | sha256sum | cut -c1-12)
 if ! docker image inspect "$img" >/dev/null 2>&1; then
@@ -36,4 +40,4 @@ exec docker run --rm "${tty[@]}" --init \
   ${MGA_GAMES_DIR:+-v "$MGA_GAMES_DIR:$MGA_GAMES_DIR:ro"} \
   ${MGA_EXTRA_DIR:+-v "$MGA_EXTRA_DIR:$MGA_EXTRA_DIR"} \
   ${MGA_DOCKER_NETWORK:+--network "$MGA_DOCKER_NETWORK"} \
-  -w "$PWD" "$img" "$@"
+  -w "$PWD" "$img" "${niced[@]}" "$@"

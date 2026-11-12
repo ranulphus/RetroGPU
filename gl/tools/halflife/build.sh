@@ -126,6 +126,11 @@ fi
 [ -f "$root/build/lib/libGL.a" ] || { echo "halflife: no build/lib/libGL.a (make lib)" >&2; exit 1; }
 export DJGPP_PREFIX=$D LD_LIBRARY_PATH=$D/hostlib
 export LD=$D/bin/i586-pc-msdosdjgpp-ld OBJCOPY=$D/bin/i586-pc-msdosdjgpp-objcopy NM=$D/bin/i586-pc-msdosdjgpp-nm
+# A DOS build must not take the build machine's libraries: with libogg's
+# development files installed (the dev container has them), waf's pkg-config
+# check found the Linux ogg instead of building the bundled 3rdparty/libogg,
+# and the DJGPP compiler then had no ogg/ogg.h. pkg-config finds nothing here.
+export PKG_CONFIG_LIBDIR=/nonexistent PKG_CONFIG_PATH=
 log=$out/build.log
 : > "$log"
 run() { "$@" >> "$log" 2>&1 || { grep -E "error|Error" "$log" | tail -20; echo "halflife: failed: $*" >&2; exit 1; }; }
