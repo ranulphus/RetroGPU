@@ -1,21 +1,22 @@
 # DOS-GL with more than one back end: the software renderer first, a plan
 
 **Status (2026-11-09): plan v1, approved by the owner. B0 written and reviewed (`docs/backend-interface.md`); the
-merge into RetroGPU has landed (2026-11-08), so B1 can start here. Nothing built yet.**
+merge into RetroGPU has landed (2026-11-08), so B1 can start here. Nothing built yet. 2026-11-12: the S3 ViRGE/DX
+added to the order of the other cards, first (see the end).**
 
 The owner's decision (2026-11-06), from GLOS's v1 route (GLOS `docs/v1-route.md`): **DOS-GL gains a software
 renderer**, so that DOS-GL programs run on any graphics card. GLOS v1 needs it for two things:
 - its screensavers (a starfield, pipes, a 3D maze, after Windows 98's OpenGL ones) on every PC;
 - windowed DOS-GL apps under GLOS on any VBE card.
 
-It also gives DOS-GL the shape the other vendors' cards need. The owner's order is the Riva TNT2 next, then ATI's
-Rage 128 Pro, then perhaps the Radeon 7000 VE. The owner chose to give it a plan of its own, now: designed for
+It also gives DOS-GL the shape the other vendors' cards need. The owner's order is the S3 ViRGE/DX first (added
+2026-11-12, below), then the Riva TNT2, then ATI's Rage 128 Pro, then perhaps the Radeon 7000 VE. The owner chose to give it a plan of its own, now: designed for
 those back ends too, and built alongside GLOS v1's phases B and C, so that it is ready for GLOS's phase D.
 
 **This reverses two of DOS-GL's own decisions.** The PRD amendment is part of this plan (step B5):
 - D4 ("no software fallback") and the non-goal "Software rasteriser fallback: No";
-- the non-goal "Other vendors": the software renderer comes first, then the TNT2 and the rest, each with its own
-  plan.
+- the non-goal "Other vendors": the software renderer comes first, then the ViRGE/DX, the TNT2 and the rest, each
+  with its own plan.
 
 ## Where DOS-GL stands
 
@@ -47,13 +48,14 @@ texture objects and their GL formats. Below one interface, a back end does what 
 | **Textures** | Allocate, upload (sub-images too), free; its own memory and formats (VRAM for a card, system memory for software) |
 | **Drawing** | Triangles in clip space, as DOS-GL's sink has them today: each back end clips (with a shared clipper and its own guard band) and projects to its own precision (B0, settled at the review); clear; finish and flush |
 | **Reading** | Read pixels; snapshots and crash dumps (`snap.c`, `crash.c`) |
-| **Selection** | Found and chosen at `dglInit`: `DGL_DEVICE=mga` / `soft` / later `tnt2`, or the first that works |
+| **Selection** | Found and chosen at `dglInit`: `DGL_DEVICE=mga` / `soft` / later `virge`, `tnt2`, or the first that works |
 
 Matrox-only features stay reachable through capabilities, not as the GL layer's knowledge of registers. These
 include the WARP, AGP, dual texture, the HAL's 2D engine and GLOS's GPU lock. Three settle the interface's details:
 - **B1:** moving the Matrox code behind it.
 - **B2:** the software renderer.
-- **The TNT2's plan, later:** it checks the interface fits a second card before that card's work starts.
+- **The ViRGE/DX's plan, later:** the first card after the Matrox ones (the owner's order, 2026-11-12), so it checks
+  the interface fits a second card before that card's work starts; the TNT2's plan checks it again.
 
 ## The steps
 
@@ -128,3 +130,40 @@ include the WARP, AGP, dual texture, the HAL's 2D engine and GLOS's GPU lock. Th
 
 B0's review (2026-11-06): the back-end interface in clip space; stencil (8 bits) in the software renderer from B2's
 start. B0 is `docs/backend-interface.md`.
+
+## The S3 ViRGE/DX, first of the other cards (the owner's addition, 2026-11-12)
+
+The ViRGE/DX (S3 86C375) goes into the 486DX4 bench (bench C: PCI, 8 MB of RAM, GLOS from its setup floppy), with
+4 MB of video memory. The owner's answers:
+- **Order:** first of the other cards, after the software renderer (B1-B5) and before the Riva TNT2. 86Box emulates
+  its 3D engine, so it can be built and tested in Loop A as well as on the bench, and it is the cheapest check that
+  the back-end interface fits a second card.
+- **Scope:** DOS-GL's drawing back end on its 3D engine; GLOS's desktop on its 2D engine through RetroGPU's device
+  level; and Glide on it too, accepting that the effects the chip cannot blend are missing from the games.
+
+**What the chip has,** read from 86Box's model (`src/video/vid_s3_virge.c`, `virge375_pci`); S3's 86C375 data book
+and the bench check it before the work starts:
+- **3D:** drawn into 15-bit (RGB555) or 24-bit colour, not RGB565; 16-bit Z with all eight compare functions;
+  Gouraud shading; textures in ARGB8888, ARGB4444 and ARGB1555, perspective-correct, bilinear, with mipmaps; texture
+  modes decal, modulate and reflection. The CPU computes each triangle's slopes and gradients, as with the Matrox
+  cards' setup today.
+- **Blending:** one mode, source alpha (from the texture or the vertex). Fog blends towards one colour by the
+  vertex's alpha, so not together with blending. No stencil.
+- **2D:** blits, fills, lines, colour expansion and a hardware cursor.
+
+**What follows:**
+- **GL:** draws whose state the chip can do go to it; the rest to the software renderer into the same buffers, which
+  reads video memory back over PCI and so is slow on a 486. Programs that draw only what the chip can stay fast:
+  Gouraud and textured scenes, alpha-blended HUDs, GLOS's screensavers. Quake's lightmaps (a multiplying blend) are
+  beyond the chip. Its 16-bit colour is RGB555, so the back end converts where DOS-GL or GLOS windows use RGB565.
+- **GLOS:** the desktop's blits, fills and cursor on the 2D engine through the device; modes and the framebuffer
+  through VBE as on any card.
+- **Glide:** through the device and a Glide drawing back end; the combine and blend states the chip cannot do are
+  approximated or dropped, listed per game, as the G100's approximations were.
+- **Memory:** 640x480 with double buffering and a 16-bit Z buffer takes about 1.8 MB of the 4 MB, leaving about
+  2.2 MB for textures.
+
+**Tests:** Loop A gets a ViRGE/DX card (86Box's `virge375_pci`; its BIOS folder, `video/s3virge`, joins the
+sparse ROM set), and bench C is its silicon tier. The ViRGE/DX gets its own plan before its work starts, as the
+TNT2 will: the references and their licences (the data book, the open drivers of the time), 86Box's model against
+the bench, and the PRD amendments (DOS-GL's other-vendor non-goal, and the Glide runtime's Matrox-only scope).

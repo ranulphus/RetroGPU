@@ -80,7 +80,7 @@ So the interface has two levels:
   ------+---------------------------------+-----------------------+------
   the device (hal/): the card, modes, surfaces, present, memory, 2D, cursor, sync, teardown
   ----------------------------------------------------------------------
-     Matrox (today's HAL)      software (VBE, a GLOS window)      later: TNT2, Rage
+     Matrox (today's HAL)      software (VBE, a GLOS window)      later: ViRGE/DX, TNT2, Rage
 ```
 
 ### The device (`hal/`)
