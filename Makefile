@@ -78,7 +78,7 @@ DJ_SRC_WARPTRI := tests/hal/warptri.c
 DJ_SRC_CLOCKMON := tests/hal/clockmon.c
 # The S3 ViRGE/DX (docs/virge.md): its register layer as a library of its own (hal/src/virge, not part of the
 # Matrox HAL's), VPROBE (PCI, IDs, the BIOS's modes, the linear window) and VTWOD (its 2D against sw2d.c).
-VIRGE_SRCS := hal/src/virge/chip.c hal/src/virge/engine2d.c
+VIRGE_SRCS := hal/src/virge/chip.c hal/src/virge/engine2d.c hal/src/virge/cursor.c
 build/djgpp/libvirge.a: $(VIRGE_SRCS:%.c=build/djgpp/%.o)
 	@rm -f $@
 	$(DJAR) rcs $@ $^

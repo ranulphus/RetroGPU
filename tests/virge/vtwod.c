@@ -4,10 +4,13 @@
  * other pitches, draws the same with the software model (tests/hal/sw2d.c)
  * in a copy of VRAM, and compares the two byte for byte.
  *
+ * Then, at 16 bits, the hardware cursor and the display start, read from the
+ * emulated monitor (86Box's unit tester).
+ *
  *   VTWOD [8] [16] [ops=N]
  *
  * HX-TEST lines: map, mode-BPP, fill-BPP, copy-BPP, copy-from-BPP, mono-BPP,
- * image-BPP, mixed-BPP. */
+ * image-BPP, mixed-BPP, cursor, cursor-edge, start, start-high. */
 #include "hx.h"
 #include "sw2d.h"
 #include "virge/virge.h"
@@ -241,6 +244,131 @@ static void depth_cases(void)
     check(n);
 }
 
+/* ---- the cursor and the display start, from the emulated monitor */
+
+static uint8_t *grab(int x, int y, int w, int h)
+{
+    uint8_t *p = malloc((size_t)w * (size_t)h * 4);
+    uint16_t cw, ch;
+    virge_vsync_wait(200000);
+    virge_vsync_wait(200000);                   /* (a whole frame since the change) */
+    if (!p || hx_ut_capture(&cw, &ch) < 0 || hx_ut_read(x, y, w, h, p) < 0) {
+        free(p);
+        return NULL;
+    }
+    return p;
+}
+
+static uint32_t at_(const uint8_t *p, int w, int x, int y)
+{
+    const uint8_t *q = p + ((long)y * w + x) * 4;
+    return (uint32_t)q[2] << 16 | (uint32_t)q[1] << 8 | q[0];
+}
+
+static uint8_t and_mask[512], xor_mask[512];
+
+static void cursor_row(const uint8_t *under, const uint8_t *seen, int w, int y, int x0, int cx, int iy, uint32_t c0,
+                       uint32_t c1)
+{
+    char got[65], want[65];
+    int ix;
+    for (ix = 0; ix < 64; ix++) {
+        int x = cx + ix - x0, a = (and_mask[iy * 8 + ix / 8] >> (7 - ix % 8)) & 1;
+        int o = (xor_mask[iy * 8 + ix / 8] >> (7 - ix % 8)) & 1;
+        uint32_t u = x >= 0 && x < w ? at_(under, w, x, y) : 0, g = x >= 0 && x < w ? at_(seen, w, x, y) : 0;
+        want[ix] = !a ? (o ? '1' : '0') : o ? 'x' : '.';
+        got[ix] = x < 0 || x >= w ? ' ' : g == c0 ? '0' : g == c1 ? '1' : g == u ? '.' : g == (u ^ 0xFFFFFF) ? 'x' : '?';
+    }
+    got[64] = want[64] = 0;
+    hx_log("HX-STAT cursor row %d seen %s", iy, got);
+    hx_log("HX-STAT cursor row %d want %s", iy, want);
+}
+
+static int cursor_differs(const uint8_t *under, const uint8_t *seen, int x0, int y0, int w, int h, int cx, int cy,
+                          uint32_t c0, uint32_t c1, char *why)
+{
+    int x, y;
+    for (y = 0; y < h; y++)
+        for (x = 0; x < w; x++) {
+            int ix = x + x0 - cx, iy = y + y0 - cy;
+            uint32_t want = at_(under, w, x, y), got = at_(seen, w, x, y);
+            if (ix >= 0 && ix < 64 && iy >= 0 && iy < 64) {
+                int a = (and_mask[iy * 8 + ix / 8] >> (7 - ix % 8)) & 1, o = (xor_mask[iy * 8 + ix / 8] >> (7 - ix % 8)) & 1;
+                want = !a ? (o ? c1 : c0) : o ? want ^ 0xFFFFFF : want;
+            }
+            if (got != want) {
+                sprintf(why, "at %d,%d (image %d,%d): %06lx, want %06lx", x + x0, y + y0, ix, iy, (unsigned long)got,
+                        (unsigned long)want);
+                if (iy >= 0 && iy < 64)
+                    cursor_row(under, seen, w, y, x0, cx, iy, c0, c1);
+                return 1;
+            }
+        }
+    return 0;
+}
+
+static void cursor_cases(void)
+{
+    /* Full or empty channels, which 16-bit pixels hold exactly (the cursor's
+     * colours are pixel values on this chip); red and blue told apart. */
+    const uint32_t c0 = 0x00FFFF, c1 = 0xFF00FF;
+    uint32_t off = (virge.vram_bytes - VIRGE_CURSOR_BYTES) & ~1023u;
+    uint8_t *under, *seen;
+    char why[160] = "";
+    int i, bad;
+
+    for (i = 0; i < 512; i++) {                 /* each of the four kinds, in bands and specks */
+        int y = i / 8, x8 = i % 8;
+        and_mask[i] = (uint8_t)(y < 16 ? 0x00 : y < 32 ? 0xFF : (0xF0 >> (x8 & 1)) ^ (uint8_t)(y * 7));
+        xor_mask[i] = (uint8_t)(y < 8 ? 0x00 : y < 16 ? 0xFF : y < 24 ? 0x00 : y < 32 ? 0xFF : (uint8_t)(x8 * 37 + y));
+    }
+    if (virge_cursor_load(off, and_mask, xor_mask) != 0) {
+        hx_test("cursor", 0, "no place for the image");
+        return;
+    }
+    hx_stat("cursor at=%08lx", (unsigned long)off);
+    virge_cursor_colours(c0, c1);
+    virge_cursor_show(0);
+    under = grab(80, 40, 96, 96);
+    virge_cursor_move(100, 50);
+    virge_cursor_show(1);
+    seen = grab(80, 40, 96, 96);
+    bad = !under || !seen || cursor_differs(under, seen, 80, 40, 96, 96, 100, 50, c0, c1, why);
+    hx_test("cursor", !bad, "%s", !under || !seen ? "no capture" : bad ? why : "image, colours and place");
+    free(under);
+    free(seen);
+
+    virge_cursor_show(0);                       /* partly off the top left corner */
+    under = grab(0, 0, 64, 64);
+    virge_cursor_move(-10, -20);
+    virge_cursor_show(1);
+    seen = grab(0, 0, 64, 64);
+    bad = !under || !seen || cursor_differs(under, seen, 0, 0, 64, 64, -10, -20, c0, c1, why);
+    hx_test("cursor-edge", !bad, "%s", !under || !seen ? "no capture" : bad ? why : "clipped at the top left");
+    free(under);
+    free(seen);
+    virge_cursor_show(0);
+}
+
+static void start_case(const char *name, uint32_t at)
+{
+    uint8_t *before, *after;
+    uint32_t row = (uint32_t)scr.pitch_b;
+    int bad;
+    virge_sync(2000000);
+    before = grab(0, 100, SW, 64);              /* rows 100-163, which `at` holds a copy of */
+    memcpy((uint8_t *)virge.fb + at, (const uint8_t *)virge.fb + 100 * row, 64 * row);
+    virge_vsync_wait(200000);
+    virge_set_start(at);
+    after = grab(0, 0, SW, 64);
+    bad = !before || !after || memcmp(before, after, (size_t)SW * 64 * 4) != 0;
+    hx_test(name, !bad, "start=%08lx%s", (unsigned long)at, !before || !after ? " no capture" : bad ? " other pixels" : "");
+    free(before);
+    free(after);
+    virge_vsync_wait(200000);
+    virge_set_start(0);
+}
+
 static void place(surface *t, const char *name, uint32_t off, int w, int h, int pitch_px)
 {
     t->name = name;
@@ -272,6 +400,11 @@ static int depth(int b)
     memset((void *)virge.fb, 0, used);
     memset(shadow, 0, used);
     depth_cases();
+    if (b == 16 && hx_ut_present()) {
+        cursor_cases();
+        start_case("start", (used + 4095) & ~4095u);           /* past 1 MB: CR69's bits */
+        start_case("start-high", 3u << 20);                    /* bit 19 of the 4-byte units */
+    }
     return 1;
 }
 

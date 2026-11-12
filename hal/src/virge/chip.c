@@ -170,6 +170,7 @@ int virge_set_mode(const virge_mode *m)
     if (vbe(&r) < 0)
         return -1;
     open_window();
+    virge_mode_bpp = m->bpp;
     return 0;
 }
 

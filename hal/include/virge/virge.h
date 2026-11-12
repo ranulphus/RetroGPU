@@ -66,4 +66,22 @@ void virge_mono(int x, int y, int w, int h, const uint8_t *bits, int stride, uin
 /* Pixels from the CPU in the target's format, rows stride bytes apart. */
 void virge_image(int x, int y, int w, int h, const void *px, int stride);
 
+/* cursor.c: the hardware cursor (64 x 64) and the display start, as the
+ * Matrox HAL's cursor_* and crtc_set_start: the image's AND and XOR masks,
+ * rows of 8 bytes, the leftmost pixel in bit 7 (AND 0: colour 0 for XOR 0,
+ * colour 1 for XOR 1; AND 1: the screen, inverted for XOR 1), stored at
+ * off, a multiple of 1 KB: 0, or -1. Colours are 0xRRGGBB, converted to
+ * the mode's pixels (8 bits: a palette index). virge_cursor_move takes the
+ * image's top left corner, as far as 63 pixels off the top or the left.
+ * virge_set_start: the first byte shown, a multiple of 4, from the next
+ * frame on (call it in the vertical blank: virge_vsync_wait). */
+#define VIRGE_CURSOR_BYTES 1024u
+extern int virge_mode_bpp;          /* the mode's bits a pixel: 8, 15, 16, 24 or 32 */
+int  virge_cursor_load(uint32_t off, const uint8_t and_mask[512], const uint8_t xor_mask[512]);
+void virge_cursor_colours(uint32_t c0, uint32_t c1);
+void virge_cursor_show(int on);
+void virge_cursor_move(int x, int y);
+int  virge_set_start(uint32_t byte_off);
+int  virge_vsync_wait(uint32_t timeout_us);        /* to the start of the next vertical retrace: 0, or -1 */
+
 #endif

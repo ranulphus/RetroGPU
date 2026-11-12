@@ -1,6 +1,6 @@
 # The S3 ViRGE/DX: a plan
 
-**Status (2026-11-12): v1, the owner's answers in (below). V0 done; V1's 2D engine done (VTWOD), its display start and cursor next.**
+**Status (2026-11-12): v1, the owner's answers in (below). V0 done; V1 done in Loop A (VTWOD 19/19 on both boards); bench C pending; V2 next.**
 
 The owner's decisions (2026-11-12, `gl/docs/backends.md`): the ViRGE/DX is the first card after the Matrox ones,
 before the Riva TNT2; DOS-GL, GLOS's desktop and Glide all run on it; the card is bench C's (the 486DX4, PCI,
@@ -69,9 +69,18 @@ licences are listed in V1 before any code is written from them.
 - **2D** (`engine2d.c`), with the Matrox HAL's calls' meaning (`engine_*` in `mga/hal.h`): fills, copies (any
   overlap) and copies between surfaces, colour expansion and images from the CPU. Its 11-bit unsigned coordinates
   mean every operation is trimmed to the clip in software; trimmed CPU data is repacked.
+- **The cursor and the display start** (`cursor.c`), as the Matrox HAL's `cursor_*` and `crtc_set_start`: the
+  64 x 64 AND/XOR image word-interleaved on a 1 KB boundary (Windows-style), its colours converted to the mode's
+  pixels (on this chip they are pixel values, not DAC colours), positions with the edge offsets; the display start
+  in 4-byte units, 20 bits (CR0D, CR0C, CR69, and CR31/CR51 kept in step).
 - **`VTWOD`** draws each primitive on the screen and two surfaces of other pitches and compares VRAM byte for byte
-  with `tests/hal/sw2d.c`'s model: all 15 checks pass at 8 and 16 bits on the 486DX4 and Pentium II profiles. The
-  1-bit data's order (the leftmost pixel in bit 7, as GLOS's glyphs) is the chip's own.
+  with `tests/hal/sw2d.c`'s model at 8 and 16 bits, then reads the cursor (inside and clipped at the top left) and
+  two display starts (past 1 MB, and 3 MB) from the emulated monitor: all 19 checks pass on the 486DX4 and
+  Pentium II profiles. The 1-bit data's order (the leftmost pixel in bit 7, as GLOS's glyphs) is the chip's own.
+- **`tools/regress.sh`:** `VTWOD` on the 486DX4 in the smoke tier; `VPROBE` and `VTWOD` on both boards in the
+  merge tier.
+- **Not yet:** 24-bit 2D (no 24-bit mode in the BIOS's list; bench C's BIOS may differ), colour patterns, lines and
+  polygons (nothing asks for them yet).
 - **For GLOS** (its session, 2026-11-12): its desktop takes only VBE modes with a linear framebuffer, in 8, 16
   (RGB565) or 32 bits; on this card the linear window has to come from this layer (later its device level), and
   a 15-bit desktop is a new screen format for GLOS (its windows already carry their format).
