@@ -90,9 +90,11 @@ the device logs `SoundBlaster: U of N chunks underran`.
 
 Under GLOS (a graphical DOS whose DPMI host answers 0A00h "GLOS"), on a
 desktop that can show OpenGL in a window (a Matrox card at 16 bits a
-pixel: GLOS's `GLOS_CAP_GLWIN`), SDL picks its `glos` drivers (patches
+pixel: GLOS's `GLOS_MACHINE_GLWIN`), SDL picks its `glos` drivers (patches
 0008 and 0009) before `vesa` and `soundblaster`, and the program becomes a
-GLOS app:
+GLOS app. The drivers speak GLOS's API 2.0 (since 2026-11-12; DOS-GL's
+windowed path does too: a program is all of one API), with their own copy
+of the numbers and structures they use (`SDL_glos.h`):
 
 - **Windows.** A window is a GLOS window of its size; "fullscreen" is a
   window of the mode's size (the desktop stays), and the mode list is the

@@ -182,9 +182,9 @@ WARPTRI turned AGP on itself then. Now the HAL does (below): `agp=N` asks it for
 fails if the fetches stay on PCI (as without GLOS). `cached` still forces AGP from the cached rings as above, the
 unsafe form that 86Box's silicon checks report as `agp-cached` (`make loopa-selftest-ext CHECKS=hazards`).
 
-So the rings must be write-combining, which takes ring 0 (the MTRRs). Under GLOS (API 1.4) the HAL asks for it:
+So the rings must be write-combining, which takes ring 0 (the MTRRs). Under GLOS the HAL asks for it:
 - `dma_setup` allocates the rings 64 KB larger and aligns them to 64 KB, and asks GLOS to make them write-combining
-  (`sys_cache_wc`: `GLOS_FN_CACHE`, which sets the fixed MTRRs below A0000h; GLOS gives them back when the program
+  (`sys_cache_wc`: API 2.0's DRAW CACHE, for any program (1.4 had it as `GLOS_FN_CACHE`), which sets the fixed MTRRs below A0000h; GLOS gives them back when the program
   ends). Without GLOS, or when GLOS can't, the block is freed and the plain rings are allocated, fetched by PCI.
 - With write-combining rings, AGP is turned on: the host bridge's AGP capability first, then the card's AGP_CMD,
   at the fastest rate both have, with sideband addressing if both have it. `warp_stop` puts both commands back as

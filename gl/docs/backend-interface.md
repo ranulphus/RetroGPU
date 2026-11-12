@@ -286,7 +286,7 @@ offsets and the scaled and zoomed display's fields move to the Matrox back end.
 
 ### `src/dgl/glos.c` (305 lines)
 
-- **Today's API 1.x calls** (`glos_window`, `glos_gpu`, `glos_gpu_share`, `mga_mmio`, `mga_fb`, `vram_bytes`,
+- **Today's GLOS calls** (API 2.0 since 2026-11-12: `glos_win_create`, `glos_gpu`, `glos_gpu_share`, `mga_mmio`, `mga_fb`, `vram_bytes`,
   `mga_chip_caps`, `MGA_FAMILY_*`, `engine_resync`, GLOS's VRAM blocks) are the Matrox back end's GLOS path, in
   `open_glos`, `swap` and the lock.
 - **What is GLOS's and not the card's stays in the GL layer:**

@@ -106,7 +106,7 @@ dglShutdown();
     drawing, and the WARP fed by the CPU was slower than the CPU's setup on bench-g400 (and stalled DOSBench's
     scenes until GLOS's GPU watchdog ended them).
   - `DGL_AGP=0` keeps the DMA rings cached and fetched by PCI under GLOS too, which otherwise makes them
-    write-combining (API 1.4) and turns AGP on, at the fastest rate the card and the bridge both have;
+    write-combining (GLOS's DRAW CACHE call) and turns AGP on, at the fastest rate the card and the bridge both have;
     `DGL_AGP=1` or `2` caps the rate at 1x or 2x. The G200 keeps cached rings and PCI unless `DGL_AGP=1` or `2`
     asks (its AGP drew nothing on the real card: RetroGPU's `docs/g200-warp.md`). `DGL_RING=bytes` (256 KB) and `DGL_KICK=bytes` (6 KB of
     vertices between kicks) tune the rings.
