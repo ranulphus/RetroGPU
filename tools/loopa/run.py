@@ -370,8 +370,13 @@ def run(a):
         prof = resolve_profile(a)
         result.update(machine=a.machine, card=a.card, boot_cfg=a.boot_cfg)
         d = None
+        if a.floppy and not a.hdd:
+            raise RuntimeError("--floppy goes with --hdd (the golden boot floppy is the harness's own)")
         if a.hdd:                               # a bench PC's own disk (docs/loops.md): booted as it is
             cimg, bootimg, extra = hdd_disk(a)
+            if a.floppy:                        # ... with a floppy of the job's own in A:, which the BIOS starts
+                bootimg = os.path.join(vm, "boot.img")      # from (GLOS's setup floppy and a blank disk)
+                shutil.copyfile(a.floppy, bootimg)
         else:
             gold = golden(a.boot_cfg)
             bootimg = os.path.join(vm, "boot.img")
@@ -722,6 +727,8 @@ def main():
     ap.add_argument("--hdd", help="boot this raw hard disk image as C: instead (in place, written to; no floppy, "
                     "nothing put on it): a bench PC's own disk. Outside the repository and the cache, mount its "
                     "directory into the dev container with MGA_EXTRA_DIR")
+    ap.add_argument("--floppy", metavar="IMG", help="with --hdd: this 1.44 MB floppy image in A: (a copy), which the "
+                    "BIOS boots before the disk (an installer's floppy and a blank disk)")
     ap.add_argument("--scratch-hdd", metavar="MB", help="a blank disk of MB megabytes (sparse, made for the run) on "
                     "IDE 1:0, unpartitioned, so DOS leaves it alone: for raw-sector tests (GLOS's DSKTORT)")
     ap.add_argument("--pre", action="append", default=[], help="extra RUN.BAT lines before the test")
