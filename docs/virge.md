@@ -1,6 +1,6 @@
 # The S3 ViRGE/DX: a plan
 
-**Status (2026-11-12): v0, for the owner's review. Bring-up step V0 done (below); nothing else built.**
+**Status (2026-11-12): v1, the owner's answers in (below). V0 done; V1's 2D engine done (VTWOD), its display start and cursor next.**
 
 The owner's decisions (2026-11-12, `gl/docs/backends.md`): the ViRGE/DX is the first card after the Matrox ones,
 before the Riva TNT2; DOS-GL, GLOS's desktop and Glide all run on it; the card is bench C's (the 486DX4, PCI,
@@ -61,12 +61,33 @@ merges, and bench C as the silicon tier (`ssh bench-486`; GLOS installed from th
 against. The register facts come from S3's 86C375 data book and the bench; the plan's references and their
 licences are listed in V1 before any code is written from them.
 
-## Open questions for the owner
+## V1 so far
 
-1. **Colour for 3D:** 15 bits (RGB555, the chip's 16-bit 3D format) as DOS-GL's 16-bit mode on the ViRGE/DX. GLOS's
-   windows are RGB565: either GLOS's desktop runs in 15 bits on this card, or presenting a DOS-GL window converts.
-   Which, is GLOS's and the owner's call (recommendation: 15 bits for the desktop on the ViRGE/DX, no conversion).
-2. **Until the software renderer exists (B2):** draws the chip cannot do are approximated (the nearest blend the
-   chip has) and logged once, rather than refused.
-3. **Order with B1:** V1 and V2 start now (they touch no file B1 moves); V3 onwards waits for B1, or B1 is brought
-   forward if the ViRGE work overtakes GLOS's phase B.
+- **The register layer** (`hal/include/virge/`, `hal/src/virge/`, its own library `libvirge.a`, apart from the
+  Matrox HAL's): the chip found on PCI, its window and new MMIO opened after every BIOS mode set, modes from the
+  BIOS's list (15 and 16 bits told apart by their green field), the engine's FIFO and idle wait.
+- **2D** (`engine2d.c`), with the Matrox HAL's calls' meaning (`engine_*` in `mga/hal.h`): fills, copies (any
+  overlap) and copies between surfaces, colour expansion and images from the CPU. Its 11-bit unsigned coordinates
+  mean every operation is trimmed to the clip in software; trimmed CPU data is repacked.
+- **`VTWOD`** draws each primitive on the screen and two surfaces of other pitches and compares VRAM byte for byte
+  with `tests/hal/sw2d.c`'s model: all 15 checks pass at 8 and 16 bits on the 486DX4 and Pentium II profiles. The
+  1-bit data's order (the leftmost pixel in bit 7, as GLOS's glyphs) is the chip's own.
+- **For GLOS** (its session, 2026-11-12): its desktop takes only VBE modes with a linear framebuffer, in 8, 16
+  (RGB565) or 32 bits; on this card the linear window has to come from this layer (later its device level), and
+  a 15-bit desktop is a new screen format for GLOS (its windows already carry their format).
+- **Bench C** (VPROBE, VTWOD on silicon, its BIOS's modes) waits for the PC to boot from its disk.
+
+## The owner's answers (2026-11-12)
+
+1. **Colour depth is the user's choice, not the card's:** GLOS gets a Display control panel and a `GLOS.CFG`
+   setting for the desktop's resolution and depth (15, 16, 24 and 32 bits, perhaps 8 and 4), which is GLOS's to
+   build. On the ViRGE/DX this means:
+   - **15 bits:** 3D draws straight into the desktop and its windows (the chip's own 16-bit 3D format);
+   - **16 or 32 bits:** DOS-GL draws into a 15-bit buffer in the card's memory and presenting converts it (a CPU
+     copy per frame, which the 486 feels), or the program runs full-screen in a 15-bit mode of its own;
+   - **24 bits:** the chip's 3D packs 3 bytes a pixel; whether its display has packed 24-bit modes beyond the
+     BIOS's 32-bit list is checked on bench C in V1;
+   - **8 or 4 bits:** no 3D on the chip; DOS-GL uses the software renderer (B2 draws 8 bits with a fixed palette).
+2. **Until B2:** draws the chip cannot do are approximated (the nearest state it has) and logged once each,
+   listed; once B2 exists they go to the software renderer.
+3. **Order:** V1 and V2 now (nothing B1 moves is touched); V3 onwards after B1.
