@@ -84,4 +84,20 @@ void virge_cursor_move(int x, int y);
 int  virge_set_start(uint32_t byte_off);
 int  virge_vsync_wait(uint32_t timeout_us);        /* to the start of the next vertical retrace: 0, or -1 */
 
+/* tri.c: 3D triangles (V2), drawn as OpenGL rasterises: the pixels whose
+ * centres are inside (top-left rule), each coloured by the plane through the
+ * vertices at its centre. The target: 16 bits a pixel (RGB555: the 3D
+ * engine's only 16-bit format) or 24 (packed), w x h, with a 16-bit Z buffer
+ * (zbuf_stride bytes a line). Vertices in pixels; z 0..65535; colours 0..255.
+ * The whole triangle must lie within the target (x, y >= 0): the engine's
+ * coordinates are unsigned, so callers clip first. virge_3d_state: zfunc
+ * -1 for no Z, else 0-7 (never, >, =, >=, <, !=, <=, always). */
+typedef struct {
+    float x, y, z;
+    float r, g, b, a;
+} virge_vertex;
+void virge_3d_target(uint32_t dest_off, int dest_stride, int bpp, int w, int h, uint32_t zbuf_off, int zbuf_stride);
+void virge_3d_state(int zfunc, int zwrite);
+void virge_tri(const virge_vertex *a, const virge_vertex *b, const virge_vertex *c);
+
 #endif

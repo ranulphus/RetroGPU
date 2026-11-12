@@ -91,7 +91,7 @@ loopa_pass() {
 # ---- host: builds and host tests of every part -----------------------------
 step build-platform-glide tools/dev make -s runtime runtime-prof gltrace dostests hal-ow hal-djgpp hal-host \
                                smoke-djgpp dostests-djgpp hreplay rig v86test build/djgpp/WARPTRI.EXE build/djgpp/CLOCKMON.EXE \
-                               build/djgpp/VPROBE.EXE build/djgpp/VTWOD.EXE
+                               build/djgpp/VPROBE.EXE build/djgpp/VTWOD.EXE build/djgpp/VTRI.EXE
 step glide-checks          tools/dev make -s check-header check-exports check-clib
 step no-3dfx               python3 tools/ci/no_3dfx.py
 step loopa-cfgcheck        make -s loopa-cfgcheck
@@ -106,6 +106,7 @@ if [ "$tier" = smoke ]; then
     step glide-conform-g400 env MGA_CARD=g400 tools/dev python3 glide/tools/conform/run.py check t01 t13 t27
     step gl-conform-g400   make -s -C gl conform CARD=g400 TESTS="t01 t16 t32"
     step virge-vtwod       loopa_pass smoke-vtwod --machine 486dx4 --card virge --exe build/djgpp/VTWOD.EXE --idle 120 --timeout 900
+    step virge-vtri        loopa_pass smoke-vtri --machine bf6 --card virge --exe build/djgpp/VTRI.EXE --idle 180 --timeout 900
 fi
 
 # ---- merge: everything ------------------------------------------------------
@@ -119,6 +120,8 @@ if [ "$tier" = merge ]; then
     pstep virge-vprobe       loopa_pass regress-vprobe --machine 486dx4 --card virge --exe build/djgpp/VPROBE.EXE --idle 90 --timeout 400
     pstep virge-vtwod-486    loopa_pass regress-vtwod-486 --machine 486dx4 --card virge --exe build/djgpp/VTWOD.EXE --idle 120 --timeout 900
     pstep virge-vtwod-p2     loopa_pass regress-vtwod-p2 --machine bf6 --card virge --exe build/djgpp/VTWOD.EXE --idle 120 --timeout 900
+    pstep virge-vtri-486     loopa_pass regress-vtri-486 --machine 486dx4 --card virge --exe build/djgpp/VTRI.EXE --idle 400 --timeout 1500
+    pstep virge-vtri-p2      loopa_pass regress-vtri-p2 --machine bf6 --card virge --exe build/djgpp/VTRI.EXE --idle 180 --timeout 900
     pstep hreplay-check      tools/dev make -s hreplay-check
     pstep glide-conform-ci   tools/dev make -s conform-ci
     # The acceptance games' traces through Glide, three cards at once. Screamer

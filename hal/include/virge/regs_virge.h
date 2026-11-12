@@ -64,6 +64,65 @@
 #define VIRGE_ROP_SRCCOPY   0xCC
 #define VIRGE_ROP_PATCOPY   0xF0
 
+/* The 3D triangle group (data book 19.4). */
+#define VIRGE_3D_Z_BASE     0xB4D4u
+#define VIRGE_3D_DEST_BASE  0xB4D8u
+#define VIRGE_3D_CLIP_LR    0xB4DCu
+#define VIRGE_3D_CLIP_TB    0xB4E0u
+#define VIRGE_3D_STRIDE     0xB4E4u     /* destination 27-16, texture 11-0 */
+#define VIRGE_3D_Z_STRIDE   0xB4E8u
+#define VIRGE_3D_TEX_BASE   0xB4ECu
+#define VIRGE_3D_TEX_BORDER 0xB4F0u
+#define VIRGE_3D_FOG_COLOR  0xB4F4u
+#define VIRGE_3D_COLOR0     0xB4F8u
+#define VIRGE_3D_COLOR1     0xB4FCu
+#define VIRGE_3D_CMD        0xB500u
+#define VIRGE_3D_BV         0xB504u
+#define VIRGE_3D_BU         0xB508u
+#define VIRGE_3D_DWDX       0xB50Cu
+#define VIRGE_3D_DWDY       0xB510u
+#define VIRGE_3D_WS         0xB514u
+#define VIRGE_3D_DDDX       0xB518u
+#define VIRGE_3D_DVDX       0xB51Cu
+#define VIRGE_3D_DUDX       0xB520u
+#define VIRGE_3D_DDDY       0xB524u
+#define VIRGE_3D_DVDY       0xB528u
+#define VIRGE_3D_DUDY       0xB52Cu
+#define VIRGE_3D_DS         0xB530u
+#define VIRGE_3D_VS         0xB534u
+#define VIRGE_3D_US         0xB538u
+#define VIRGE_3D_DGDX_DBDX  0xB53Cu     /* S8.7 each: green 31-16, blue 15-0 */
+#define VIRGE_3D_DADX_DRDX  0xB540u     /* alpha 31-16, red 15-0 */
+#define VIRGE_3D_DGDY_DBDY  0xB544u
+#define VIRGE_3D_DADY_DRDY  0xB548u
+#define VIRGE_3D_GS_BS      0xB54Cu
+#define VIRGE_3D_AS_RS      0xB550u
+#define VIRGE_3D_DZDX       0xB554u     /* S16.15 */
+#define VIRGE_3D_DZDY       0xB558u
+#define VIRGE_3D_ZS         0xB55Cu
+#define VIRGE_3D_DXDY12     0xB560u     /* S11.20 */
+#define VIRGE_3D_XEND12     0xB564u
+#define VIRGE_3D_DXDY01     0xB568u
+#define VIRGE_3D_XEND01     0xB56Cu
+#define VIRGE_3D_DXDY02     0xB570u
+#define VIRGE_3D_XS         0xB574u
+#define VIRGE_3D_YS         0xB578u
+#define VIRGE_3D_Y01_Y12    0xB57Cu     /* bit 31: left to right; lines of 01 in 26-16, of 12 in 10-0 */
+
+/* The 3D command set (beside the 2D bits it shares: AE, HC, the destination format). */
+#define VIRGE_3D_GOURAUD        (0u << 27)
+#define VIRGE_3D_LIT_TEX        (1u << 27)
+#define VIRGE_3D_UNLIT_TEX      (2u << 27)
+#define VIRGE_3D_LIT_TEX_PERSP  (5u << 27)
+#define VIRGE_3D_UNLIT_TEX_PERSP (6u << 27)
+#define VIRGE_3D_ZB_NORMAL      (0u << 24)
+#define VIRGE_3D_ZB_NONE        (3u << 24)
+#define VIRGE_3D_ZUP            (1u << 23)
+#define VIRGE_3D_ZCMP(f)        ((uint32_t)(f) << 20)   /* 0 never, 1 >, 2 =, 3 >=, 4 <, 5 !=, 6 <=, 7 always */
+#define VIRGE_3D_ABC_TEXTURE    (2u << 18)
+#define VIRGE_3D_ABC_SOURCE     (3u << 18)
+#define VIRGE_3D_FOG            (1u << 17)
+
 /* Extended CRTC registers (index at 3D4h, data at 3D5h, after the unlock). */
 #define VIRGE_CR_CHIP_ID_HI 0x2D
 #define VIRGE_CR_CHIP_ID_LO 0x2E

@@ -78,12 +78,13 @@ DJ_SRC_WARPTRI := tests/hal/warptri.c
 DJ_SRC_CLOCKMON := tests/hal/clockmon.c
 # The S3 ViRGE/DX (docs/virge.md): its register layer as a library of its own (hal/src/virge, not part of the
 # Matrox HAL's), VPROBE (PCI, IDs, the BIOS's modes, the linear window) and VTWOD (its 2D against sw2d.c).
-VIRGE_SRCS := hal/src/virge/chip.c hal/src/virge/engine2d.c hal/src/virge/cursor.c
+VIRGE_SRCS := hal/src/virge/chip.c hal/src/virge/engine2d.c hal/src/virge/cursor.c hal/src/virge/tri.c
 build/djgpp/libvirge.a: $(VIRGE_SRCS:%.c=build/djgpp/%.o)
 	@rm -f $@
 	$(DJAR) rcs $@ $^
 DJ_SRC_VPROBE := tests/virge/vprobe.c
 DJ_SRC_VTWOD := tests/virge/vtwod.c tests/hal/sw2d.c build/djgpp/libvirge.a
+DJ_SRC_VTRI := tests/virge/vtri.c build/djgpp/libvirge.a
 build/djgpp/HOOKS.EXE: tests/hal/hooks.c
 build/djgpp/SCALE.EXE: tests/hal/scale.c
 build/djgpp/HELLO.EXE: tests/shim/hello.c
@@ -94,6 +95,7 @@ build/djgpp/CLOCKMON.EXE: tests/hal/clockmon.c
 build/djgpp/VPROBE.EXE: tests/virge/vprobe.c
 build/djgpp/VTWOD.EXE: tests/virge/vtwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libvirge.a
 build/djgpp/VTWOD.EXE: DJ_CFLAGS += -Itests/hal
+build/djgpp/VTRI.EXE: tests/virge/vtri.c build/djgpp/libvirge.a
 build/djgpp/STACKPG.EXE: tests/shim/stackpg.c
 build/djgpp/MOUSETST.EXE: tests/shim/mousetst.c
 build/djgpp/JOYTEST.EXE: tests/shim/joytest.c

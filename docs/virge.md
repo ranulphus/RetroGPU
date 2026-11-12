@@ -1,6 +1,6 @@
 # The S3 ViRGE/DX: a plan
 
-**Status (2026-11-12): v1, the owner's answers in (below). V0 done; V1 done in Loop A (VTWOD 19/19 on both boards); bench C pending; V2 next.**
+**Status (2026-11-12): v1, the owner's answers in (below). V0 and V1 done in Loop A (on main); V2 under way: Gouraud and Z triangles exact (VTRI), textures next; bench C pending.**
 
 The owner's decisions (2026-11-12, `gl/docs/backends.md`): the ViRGE/DX is the first card after the Matrox ones,
 before the Riva TNT2; DOS-GL, GLOS's desktop and Glide all run on it; the card is bench C's (the 486DX4, PCI,
@@ -85,6 +85,24 @@ licences are listed in V1 before any code is written from them.
   (RGB565) or 32 bits; on this card the linear window has to come from this layer (later its device level), and
   a 15-bit desktop is a new screen format for GLOS (its windows already carry their format).
 - **Bench C** (VPROBE, VTWOD on silicon, its BIOS's modes) waits for the PC to boot from its disk.
+
+## V2 so far
+
+- **The set-up** (`hal/src/virge/tri.c`): vertices sorted bottom to top; the lines whose centres are inside
+  (01's part from the bottom line `TYS`, then 12's); side 02's X at the first line and every line's step up
+  (`TdXdY02`), the other side's likewise (`TXEND01`/`TdXdY01`, then `TXEND12`/`TdXdY12` from the first line of
+  12's part); edges set half a pixel left, so the engine's ceil() picks the pixels whose centres are inside:
+  OpenGL's rule, top-left included. Attributes: each start value is the attribute's plane at side 02 on the first
+  line; its Y delta follows side 02 up a line (`dA/dx * TdXdY02 - dA/dy`); its X delta is per pixel **in the
+  drawing direction** (negated when side 02 is on the right).
+- **`VTRI`**, against OpenGL's rules worked out in the program: random triangles, a seamless jittered mesh (a gap
+  or a pixel drawn twice shows) and Z-tested overlaps. In Loop A on both boards: coverage exact everywhere, colours
+  within a step of 5 bits everywhere, Z's choice agreeing but for 0.24% of pixels where two depths nearly tie.
+- **For bench C to settle:** 86Box's model takes Z along a line (`TdZdX`) with 16 fractional bits (it starts each
+  line at `TZS << 1`); the data book says S16.15 as for `TZS` and `TdZdY`. The code follows the model, marked.
+- **References:** the data book and measurement only. Mesa's old ViRGE driver (`s3v`, Mesa 6-7) carries no licence
+  in its files (an author's name only) and is not in Mesa's licence list, so nothing is taken from it; 86Box's
+  model is GPL and only run against (its behaviour read for facts, its code not used).
 
 ## The owner's answers (2026-11-12)
 
