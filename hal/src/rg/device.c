@@ -26,6 +26,12 @@ void rg_set_error(const char *fmt, ...)
 
 void rg_set_log(void (*fn)(const char *line)) { log_fn = fn; }
 
+void rg_log_line(const char *line)
+{
+    if (log_fn)
+        log_fn(line);
+}
+
 void rg_logf(const char *fmt, ...)
 {
     char line[256];
@@ -41,7 +47,6 @@ void rg_logf(const char *fmt, ...)
 const rg_device *rg_choose_from(const rg_device *const *list, int n, const char *want)
 {
     int i;
-    error[0] = 0;
     if (want && *want) {
         for (i = 0; i < n; i++)
             if (!strcmp(list[i]->name, want))
@@ -58,3 +63,12 @@ const rg_device *rg_choose_from(const rg_device *const *list, int n, const char 
 
 const rg_device *rg_choose(const char *want) { return rg_choose_from(devices, NDEV, want); }
 
+/* The device GLOS can give a window to (its window_ok), or NULL. */
+const rg_device *rg_window_device(void)
+{
+    int i;
+    for (i = 0; i < NDEV; i++)
+        if (devices[i]->window_ok && devices[i]->window_ok())
+            return devices[i];
+    return NULL;
+}

@@ -4,6 +4,7 @@
  * GL_MAX_TEXTURE_UNITS_ARB is 1 and the extensions are not advertised. */
 #include "gl_state.h"
 #include "../dgl/dgl.h"
+#include "rg/mga_dev.h"                /* (temporary: until B1.4 reads caps instead) */
 
 int dgl_texture_units(void) { return mga.has_dual_tex ? 2 : 1; }
 

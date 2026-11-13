@@ -16,6 +16,7 @@
  * copies bring them back). */
 #include "gl_tex.h"
 #include "../dgl/dgl.h"
+#include "rg/mga_dev.h"                /* (the Matrox device: until B1.4 moves this file into the Matrox back end) */
 #include "mga/mmio.h"                  /* mga_cmd_open */
 #include "mga/sys.h"                   /* sys_time_us */
 #include <stdlib.h>
@@ -74,14 +75,11 @@ static void env_defaults(dgl_texenv *e)
     e->rgb_scale = e->alpha_scale = 1.0f;
 }
 
+/* Everything drawn: the device's sync, which runs context.c's hook (the
+ * epoch moves on, retired blocks come back) when it completes. */
 int dgl_sync(void)
 {
-    DGL_GPU_ENTER();
-    if (engine_sync(500000) != 0)
-        return -1;
-    dgl_sync_epoch++;
-    dgl_vram_sync_done();
-    return 0;
+    return dgl_dev ? dgl_dev->sync() : -1;
 }
 GLuint dgl_bound_name(void) { return bound; }
 

@@ -2,6 +2,7 @@
  * §6.2: glGetFloatv, glGetBooleanv). */
 #include "gl_state.h"
 #include "../dgl/dgl.h"
+#include "rg/mga_dev.h"                /* (temporary: until B1.4 reads caps instead) */
 #include <stdio.h>
 #include <string.h>
 
@@ -23,7 +24,7 @@ static int query(GLenum p, double *v)
     case GL_RED_BITS: case GL_BLUE_BITS: v[0] = 5; return 1;
     case GL_GREEN_BITS: v[0] = 6; return 1;
     case GL_ALPHA_BITS: v[0] = 0; return 1;
-    case GL_DEPTH_BITS: v[0] = dgl_ctx.z_off ? 16 : 0; return 1;
+    case GL_DEPTH_BITS: v[0] = dgl_ctx.depth_bits ? 16 : 0; return 1;
     case GL_DEPTH_FUNC: v[0] = dgl_gl.depth_func; return 1;
     case GL_DEPTH_WRITEMASK: v[0] = dgl_gl.depth_mask; return 1;
     case GL_DEPTH_CLEAR_VALUE: v[0] = dgl_gl.clear_depth; return 1;

@@ -22,7 +22,6 @@ static char snap_dir[96];
 
 int dglSnapshot(const char *path)
 {
-    const volatile uint16_t *fb;
     unsigned char *row;
     FILE *f;
     int x, y, ok;
@@ -33,22 +32,20 @@ int dglSnapshot(const char *path)
         DGL_WARN("DGL-SNAP cannot write %s", path);
         return -1;
     }
-    row = (unsigned char *)malloc((size_t)dgl_ctx.width * 3);
+    row = (unsigned char *)malloc((size_t)dgl_ctx.width * 4);   /* (the device's RGBA8, packed to RGB in place) */
     if (!row) {
         fclose(f);
         return -1;
     }
     dgl_sync();                                   /* the LFB is not ordered with queued draws */
     DGL_GPU_QUIET();
-    fb = (const volatile uint16_t *)(mga_fb + dgl_color_off(dgl_ctx.draw_front));
     fprintf(f, "P6\n%d %d\n255\n", dgl_ctx.width, dgl_ctx.height);
     for (y = 0; y < dgl_ctx.height; y++) {
+        dgl_dev->read(dgl_ctx.draw_front, 0, y, dgl_ctx.width, 1, row, dgl_ctx.width * 4);
         for (x = 0; x < dgl_ctx.width; x++) {
-            uint16_t c = fb[y * dgl_ctx.pitch_px + x];
-            unsigned r = (c >> 11) & 31, g = (c >> 5) & 63, b = c & 31;
-            row[x * 3 + 0] = (unsigned char)((r << 3) | (r >> 2));
-            row[x * 3 + 1] = (unsigned char)((g << 2) | (g >> 4));
-            row[x * 3 + 2] = (unsigned char)((b << 3) | (b >> 2));
+            row[x * 3 + 0] = row[x * 4 + 0];
+            row[x * 3 + 1] = row[x * 4 + 1];
+            row[x * 3 + 2] = row[x * 4 + 2];
         }
         fwrite(row, 3, (size_t)dgl_ctx.width, f);
     }

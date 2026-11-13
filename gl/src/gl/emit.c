@@ -9,6 +9,7 @@
 #include "gl_draw.h"
 #include "gl_tex.h"
 #include "../dgl/dgl.h"
+#include "rg/mga_dev.h"                /* (the Matrox device: until B1.4 moves this file into the Matrox back end) */
 #include "mga/fp.h"
 #include "mga/tex.h"
 #include "mga/mmio.h"
@@ -170,7 +171,7 @@ static uint32_t stage_word(int stage, int unit, const dgl_texture *t)
 
 static void validate_state(void)
 {
-    int depth = dgl_gl.depth_test && dgl_ctx.z_off;
+    int depth = dgl_gl.depth_test && rg_mga.z_off;
     uint32_t alphactrl, zmode = depth ? zmode_for(dgl_gl.depth_func) : DWG_ZMODE_NOZCMP, asel;
     dgl_texture *tex = dgl_gl.texture_2d ? dgl_unit_texture(0) : NULL;
     dgl_texture *tex1 = dgl_gl.texture_2d1 && dgl_texture_units() > 1 ? dgl_unit_texture(1) : NULL;
@@ -1250,8 +1251,8 @@ static void emit_point(const dgl_cvtx *a)
 
 static void emit_end(void) { }
 
-/* The CPU's setup from now on (GLOS windows: dgl/glos.c). */
-void dgl_emit_no_warp(void)
+/* The CPU's setup from now on (GLOS windows). */
+static void dgl_emit_no_warp(void)
 {
     if (warp_tris || warp_failures)
         warp_stop();
@@ -1262,7 +1263,9 @@ void dgl_emit_no_warp(void)
 void dgl_emit_install(void)
 {
     const char *e = getenv("DGL_WARP");
-    warp_on = !(e && *e == '0') && warp_available() && !dgl_glos.on;  /* (not in a GLOS window: dgl/glos.c) */
+    if (rg_lock.on)
+        dgl_emit_no_warp();                     /* (a GLOS window: the CPU's setup; hal/src/rg/mga_glos.c) */
+    warp_on = !(e && *e == '0') && warp_available() && !rg_lock.on;  /* (not in a GLOS window) */
     e = getenv("DGL_WARPDMA");
     warp_use_dma = !(e && *e == '0');          /* DGL_WARPDMA=0: vertices by the CPU, no DMA stream */
     e = getenv("DGL_AGP");
@@ -1311,7 +1314,7 @@ static void clear(GLbitfield mask)
         uint32_t b = (uint32_t)lrintf(dgl_gl.clear_color[2] * 31.0f);
         engine_fill(x0, y0, x1 - x0, y1 - y0, (r << 11) | (g << 5) | b);
     }
-    if ((mask & GL_DEPTH_BUFFER_BIT) && dgl_ctx.z_off && dgl_gl.depth_mask) {
+    if ((mask & GL_DEPTH_BUFFER_BIT) && rg_mga.z_off && dgl_gl.depth_mask) {
         fifo_reserve(1);
         MGA_WR32(MGAREG_PLNWT, 0xFFFFFFFFu);
         engine_fill_depth(x0, y0, x1 - x0, y1 - y0, (uint32_t)lrint(dgl_gl.clear_depth * 65535.0));
@@ -1335,7 +1338,7 @@ void APIENTRY glClear(GLbitfield mask)
  * sees its picture once it is scaled onto the display. */
 void APIENTRY glFlush(void)
 {
-    if (dgl_ctx.active && dgl_ctx.scaled && (!dgl_ctx.double_buffer || dgl_ctx.draw_front))
+    if (dgl_ctx.active && rg_mga.scaled && (!dgl_ctx.double_buffer || dgl_ctx.draw_front))
         dgl_present_front();
 }
 
@@ -1343,7 +1346,7 @@ void APIENTRY glFinish(void)
 {
     if (!dgl_ctx.active)
         return;
-    if (dgl_ctx.scaled && (!dgl_ctx.double_buffer || dgl_ctx.draw_front))
+    if (rg_mga.scaled && (!dgl_ctx.double_buffer || dgl_ctx.draw_front))
         dgl_present_front();
     else
         dgl_sync();

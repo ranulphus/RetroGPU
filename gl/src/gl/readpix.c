@@ -9,9 +9,9 @@
 
 void APIENTRY glReadPixels(GLint x, GLint y, GLsizei w, GLsizei h, GLenum format, GLenum type, GLvoid *pixels)
 {
-    const volatile uint16_t *fb;
+    static uint8_t px[4 * 4096];            /* one row as the device reads it: RGBA8 */
     unsigned char *row = (unsigned char *)pixels;
-    int bpp, stride, i, j;
+    int bpp, stride, i, j, n;
     if (w < 0 || h < 0) { dgl_gl_error(GL_INVALID_VALUE); return; }
     if (type != GL_UNSIGNED_BYTE) { dgl_gl_error(GL_INVALID_ENUM); return; }
     switch (format) {
@@ -26,25 +26,23 @@ void APIENTRY glReadPixels(GLint x, GLint y, GLsizei w, GLsizei h, GLenum format
     dgl_sync();                             /* the LFB is not ordered with queued draws */
     dgl_regcrc("read");
     DGL_GPU_QUIET();                        /* (the CPU's work from here) */
-    fb = (const volatile uint16_t *)(mga_fb + dgl_color_off(dgl_ctx.read_front));
     for (j = 0; j < h; j++, row += stride) {
         int sy = dgl_ctx.height - 1 - (y + j);     /* GL row -> screen row */
         unsigned char *p = row;
         if ((j & 15) == 15)
             dgl_yield_maybe(0);                    /* (a whole frame read back takes a while: the sound's turn) */
-        for (i = 0; i < w; i++, p += bpp) {
-            int sx = x + i;
-            unsigned r = 0, g = 0, b = 0;
-            if (sx >= 0 && sx < dgl_ctx.width && sy >= 0 && sy < dgl_ctx.height) {
-                uint16_t c = fb[sy * dgl_ctx.pitch_px + sx];
-                r = (c >> 11) & 31; g = (c >> 5) & 63; b = c & 31;
-                r = (r << 3) | (r >> 2); g = (g << 2) | (g >> 4); b = (b << 3) | (b >> 2);
+        for (i = 0; i < w; i += n) {
+            const uint8_t *q = px;
+            int k;
+            n = w - i < 4096 ? w - i : 4096;
+            dgl_dev->read(dgl_ctx.read_front, x + i, sy, n, 1, px, 4 * n);   /* (outside the buffer: black) */
+            for (k = 0; k < n; k++, q += 4, p += bpp) {
+                if (format == GL_RGBA || format == GL_RGB) { p[0] = q[0]; p[2] = q[2]; }
+                else { p[0] = q[2]; p[2] = q[0]; }
+                p[1] = q[1];
+                if (bpp == 4)
+                    p[3] = 255;
             }
-            if (format == GL_RGBA || format == GL_RGB) { p[0] = (unsigned char)r; p[2] = (unsigned char)b; }
-            else { p[0] = (unsigned char)b; p[2] = (unsigned char)r; }
-            p[1] = (unsigned char)g;
-            if (bpp == 4)
-                p[3] = 255;
         }
     }
 }

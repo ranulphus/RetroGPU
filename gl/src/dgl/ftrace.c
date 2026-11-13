@@ -14,6 +14,7 @@
  * DGL-FRAMES. Recording costs a few clock reads a frame, and two for each
  * texture upload or sub-image. */
 #include "dgl.h"
+#include "rg/mga_dev.h"                /* (temporary: until B1.4 reads caps instead) */
 #include "../gl/gl_tex.h"
 #include "mga/setup.h"
 #include "mga/sys.h"
@@ -53,9 +54,13 @@ void dgl_ftrace_init(void)
     nrec = caprec = frames = 0;
     prev = dgl_texc;
     prev_tris = warp_tris + setup_stats.tris;
-    prev_resets = engine_resets;
-    prev_timeouts = engine_timeouts;
-    prev_stuck = engine_fence_stuck;
+    {
+        rg_stats rs;
+        dgl_dev->stats(&rs);
+        prev_resets = rs.resets;
+        prev_timeouts = rs.timeouts;
+        prev_stuck = rs.fence_stuck;
+    }
     dgl_ftrace_tex_us = dgl_ftrace_drain_us = 0;
     last_us = sys_time_us();
     dgl_ftrace_on = 1;
@@ -67,6 +72,8 @@ void dgl_ftrace_init(void)
 void dgl_ftrace_counts(void)
 {
     uint32_t tris = warp_tris + setup_stats.tris;
+    rg_stats rs;
+    dgl_dev->stats(&rs);
     pending.uploads = DELTA(uploads);
     pending.upload_kb = DELTA(upload_bytes) >> 10;
     pending.subs = DELTA(sub_fast) + DELTA(sub_iload) + DELTA(sub_full);
@@ -76,14 +83,14 @@ void dgl_ftrace_counts(void)
     pending.evictions = DELTA(evictions);
     pending.syncs = DELTA(syncs);
     pending.tris = tris - prev_tris;
-    pending.resets = engine_resets - prev_resets;
-    pending.timeouts = engine_timeouts - prev_timeouts;
-    pending.stuck = engine_fence_stuck - prev_stuck;
+    pending.resets = rs.resets - prev_resets;
+    pending.timeouts = rs.timeouts - prev_timeouts;
+    pending.stuck = rs.fence_stuck - prev_stuck;
     pending.tex_us = dgl_ftrace_tex_us;
     prev_tris = tris;
-    prev_resets = engine_resets;
-    prev_timeouts = engine_timeouts;
-    prev_stuck = engine_fence_stuck;
+    prev_resets = rs.resets;
+    prev_timeouts = rs.timeouts;
+    prev_stuck = rs.fence_stuck;
     dgl_ftrace_tex_us = 0;
 }
 
