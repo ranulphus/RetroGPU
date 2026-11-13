@@ -98,6 +98,7 @@ step loopa-cfgcheck        make -s loopa-cfgcheck
 step tests-host            tools/dev make -s tests-host
 step gl-build              make -s -C gl lib examples conform-dos
 step gl-tests-host         make -s -C gl tests-host
+step gl-layers             sh gl/tools/layers.sh
 step gl-conform-host       tools/dev make -s -C gl conform-host
 
 # ---- smoke: a short Loop A run of each part ---------------------------------

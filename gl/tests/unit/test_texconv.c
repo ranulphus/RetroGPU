@@ -1,6 +1,7 @@
 /* test_texconv.c - texel formats, alpha classes and client format expansion. */
 #include "unit.h"
 #include "../../src/gl/gl_tex.h"
+#include "../../src/backend/mga/mga_be_fmt.h"
 #include <string.h>
 
 void unit_run(void)

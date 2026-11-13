@@ -130,7 +130,7 @@ What each combination means:
 
 - **D modulated:** keep the legacy path.
 - **D not modulated, C modulated:** make the combiner the default on that
-  chip (`force_combiner` in `src/gl/emit.c`). Then update 86Box patch 0009,
+  chip (`force_combiner` in `src/backend/mga/emit.c`). Then update 86Box patch 0009,
   which applies tmodulate before the stages.
 - **C wrong, D modulated:** this is Rev A behaviour; the combiner words must
   stay 0.
@@ -188,7 +188,7 @@ every stripe's colour, and the verdict says which path ran (`tlut` or
 ### E6: texture cache after in-place texel writes (all cards)
 
 DOS-GL writes a `glTexSubImage2D` rectangle straight into the texture's VRAM
-when it can (`sub_in_place` in `src/gl/texture.c`). There are two paths:
+when it can (`sub_in_place` in `src/backend/mga/tex.c`). There are two paths:
 
 - **D:** through the drawing engine (ILOAD), queued in order with the draws.
   This is the default where the level is wide enough.

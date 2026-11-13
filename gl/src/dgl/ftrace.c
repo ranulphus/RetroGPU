@@ -14,11 +14,9 @@
  * DGL-FRAMES. Recording costs a few clock reads a frame, and two for each
  * texture upload or sub-image. */
 #include "dgl.h"
-#include "rg/mga_dev.h"                /* (temporary: until B1.4 reads caps instead) */
+#include "../backend/backend.h"
 #include "../gl/gl_tex.h"
-#include "mga/setup.h"
 #include "mga/sys.h"
-#include "mga/warp.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,7 +51,11 @@ void dgl_ftrace_init(void)
     rec = NULL;
     nrec = caprec = frames = 0;
     prev = dgl_texc;
-    prev_tris = warp_tris + setup_stats.tris;
+    {
+        dgl_be_stats bs;
+        dgl_be->stats(&bs);
+        prev_tris = bs.tris_offloaded + bs.tris;
+    }
     {
         rg_stats rs;
         dgl_dev->stats(&rs);
@@ -71,8 +73,11 @@ void dgl_ftrace_init(void)
 /* At the swap's start: what the frame did. */
 void dgl_ftrace_counts(void)
 {
-    uint32_t tris = warp_tris + setup_stats.tris;
+    uint32_t tris;
     rg_stats rs;
+    dgl_be_stats bs;
+    dgl_be->stats(&bs);
+    tris = bs.tris_offloaded + bs.tris;
     dgl_dev->stats(&rs);
     pending.uploads = DELTA(uploads);
     pending.upload_kb = DELTA(upload_bytes) >> 10;

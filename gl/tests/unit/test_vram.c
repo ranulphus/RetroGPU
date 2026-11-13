@@ -2,6 +2,7 @@
  * blocks, and a randomised alloc/free sequence that must never overlap or leak. */
 #include "unit.h"
 #include "../../src/gl/gl_tex.h"
+#include "../../src/backend/mga/vram.h"
 #include <stdlib.h>
 
 void unit_run(void)

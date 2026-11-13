@@ -2,7 +2,7 @@
  * §6.2: glGetFloatv, glGetBooleanv). */
 #include "gl_state.h"
 #include "../dgl/dgl.h"
-#include "rg/mga_dev.h"                /* (temporary: until B1.4 reads caps instead) */
+#include "../backend/backend.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -16,7 +16,7 @@ static int query(GLenum p, double *v)
     case GL_MATRIX_MODE: v[0] = dgl_gl.matrix_mode; return 1;
     case GL_VIEWPORT: for (i = 0; i < 4; i++) v[i] = dgl_gl.viewport[i]; return 4;
     case GL_SCISSOR_BOX: for (i = 0; i < 4; i++) v[i] = dgl_gl.scissor[i]; return 4;
-    case GL_MAX_TEXTURE_SIZE: v[0] = mga.max_tex_size ? mga.max_tex_size : 1024; return 1;
+    case GL_MAX_TEXTURE_SIZE: { dgl_caps c; dgl_be->caps(&c); v[0] = c.max_texture_size; return 1; }
     case GL_MAX_MODELVIEW_STACK_DEPTH: v[0] = DGL_MV_DEPTH; return 1;
     case GL_MAX_PROJECTION_STACK_DEPTH: v[0] = DGL_PROJ_DEPTH; return 1;
     case GL_MAX_TEXTURE_STACK_DEPTH: v[0] = DGL_TEX_DEPTH; return 1;
@@ -174,7 +174,7 @@ void APIENTRY glGetBooleanv(GLenum p, GLboolean *out)
  * texture units (combine.c). */
 static const char *extensions(void)
 {
-    return mga.has_dual_tex ? "GL_EXT_bgra "
+    return dgl_texture_units() == 2 ? "GL_EXT_bgra "
                               "GL_EXT_texture_edge_clamp GL_SGIS_texture_edge_clamp "
                               "GL_EXT_paletted_texture GL_EXT_shared_texture_palette "
                               "GL_ARB_vertex_buffer_object GL_EXT_draw_range_elements "
@@ -192,7 +192,9 @@ const GLubyte *APIENTRY glGetString(GLenum name)
     switch (name) {
     case GL_VENDOR: return (const GLubyte *)"DOS-GL";
     case GL_RENDERER:
-        snprintf(renderer, sizeof renderer, "DOS-GL on %s", mga.name ? mga.name : "Matrox");
+        dgl_caps c;
+        dgl_be->caps(&c);
+        snprintf(renderer, sizeof renderer, "DOS-GL on %s", c.renderer);
         return (const GLubyte *)renderer;
     case GL_VERSION: return (const GLubyte *)"1.1 DOS-GL 0.3";
     case GL_EXTENSIONS: return (const GLubyte *)extensions();

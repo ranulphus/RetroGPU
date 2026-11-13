@@ -5,11 +5,11 @@
  * the scissor. Each triangle is clipped (near/far and a guard band),
  * projected to 1/16-pixel screen coordinates, culled, and handed to the
  * HAL's setup_triangle. Lines and points become screen-space quads. */
-#include "gl_state.h"
-#include "gl_draw.h"
-#include "gl_tex.h"
-#include "../dgl/dgl.h"
-#include "rg/mga_dev.h"                /* (the Matrox device: until B1.4 moves this file into the Matrox back end) */
+#include "../../gl/gl_state.h"
+#include "../../gl/gl_draw.h"
+#include "../../gl/gl_tex.h"
+#include "../../dgl/dgl.h"
+#include "mga_be.h"
 #include "mga/fp.h"
 #include "mga/tex.h"
 #include "mga/mmio.h"
@@ -21,8 +21,6 @@
 #include <string.h>
 #include <stdint.h>
 
-int dgl_stage_word(int stage, const dgl_texenv *e, const dgl_texture *t, uint32_t *w);
-int dgl_env_needs_combiner(GLenum env, const dgl_texture *t);
 
 static mga_tri_ctx tctx;
 static mga_texstate tstate, tstate1;  /* hardware maps 0 and 1 */
@@ -132,16 +130,16 @@ static void sampler(mga_texstate *ts, const dgl_texture *tex, float *scale_s, fl
 {
     int k;
     memset(ts, 0, sizeof *ts);
-    ts->org = tex->level_off[0];
-    ts->mip_n = tex->hw_levels > 1 ? tex->hw_levels : 0;
-    for (k = 0; k < tex->hw_levels && k < 5; k++)
-        ts->mip_org[k] = tex->level_off[k];
-    ts->w_log2 = tex->hw_w_log2;
-    ts->h_log2 = tex->hw_h_log2;
-    *scale_s = (float)tex->level[0].w / (float)(1 << tex->hw_w_log2);
-    *scale_t = (float)tex->level[0].h / (float)(1 << tex->hw_h_log2);
-    ts->pitch = 1 << tex->hw_w_log2;
-    ts->hwfmt = (uint32_t)tex->hwfmt;
+    ts->org = MT(tex)->level_off[0];
+    ts->mip_n = MT(tex)->hw_levels > 1 ? MT(tex)->hw_levels : 0;
+    for (k = 0; k < MT(tex)->hw_levels && k < 5; k++)
+        ts->mip_org[k] = MT(tex)->level_off[k];
+    ts->w_log2 = MT(tex)->hw_w_log2;
+    ts->h_log2 = MT(tex)->hw_h_log2;
+    *scale_s = (float)tex->level[0].w / (float)(1 << MT(tex)->hw_w_log2);
+    *scale_t = (float)tex->level[0].h / (float)(1 << MT(tex)->hw_h_log2);
+    ts->pitch = 1 << MT(tex)->hw_w_log2;
+    ts->hwfmt = (uint32_t)MT(tex)->hwfmt;
     ts->clamp_u = tex->wrap_s != GL_REPEAT;      /* CLAMP behaves as CLAMP_TO_EDGE */
     ts->clamp_v = tex->wrap_t != GL_REPEAT;
     ts->bilinear = tex->mag_filter == GL_LINEAR || tex->min_filter == GL_LINEAR ||
@@ -1294,7 +1292,7 @@ void dgl_emit_install(void)
 }
 
 /* ---- Clears -------------------------------------------------------------- */
-static void clear(GLbitfield mask)
+void dgl_mga_clear(GLbitfield mask)
 {
     int x0, y0, x1, y1;
     PROF_SCOPE(PROF_D_CLEAR);
@@ -1323,31 +1321,3 @@ static void clear(GLbitfield mask)
     DGL_FPU_LEAVE();
 }
 
-void APIENTRY glClear(GLbitfield mask)
-{
-    if (mask & ~(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT | 0x200u /* accum */)) {
-        dgl_gl_error(GL_INVALID_VALUE);
-        return;
-    }
-    if (!dgl_ctx.active)
-        return;
-    clear(mask);
-}
-
-/* In a scaled mode a single-buffered program, or one drawing to GL_FRONT,
- * sees its picture once it is scaled onto the display. */
-void APIENTRY glFlush(void)
-{
-    if (dgl_ctx.active && rg_mga.scaled && (!dgl_ctx.double_buffer || dgl_ctx.draw_front))
-        dgl_present_front();
-}
-
-void APIENTRY glFinish(void)
-{
-    if (!dgl_ctx.active)
-        return;
-    if (rg_mga.scaled && (!dgl_ctx.double_buffer || dgl_ctx.draw_front))
-        dgl_present_front();
-    else
-        dgl_sync();
-}

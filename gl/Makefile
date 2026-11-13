@@ -46,7 +46,7 @@ HAL_SRCS := $(addprefix $(MGAHAL)/hal/,src/debug/serial.c src/pci.c src/chip.c s
               src/engine.c src/dac.c src/texhw.c src/present.c src/debug/regtrace.c src/setup/trap.c src/warp.c \
               src/rg/device.c src/rg/glos.c src/rg/mga.c src/rg/mga_glos.c port/djgpp.c)
 hal_objs = $(patsubst $(MGAHAL)/%.c,build/$(1)/mgahal/%.o,$(2))
-DGL_SRCS := $(wildcard src/dgl/*.c) $(wildcard src/gl/*.c)
+DGL_SRCS := $(wildcard src/dgl/*.c) $(wildcard src/gl/*.c) $(wildcard src/backend/mga/*.c)
 LIB := build/lib/libGL.a
 
 .PHONY: all lib examples sdl sdl-host sdl-examples loopa-sdl tests-host loopa conform conform-dos conform-host classicube loopa-classicube quake loopa-quake halflife loopa-halflife doom loopa-doom setup-djgpp setup-ow dostools 86box clean help
@@ -204,9 +204,9 @@ build/host/test_gl_h_abi: tests/unit/test_gl_h_abi.c include/GL/gl.h include/GL/
 GL_SRCS := $(wildcard src/gl/*.c)
 UNIT_TESTS := matrix clip assembly texconv vram lists buffer
 UNIT_lists := src/gl/lists.c src/gl/vertex.c src/gl/buffer.c src/gl/matrix.c src/gl/state.c src/gl/raster.c
-UNIT_buffer := src/gl/buffer.c src/gl/vertex.c src/gl/matrix.c src/gl/state.c src/gl/raster.c src/gl/combine.c
-UNIT_texconv := src/gl/texconv.c
-UNIT_vram := src/gl/vram.c
+UNIT_buffer := src/gl/buffer.c src/gl/vertex.c src/gl/matrix.c src/gl/state.c src/gl/raster.c src/backend/mga/combine.c
+UNIT_texconv := src/gl/texconv.c src/backend/mga/texconv.c
+UNIT_vram := src/backend/mga/vram.c
 UNIT_matrix := src/gl/matrix.c src/gl/state.c
 UNIT_clip := src/gl/clip.c
 UNIT_assembly := src/gl/vertex.c src/gl/buffer.c src/gl/matrix.c src/gl/state.c src/gl/raster.c

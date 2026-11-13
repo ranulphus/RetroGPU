@@ -4,9 +4,14 @@
  * GL_MAX_TEXTURE_UNITS_ARB is 1 and the extensions are not advertised. */
 #include "gl_state.h"
 #include "../dgl/dgl.h"
-#include "rg/mga_dev.h"                /* (temporary: until B1.4 reads caps instead) */
+#include "../backend/backend.h"
 
-int dgl_texture_units(void) { return mga.has_dual_tex ? 2 : 1; }
+int dgl_texture_units(void)
+{
+    dgl_caps c;
+    dgl_be->caps(&c);
+    return c.texture_units;
+}
 
 /* The unit a GL_TEXTUREi_ARB or GL_TEXTUREi_SGIS names; -1 (and
  * GL_INVALID_ENUM) for any other. */

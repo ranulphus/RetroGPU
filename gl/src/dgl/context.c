@@ -7,8 +7,8 @@
 #include "dgl.h"
 #include "../gl/gl_state.h"
 #include "../gl/gl_tex.h"
-#include "mga/setup.h"
 #include "mga/sys.h"
+#include "../backend/backend.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,10 +32,6 @@ static unsigned long stats_swaps0;
 static uint32_t drain_us;
 static uint32_t retrace0_us, present_base_us;
 #ifdef MGA_PROF
-#include "mga/fp.h"
-#include "mga/mmio.h"
-#include "mga/regs_mga.h"
-#include <math.h>
 static void prof_start(int level);
 static void prof_report(uint32_t tris);
 #endif
@@ -59,10 +55,22 @@ static void run_wait_hook(void);
  * and GL's state written again when GLOS lent the engine to someone else. */
 static void dev_wait(void) { if (wait_hook) run_wait_hook(); }
 static void dev_yield(void) { dgl_yield_maybe(0); }
-static void dev_synced(void)
+static void dev_synced(void) { dgl_be->synced(); }
+
+/* The back end's texture memory in use. */
+static uint32_t be_mem_used(void)
 {
-    dgl_sync_epoch++;
-    dgl_vram_sync_done();
+    dgl_be_stats bs;
+    dgl_be->stats(&bs);
+    return bs.mem_used;
+}
+
+/* Triangles set up by the CPU so far (the back end's count). */
+static uint32_t be_tris(void)
+{
+    dgl_be_stats bs;
+    dgl_be->stats(&bs);
+    return bs.tris;
 }
 static void dev_lost(void) { dgl_gl.dirty |= DGL_DIRTY_TARGET | DGL_DIRTY_RASTER | DGL_DIRTY_TEXTURE | DGL_DIRTY_FOG; }
 static void dev_log(const char *line) { DGL_ERR("%s", line); }
@@ -83,12 +91,15 @@ static void stats_present(void)
     stats.present_us = rs.present_us - present_base_us;
 }
 
-void dgl_present_front(void)
+int dgl_present_front(void)
 {
+    int d;
     if (!dgl_ctx.active)
-        return;
-    disturbed(dgl_dev->present_front());
+        return 0;
+    d = dgl_dev->present_front();
+    disturbed(d);
     stats_present();
+    return d != 0;
 }
 
 static void after_init(const DGLConfig *c);
@@ -228,7 +239,7 @@ static void after_init(const DGLConfig *cp)
         e = getenv("DGL_STATS");
         stats_on = e ? atoi(e) : 0;
         stats_t0 = sys_time_us();
-        stats_tris0 = setup_stats.tris;
+        stats_tris0 = be_tris();
 #ifdef MGA_PROF
         prof_start(stats_on);
 #endif
@@ -286,43 +297,12 @@ void dglSetVSync(int enabled)
  * single operations cost (in 86Box the emulated cycles, which are not the
  * hardware's: an MMIO access there costs almost nothing). */
 static uint32_t prof_ovh;
-static volatile double micro_in = 123.456;
-static volatile int32_t micro_out;
-static __attribute__((noinline)) int32_t micro_cast(double v) { return (int32_t)v; }
-static __attribute__((noinline)) int32_t micro_floor(double v) { return mga_ifloor(v); }
-static __attribute__((noinline)) int32_t micro_lrint(double v) { return (int32_t)lrint(v); }
-static __attribute__((noinline)) double micro_div(double v) { return 1.0 / v; }
-
-static void prof_micro(void)
-{
-    uint64_t t0, wr = 0, rd, cast, flo, lr, dv;
-    int i, r;
-    for (r = 0; r < 50; r++) {
-        engine_sync(500000);
-        t0 = prof_rdtsc();
-        for (i = 0; i < 16; i++)
-            MGA_WR32(MGAREG_PLNWT, 0xFFFFFFFFu);
-        wr += prof_rdtsc() - t0;
-    }
-    engine_sync(500000);
-#define LOOP(var, expr) t0 = prof_rdtsc(); for (i = 0; i < 1000; i++) expr; var = (prof_rdtsc() - t0) / 1000
-    LOOP(rd, micro_out = MGA_RD8(MGAREG_FIFOSTATUS));
-    LOOP(cast, micro_out = micro_cast(micro_in));
-    LOOP(flo, micro_out = micro_floor(micro_in));
-    LOOP(lr, micro_out = micro_lrint(micro_in));
-    LOOP(dv, micro_out = (int32_t)micro_div(micro_in));
-#undef LOOP
-    DGL_ERR("DGL-MICRO write=%lu read=%lu cast=%lu ifloor=%lu lrint=%lu div=%lu (cycles each, calls included)",
-            (unsigned long)(wr / 800), (unsigned long)rd, (unsigned long)cast, (unsigned long)flo,
-            (unsigned long)lr, (unsigned long)dv);
-}
-
 static void prof_start(int level)
 {
     int i;
     uint64_t t0;
-    if (level >= 3)
-        prof_micro();
+    if (level >= 3 && dgl_be->prof_micro)
+        dgl_be->prof_micro();
     t0 = prof_rdtsc();
     for (i = 0; i < 1024; i++) {
         prof_switch(PROF_D_SWAP);
@@ -418,7 +398,7 @@ static void swap_buffers(void)
     stats.swaps++;
     dgl_snap_frame(stats.swaps);        /* DGL_SNAP: before the frame is shown */
     stats.frames++;
-    stats.triangles = setup_stats.tris;
+    stats.triangles = be_tris();
     stats.stub_calls = dgl_stub_calls;
     if (stats_on) {
         uint32_t now = sys_time_us(), dt = now - stats_t0;
@@ -431,14 +411,14 @@ static void swap_buffers(void)
             stats.present_us = rs.present_us - present_base_us;
             DGL_ERR("DGL-STAT fps=%.1f tris/s=%.0f swaps=%lu tex_kb=%lu stubs=%lu drain_ms=%lu retrace_ms=%lu "
                     "present_ms=%lu hooks=%lu", (stats.swaps - stats_swaps0) * 1e6 / dt,
-                    (setup_stats.tris - stats_tris0) * 1e6 / dt, stats.swaps, (unsigned long)(dgl_vram_used() >> 10),
+                    (be_tris() - stats_tris0) * 1e6 / dt, stats.swaps, (unsigned long)(be_mem_used() >> 10),
                     dgl_stub_calls, (unsigned long)(drain_us / 1000), (unsigned long)(retrace_us / 1000),
                     (unsigned long)((stats.present_us - present0_us) / 1000), stats.wait_hooks);
             drain_us = 0;
             present0_us = stats.present_us;
 #ifdef MGA_PROF
             if (stats_on >= 2)
-                prof_report(setup_stats.tris - stats_tris0);
+                prof_report(be_tris() - stats_tris0);
 #endif
             if (stats_on >= 2) {
                 DGL_ERR("DGL-PRIMS begins=%lu skipped=%lu tris=%lu clipped=%lu zero=%lu culled=%lu seqs=%lu",
@@ -453,7 +433,7 @@ static void swap_buffers(void)
                 memset(&dgl_texc, 0, sizeof dgl_texc);
             }
             stats_t0 = now;
-            stats_tris0 = setup_stats.tris;
+            stats_tris0 = be_tris();
             stats_swaps0 = stats.swaps;
         }
     }

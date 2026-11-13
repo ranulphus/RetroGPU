@@ -7,7 +7,7 @@
  * it goes back to the heap only after the next completed engine sync
  * (dgl_vram_sync_done), so a new upload can never overwrite texels the
  * engine has yet to fetch. */
-#include "gl_tex.h"
+#include "vram.h"
 #include <stdlib.h>
 
 #define GRAIN 32u

@@ -16,7 +16,7 @@
  * inputs as Mesa did). INTERPOLATE, two non-texture sources, x4 on an add,
  * and GL_CONSTANT_ARB (FCOL, not programmed yet) are not done: the stage
  * word is refused and emit.c draws GL_MODULATE, logged once. */
-#include "gl_tex.h"
+#include "../../gl/gl_tex.h"
 
 enum { BASE_RGB, BASE_RGBA, BASE_A, BASE_I };
 

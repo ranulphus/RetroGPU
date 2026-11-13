@@ -47,6 +47,9 @@ void dgl_ftrace_init(void);
 void dgl_ftrace_counts(void);             /* at a swap's start */
 void dgl_ftrace_frame(uint32_t t0);       /* at its end (t0: its start) */
 void dgl_ftrace_write(void);              /* at exit (not on a fault) */
+/* DGL_FRAMES: the time spent in texture work, a frame at a time. */
+#define FT_START() uint32_t ft0 = dgl_ftrace_on ? sys_time_us() : 0
+#define FT_END() do { if (dgl_ftrace_on) dgl_ftrace_tex_us += sys_time_us() - ft0; } while (0)
 
 /* emit.c: install the hardware sinks for the vertex stream. */
 void dgl_emit_install(void);
@@ -59,7 +62,8 @@ typedef struct {
     int      draw_front, read_front;      /* glDrawBuffer/glReadBuffer chose GL_FRONT */
     unsigned window;                      /* a GLOS window's handle, 0 full screen */
 } dgl_context;
-void dgl_present_front(void);             /* scaled, single-buffered or GL_FRONT: show the render buffer now */
+int  dgl_present_front(void);             /* scaled, single-buffered or GL_FRONT: show the render buffer now (1 if
+                                             the device did; 0 in modes that are not scaled) */
 extern dgl_context dgl_ctx;
 
 void dgl_retarget(void);                  /* point the engine at dgl_ctx.draw_front's buffer */
