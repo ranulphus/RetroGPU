@@ -115,6 +115,11 @@
 #define VIRGE_3D_UNLIT_TEX      (2u << 27)
 #define VIRGE_3D_LIT_TEX_PERSP  (5u << 27)
 #define VIRGE_3D_UNLIT_TEX_PERSP (6u << 27)
+#define VIRGE_3D_TWE            (1u << 26)  /* texture wrap */
+#define VIRGE_3D_TEXFMT(f)      ((uint32_t)(f) << 5)    /* 0 ARGB8888, 1 ARGB4444, 2 ARGB1555, 6 palettized */
+#define VIRGE_3D_MIPSIZE(s)     ((uint32_t)(s) << 8)    /* the largest level: 2^s texels a side */
+#define VIRGE_3D_FILTER(f)      ((uint32_t)(f) << 12)   /* 0 M1TPP .. 3 M8TPP, 4 1TPP, 6 4TPP */
+#define VIRGE_3D_TB(m)          ((uint32_t)(m) << 15)   /* lit: 0 reflection, 1 modulate, 2 decal */
 #define VIRGE_3D_ZB_NORMAL      (0u << 24)
 #define VIRGE_3D_ZB_NONE        (3u << 24)
 #define VIRGE_3D_ZUP            (1u << 23)

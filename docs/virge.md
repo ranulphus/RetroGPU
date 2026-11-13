@@ -1,6 +1,8 @@
 # The S3 ViRGE/DX: a plan
 
-**Status (2026-11-12): v1, the owner's answers in (below). V0 and V1 done in Loop A (on main); V2 under way: Gouraud and Z triangles exact (VTRI), textures next; bench C pending.**
+**Status (2026-11-13): v1, the owner's answers in (below). V0 and V1 done in Loop A (on main); V2 done in Loop A
+(branch `virge`): Gouraud, Z, blending, fog and textures (three formats, NEAREST/LINEAR, perspective, mipmaps,
+modulate) within VTRI's tolerances on both boards; bench C pending.**
 
 The owner's decisions (2026-11-12, `gl/docs/backends.md`): the ViRGE/DX is the first card after the Matrox ones,
 before the Riva TNT2; DOS-GL, GLOS's desktop and Glide all run on it; the card is bench C's (the 486DX4, PCI,
@@ -98,8 +100,53 @@ licences are listed in V1 before any code is written from them.
 - **`VTRI`**, against OpenGL's rules worked out in the program: random triangles, a seamless jittered mesh (a gap
   or a pixel drawn twice shows) and Z-tested overlaps. In Loop A on both boards: coverage exact everywhere, colours
   within a step of 5 bits everywhere, Z's choice agreeing but for 0.24% of pixels where two depths nearly tie.
-- **For bench C to settle:** 86Box's model takes Z along a line (`TdZdX`) with 16 fractional bits (it starts each
-  line at `TZS << 1`); the data book says S16.15 as for `TZS` and `TdZdY`. The code follows the model, marked.
+- **Textures** (`virge_3d_texture`, `virge_tex_load`; ARGB8888, ARGB4444 and ARGB1555, square, 1 to 512 texels a
+  side, mipmaps largest first and packed after it). The planes: U and V are the texel position in the largest level,
+  moved half a texel back for LINEAR (the engine weights the texel at the integer part and the next, with no
+  half-texel offset of its own) and by whole textures so none is negative (start values must be; the engine wraps).
+  With perspective, U and V are that times W, and W is 1/w scaled so the triangle's largest is 2^30 (fewer bits if U
+  would not fit). D, the mipmap level (its integer part; 0 the largest), is OpenGL's level of detail plus a half
+  (the nearest level), worked out at each vertex and held to the levels there are. Environments: DECAL (as the
+  unlit triangle, unless fog or the vertex's alpha needs the lit one), MODULATE, REFLECTION (the sum). Blending:
+  SRC_ALPHA, ONE_MINUS_SRC_ALPHA with the texel's alpha or the vertex's; fog by the vertex's alpha. Always wrapped
+  (OpenGL's REPEAT); CLAMP waits for the border colour work in V3.
+- **What the engine cannot do as OpenGL does** (approximated; logged by DOS-GL's back end in V3): LINEAR
+  magnification beside NEAREST minification (one filter a triangle); MODULATE's alpha (the texel's or the vertex's,
+  not their product); the level of detail with perspective (a plane through the vertices' values, not per pixel);
+  LINEAR's half-texel move at smaller levels (it is the largest level's half texel); between-level filtering
+  (86Box's model has none: `M2TPP`/`M8TPP` sample one level); non-square textures (padded or repeated by the back
+  end); more than 15 repeats of a texture across one triangle without perspective (U's 31 bits; the back end splits).
+- **`VTRI`'s texture cases** (and `blend`, the vertex's alpha on Gouraud triangles), against OpenGL's sampling
+  worked out in the program (perspective-correct coordinates, the level of detail from the derivatives at each
+  pixel): `tex-nearest`, `tex-linear`, `tex-persp`, `tex-persp-linear` (ARGB1555, 256 texels), `tex-mip` (128, 8
+  levels, minified up to 6 texels a pixel), `tex-modulate` (ARGB4444, 64), `tex-8888` (32, perspective),
+  `tex-alpha` (the texel's alpha over a Gouraud layer), `tex-fog`. All pass on both boards, the same pixels
+  (P2 board 28 s for the whole program, 486 82 s): NEAREST's texels picked differently at their edges for under 2%
+  of pixels, LINEAR within two steps, the rest within one but for under 0.3%. `VTRI only=CASE k=MIN,MAX` runs one
+  case at other scales.
+- **For bench C to settle:**
+  - 86Box's model takes Z along a line (`TdZdX`) with 16 fractional bits (it starts each line at `TZS << 1`); the
+    data book says S16.15 as for `TZS` and `TdZdY`. The code follows the model, marked.
+  - **U and V without perspective:** the data book says S12.8.11 (texels of the largest level, 2^19 to a texel,
+    whatever the size); 86Box's model takes 2^(27 - s) to a texel (s the mipmap size field), the perspective
+    format's. They agree only at 256 texels (s = 8), so `tex-nearest`, `tex-linear` and `tex-mip`'s largest level
+    are where both agree; `tex-modulate` (64) and `tex-mip` (128) find out which is right. The code follows the model.
+  - **The scale of U/W with perspective:** 86Box's model has the ViRGE/DX's texel position as (U/W) * 2^(38 - s)
+    (and the first ViRGE's 16 times less); the data book gives the formats only. The code puts U at the position
+    times W over 2^11 (`PERSP_UW_SHIFT`).
+  - **LINEAR's sample points:** whether the chip weights about the texel's corner (86Box's model, no half-texel
+    offset) or its centre. The code moves half a texel for OpenGL on the model's word.
+  - **The source stride** (`DEST_SRC_STR` bits 11-0, "a flat texture's row"): 86Box's model ignores it (rows
+    packed); the code writes the packed row, at least 8 bytes (so flat 16-bit textures of 2 texels or fewer would
+    differ).
+  - Dithering of 16-bit output (86Box's model: on by default, up to 7/8 of a step), and whether the unlit triangle
+    takes the vertex's alpha for blending.
+  - **The first pixel's offset:** 86Box's model steps each attribute from the edge to a line's first pixel by the
+    edge's position to 1/32 of a pixel (always over, left to right; under, right to left). Colours never show it;
+    a minified LINEAR texture does (`VTRI k=1.0,1.5 only=tex-linear`: 2.1% of pixels two steps out, none three;
+    `k=0.2,0.5`: 0.05%), and NEAREST picks a neighbouring texel for 1.5-2% of pixels. VTRI's tolerances allow it.
+    The set-up could take half of it back (every start less dA/dx over 64, either direction) if bench C shows the
+    chip does the same; it does not tune to the model before then.
 - **References:** the data book and measurement only. Mesa's old ViRGE driver (`s3v`, Mesa 6-7) carries no licence
   in its files (an author's name only) and is not in Mesa's licence list, so nothing is taken from it; 86Box's
   model is GPL and only run against (its behaviour read for facts, its code not used).

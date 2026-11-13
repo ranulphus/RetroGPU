@@ -91,13 +91,55 @@ int  virge_vsync_wait(uint32_t timeout_us);        /* to the start of the next v
  * (zbuf_stride bytes a line). Vertices in pixels; z 0..65535; colours 0..255.
  * The whole triangle must lie within the target (x, y >= 0): the engine's
  * coordinates are unsigned, so callers clip first. virge_3d_state: zfunc
- * -1 for no Z, else 0-7 (never, >, =, >=, <, !=, <=, always). */
+ * -1 for no Z, else 0-7 (never, >, =, >=, <, !=, <=, always).
+ *
+ * Textures (virge_3d_texture; NULL for Gouraud): square, 2^log2size texels a
+ * side (up to 512), in VRAM at offset, its mipmaps (when levels > 1) after
+ * it, each half the size of the one before, as virge_tex_level_offset says.
+ * s and t are OpenGL's (the texture is 0..1, repeated: the engine wraps);
+ * oow is 1/w, for perspective (persp set; any positive scale), else unused.
+ * Filters as OpenGL's NEAREST and LINEAR (the engine's samples moved half a
+ * texel to OpenGL's); with mipmaps, the level the triangle's footprint
+ * picks (OpenGL's NEAREST_MIPMAP_NEAREST, or LINEAR within the level for
+ * LINEAR). Environments: DECAL draws the texel (OpenGL's REPLACE, and DECAL
+ * for RGB textures), MODULATE the texel times the vertex colour (alpha: the
+ * texel's or, with VIRGE_BLEND_SOURCE, the vertex's), REFLECTION their sum
+ * (the engine's "complex reflection"). Blending (virge_3d_blend) is OpenGL's
+ * SRC_ALPHA, ONE_MINUS_SRC_ALPHA with the texel's alpha or the vertex's;
+ * fog (virge_3d_fog, textured triangles only, not with the vertex's alpha
+ * for blending) mixes in the fog colour by 1 - a/255, a being the vertex
+ * alpha: the fog factor, worked out by the caller per vertex. */
 typedef struct {
     float x, y, z;
     float r, g, b, a;
+    float s, t, oow;
 } virge_vertex;
+
+enum { VIRGE_TEX_ARGB8888 = 0, VIRGE_TEX_ARGB4444 = 1, VIRGE_TEX_ARGB1555 = 2 };
+enum { VIRGE_TEXENV_REFLECTION = 0, VIRGE_TEXENV_MODULATE = 1, VIRGE_TEXENV_DECAL = 2 };
+enum { VIRGE_BLEND_NONE = 0, VIRGE_BLEND_TEXTURE = 2, VIRGE_BLEND_SOURCE = 3 };
+
+typedef struct {
+    uint32_t offset;                /* the largest level's first texel: VRAM, 8-byte aligned */
+    int fmt;                        /* VIRGE_TEX_* */
+    int log2size;                   /* 0-9 */
+    int levels;                     /* 1 (no mipmaps) up to log2size + 1 */
+    int linear;                     /* 0 NEAREST, 1 LINEAR */
+    int persp;                      /* 1: perspective correct, from oow */
+    int env;                        /* VIRGE_TEXENV_* */
+} virge_texture;
+
 void virge_3d_target(uint32_t dest_off, int dest_stride, int bpp, int w, int h, uint32_t zbuf_off, int zbuf_stride);
 void virge_3d_state(int zfunc, int zwrite);
+void virge_3d_texture(const virge_texture *t);
+void virge_3d_blend(int mode);                  /* VIRGE_BLEND_* */
+void virge_3d_fog(int on, uint32_t rgb888);
 void virge_tri(const virge_vertex *a, const virge_vertex *b, const virge_vertex *c);
+/* Texture memory: the bytes a texture takes with its mipmaps, where its
+ * level n (0: the largest) starts, and a level's texels from the CPU (rows
+ * of 2^(log2size - n) texels, packed: 4 or 2 bytes each). */
+uint32_t virge_tex_bytes(int fmt, int log2size, int levels);
+uint32_t virge_tex_level_offset(int fmt, int log2size, int level);
+void virge_tex_load(const virge_texture *t, int level, const void *texels);
 
 #endif
