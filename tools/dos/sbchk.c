@@ -37,6 +37,9 @@ static unsigned count(int ch)
     return lo | (hi << 8);
 }
 
+/* BIOS ticks from a to b, across the counter's start again at midnight (1800B0h a day). */
+static unsigned long since(unsigned long a, unsigned long b) { return b >= a ? b - a : b + 0x1800B0UL - a; }
+
 int main(void)
 {
     unsigned long far *ticks = (unsigned long far *)MK_FP(0x40, 0x6C);
@@ -59,7 +62,7 @@ int main(void)
     a = count(ch);
     for (i = 0; i < 4 && !moved; i++) {         /* ~100 ms in 2-tick steps */
         t = *ticks;
-        while (*ticks - t < 2)
+        while (since(t, *ticks) < 2)
             continue;
         c = count(ch);
         moved = c != a;

@@ -28,6 +28,9 @@ static void hex2(unsigned v)
     put(d[v & 15]);
 }
 
+/* BIOS ticks from a to b, across the counter's start again at midnight (1800B0h a day). */
+static unsigned long since(unsigned long a, unsigned long b) { return b >= a ? b - a : b + 0x1800B0UL - a; }
+
 int main(int argc, char **argv)
 {
     unsigned long far *ticks = (unsigned long far *)MK_FP(0x40, 0x6C);
@@ -39,7 +42,7 @@ int main(int argc, char **argv)
     while (_bios_keybrd(_KEYBRD_READY))
         _bios_keybrd(_KEYBRD_READ);
     puts_com("HX-KEYWAIT ready\r\n");
-    while (*ticks - start < n) {
+    while (since(start, *ticks) < n) {
         if (_bios_keybrd(_KEYBRD_READY)) {     /* INT 16h AH=01h */
             k = _bios_keybrd(_KEYBRD_READ);     /* INT 16h AH=00h: scan << 8 | ascii */
             puts_com("HX-KEY scan=");

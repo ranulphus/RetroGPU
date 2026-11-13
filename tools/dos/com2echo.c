@@ -30,6 +30,9 @@ static unsigned long ticks(void)
     return *(volatile unsigned long far *)MK_FP(0x40, 0x6C);
 }
 
+/* BIOS ticks from a to b, across the counter's start again at midnight (1800B0h a day). */
+static unsigned long since(unsigned long a, unsigned long b) { return b >= a ? b - a : b + 0x1800B0UL - a; }
+
 int main(int argc, char **argv)
 {
     char line[80];
@@ -43,7 +46,7 @@ int main(int argc, char **argv)
         (void)inp(COM2);
     puts_(COM1, "HX-COM2 ready\r\n");
     t0 = ticks();
-    while (ticks() - t0 < limit) {
+    while (since(t0, ticks()) < limit) {
         if (inp(COM2 + 5) & 1) {
             char c = (char)inp(COM2);
             if (c == '\n') { got_line = 1; break; }
