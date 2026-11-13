@@ -17,6 +17,11 @@ void     mga_trace_record_at(uint32_t off, uint32_t v, const char *file, int lin
 void     mga_trace_dump(void (*out)(const char *line), int max);   /* oldest first; max 0 = all */
 uint32_t mga_trace_count(void);
 void     mga_trace_clear(void);
+/* ... and a running CRC of the writes recorded, and of data the engine is
+ * handed by memory (the WARPs' vertices): MGA_TRACE_DATA. */
+void     mga_trace_data(const void *p, uint32_t bytes);
+uint32_t mga_trace_crc(void);
+uint32_t mga_trace_crc_count(void);
 
 /* The G400's DMA command stream (warp.c; docs/g400-warp.md). While it is
  * open, mga_cmd_route queues writes to the registers a primary DMA list can
@@ -33,6 +38,8 @@ void     mga_host_wr32(uint32_t off, uint32_t v);
 uint32_t mga_host_rd32(uint32_t off);
 void     mga_host_wr8(uint32_t off, uint8_t v);
 uint8_t  mga_host_rd8(uint32_t off);
+#  define MGA_TRACE(off, v) ((void)0)
+#  define MGA_TRACE_DATA(p, n) ((void)0)
 #  define MGA_WR32(off, v) mga_host_wr32((off), (v))
 #  define MGA_WR32_DIRECT(off, v) mga_host_wr32((off), (v))
 #  define MGA_RD32(off)    mga_host_rd32(off)
@@ -41,8 +48,10 @@ uint8_t  mga_host_rd8(uint32_t off);
 #else
 #  if defined(MG_DEBUG) || defined(MGA_TRACE_MMIO)
 #    define MGA_TRACE(off, v) mga_trace_record_at((off), (v), __FILE__, __LINE__)
+#    define MGA_TRACE_DATA(p, n) mga_trace_data((p), (n))
 #  else
 #    define MGA_TRACE(off, v) ((void)0)
+#    define MGA_TRACE_DATA(p, n) ((void)0)
 #  endif
 #  define MGA_WR32(off, v) do { MGA_TRACE((off), (v)); PROF_WR(); \
         if (!mga_cmd_open || !mga_cmd_route((off), (uint32_t)(v))) \

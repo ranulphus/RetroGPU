@@ -393,9 +393,25 @@ static void after_init(const DGLConfig *cp)
 
 void dglShutdown(void)
 {
+    if (dgl_ctx.active)
+        dgl_regcrc("shutdown");
     dgl_ftrace_write();
     dgl_teardown();
 }
+
+#ifdef MGA_REGCRC
+/* REGCRC=1 builds: the running CRC of every register write and WARP vertex
+ * so far (the HAL's register trace), at each swap and at the way out: B1's
+ * check that moving code changed no write (docs/b1.md). Declared here so the
+ * GL layer includes no Matrox header for it. */
+uint32_t mga_trace_crc(void);
+uint32_t mga_trace_crc_count(void);
+void dgl_regcrc(const char *at)
+{
+    DGL_ERR("DGL-REGCRC %s frame=%lu crc=%08lx n=%lu", at, stats.swaps, (unsigned long)mga_trace_crc(),
+            (unsigned long)mga_trace_crc_count());
+}
+#endif
 
 /* Every way out (dglShutdown, DGL_EXIT_AFTER, exit, a fault) ends here once. */
 void dgl_note_exit(void)
@@ -403,6 +419,7 @@ void dgl_note_exit(void)
     if (!exit_pending)
         return;
     exit_pending = 0;
+    dgl_regcrc("exit");
     DGL_ERR("DGL-EXIT frames=%lu", stats.swaps);
 }
 
@@ -656,6 +673,7 @@ void dglSwapBuffers(void)
         dgl_ftrace_counts();
     }
     swap_buffers();
+    dgl_regcrc("swap");
     if (dgl_ftrace_on)
         dgl_ftrace_frame(t0);
 }

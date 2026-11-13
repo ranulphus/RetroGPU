@@ -12,9 +12,46 @@
 static struct { uint32_t seq, off, v; const char *file; int line; } ring[TRACE_LEN];
 static uint32_t trace_seq;
 
+/* A running CRC-32 of everything recorded (DOS-GL's REGCRC=1 build prints
+ * it at each swap: B1's check that moving code changed no register write,
+ * gl/docs/b1.md). The DMA lists' own pointers are left out: they hold
+ * addresses in system memory, which move with the program's size. */
+static uint32_t crc = 0xFFFFFFFFu, crc_n;
+
+static void crc_bytes(const uint8_t *p, uint32_t n)
+{
+    int k;
+    while (n--) {
+        crc ^= *p++;
+        for (k = 0; k < 8; k++)
+            crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+    }
+}
+
+static void crc_word(uint32_t v)
+{
+    uint8_t b[4];
+    b[0] = (uint8_t)v, b[1] = (uint8_t)(v >> 8), b[2] = (uint8_t)(v >> 16), b[3] = (uint8_t)(v >> 24);
+    crc_bytes(b, 4);
+}
+
+void mga_trace_data(const void *p, uint32_t bytes)
+{
+    crc_bytes((const uint8_t *)p, bytes);
+    crc_n++;
+}
+
+uint32_t mga_trace_crc(void) { return ~crc; }
+uint32_t mga_trace_crc_count(void) { return crc_n; }
+
 void mga_trace_record_at(uint32_t off, uint32_t v, const char *file, int line)
 {
     uint32_t i = trace_seq & (TRACE_LEN - 1);
+    if (off != 0x1E58u && off != 0x1E5Cu && off != 0x2C40u && off != 0x2C44u) {   /* (PRIMADDRESS, PRIMEND, SECADDRESS, SECEND) */
+        crc_word(off);
+        crc_word(v);
+        crc_n++;
+    }
     ring[i].seq = ++trace_seq;
     ring[i].off = off;
     ring[i].v = v;

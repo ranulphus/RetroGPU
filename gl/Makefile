@@ -33,6 +33,12 @@ DJ_TESTFLAGS := -I$(MGAHAL)/tests/shim -DHX_BUILD_ID='"$(BUILD_ID)"'
 ifeq ($(PROF),1)
 DJ_CFLAGS += -DMGA_PROF=1
 endif
+# REGCRC=1: the HAL's register trace with a running CRC of every register
+# write and WARP vertex, printed at each swap and at exit (DGL-REGCRC lines):
+# B1's check that moving code changed no write (docs/b1.md; tools/conform/regcrc.py).
+ifeq ($(REGCRC),1)
+DJ_CFLAGS += -DMGA_TRACE_MMIO=1 -DMGA_REGCRC=1
+endif
 
 # The shared HAL (PRD D15) goes into libGL.a so consumers link only -lGL. Its
 # objects are built here, under build/*/mgahal/ (the root's hal/ is only read).
@@ -64,7 +70,7 @@ build/djgpp/src/dgl/version.o: build/build_id
 .PHONY: FORCE
 build/prof_mode: FORCE
 	@mkdir -p $(dir $@)
-	@echo '$(PROF)' | cmp -s - $@ || echo '$(PROF)' > $@
+	@echo '$(PROF) $(REGCRC)' | cmp -s - $@ || echo '$(PROF) $(REGCRC)' > $@
 
 # Generated: stubs for the GL 1.1 functions not implemented, and the
 # dglGetProcAddress table (tools/gen_stubs.py; files rewritten only on change).

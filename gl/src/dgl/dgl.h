@@ -35,6 +35,11 @@ int dgl_pitch_for(int width);             /* pixels, engine rules */
 void dgl_crash_install(void);
 void dgl_teardown(void);                  /* reset engine, text mode; safe to call twice */
 void dgl_note_exit(void);                 /* DGL-EXIT if DGL-START was printed */
+#ifdef MGA_REGCRC
+void dgl_regcrc(const char *at);          /* REGCRC=1: a DGL-REGCRC line (context.c; docs/b1.md) */
+#else
+#define dgl_regcrc(at) ((void)0)
+#endif
 void dgl_snap_init(void);                 /* snap.c: read DGL_SNAP, DGL_SNAPDIR */
 void dgl_snap_frame(unsigned long swap);  /* capture if swap is listed */
 /* ftrace.c: DGL_FRAMES, a line per frame written at exit. */

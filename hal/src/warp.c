@@ -901,6 +901,7 @@ uint32_t *warp_reserve(int n, int *dwords)
 void warp_commit(int n)
 {
     uint32_t b = (uint32_t)(n * ((cur_pipe & WARP_T2) ? 10 : 8)) * 4u;
+    MGA_TRACE_DATA(vring + vused / 4u, b);
     vused += b;
     vsince += b;
     setup_stale = 1;
@@ -940,6 +941,7 @@ uint32_t *warp_reserve_seq(int fan, int n, int *dwords)
         wtex_again();
     if (list_room(32) != 0 || vert_room((uint32_t)n * (t2 ? 40u : 32u)) != 0 || !running || !mga_cmd_open)
         return NULL;
+    MGA_TRACE(MGAREG_WACCEPTSEQ, t2 ? (fan ? SEQ_FAN2 : SEQ_STRIP2) : (fan ? SEQ_FAN : SEQ_STRIP));
     cmd_write(MGAREG_WACCEPTSEQ, t2 ? (fan ? SEQ_FAN2 : SEQ_STRIP2) : (fan ? SEQ_FAN : SEQ_STRIP));
     vrun = vused;                       /* (the write ended the open run; room kept above) */
     *dwords = t2 ? 10 : 8;
@@ -950,6 +952,7 @@ void warp_commit_seq(int n)
 {
     const int t2 = (cur_pipe & WARP_T2) != 0;
     uint32_t b = (uint32_t)n * (t2 ? 40u : 32u);
+    MGA_TRACE_DATA(vring + vused / 4u, b);
     vused += b;
     vsince += b;
     setup_stale = 1;
@@ -958,6 +961,7 @@ void warp_commit_seq(int n)
     warp_tris += (uint32_t)(n - 2);
     warp_seqs++;
     warp_seqs_t2 += (uint32_t)t2;
+    MGA_TRACE(MGAREG_WACCEPTSEQ, t2 ? SEQ_LIST2 : SEQ_LIST);
     cmd_write(MGAREG_WACCEPTSEQ, t2 ? SEQ_LIST2 : SEQ_LIST);  /* lists again (ends the run) */
     if (vsince >= warp_kick_bytes)
         dma_kick();
@@ -994,6 +998,7 @@ int warp_vertices(const mga_wvtx *v, int n)
                 c.f = v[i].u1; d[8] = c.u;
                 c.f = v[i].v1; d[9] = c.u;
             }
+            MGA_TRACE_DATA(d, (uint32_t)dw * 4u);
             vused += (uint32_t)dw * 4u;
         }
         vsince += (uint32_t)(n * dw) * 4u;

@@ -24,6 +24,7 @@ void APIENTRY glReadPixels(GLint x, GLint y, GLsizei w, GLsizei h, GLenum format
     stride = w * bpp;
     stride = (stride + dgl_gl.pack_align - 1) / dgl_gl.pack_align * dgl_gl.pack_align;
     dgl_sync();                             /* the LFB is not ordered with queued draws */
+    dgl_regcrc("read");
     DGL_GPU_QUIET();                        /* (the CPU's work from here) */
     fb = (const volatile uint16_t *)(mga_fb + dgl_color_off(dgl_ctx.read_front));
     for (j = 0; j < h; j++, row += stride) {
