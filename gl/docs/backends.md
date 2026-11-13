@@ -1,8 +1,9 @@
 # DOS-GL with more than one back end: the software renderer first, a plan
 
-**Status (2026-11-09): plan v1, approved by the owner. B0 written and reviewed (`docs/backend-interface.md`); the
-merge into RetroGPU has landed (2026-11-08), so B1 can start here. Nothing built yet. 2026-11-12: the S3 ViRGE/DX
-added to the order of the other cards, first (see the end).**
+**Status (2026-11-13): plan v1, approved by the owner. B0 written and reviewed (`docs/backend-interface.md`); the
+merge into RetroGPU has landed (2026-11-08). B1's own plan is `docs/b1.md`, for the owner's review; nothing built
+yet. 2026-11-12: the S3 ViRGE/DX added to the order of the other cards, first (see the end). 2026-11-13: B1 to B5
+built by the DOS-GL session (below).**
 
 The owner's decision (2026-11-06), from GLOS's v1 route (GLOS `docs/v1-route.md`): **DOS-GL gains a software
 renderer**, so that DOS-GL programs run on any graphics card. GLOS v1 needs it for two things:
@@ -67,7 +68,8 @@ include the WARP, AGP, dual texture, the HAL's 2D engine and GLOS's GPU lock. Th
   - **The test: pixel for pixel the same.** DOS-GL's conformance on the G200, G400 and G450 in Loop A; the games
     (ClassiCube, GLQuake, Quake 2, Half-Life); GLOS's windowed suites; DOSBench's DOS-GL timings within noise.
   - The bench (bench-g400) by the usual checks.
-- **B2, the software renderer** (`src/backend/soft/`):
+- **B2, the software renderer** (`src/backend/soft/`, its core shared with Glide: the owner's answer of
+  2026-11-09, below):
   - **Rasterising:** a half-space or scanline rasteriser in fixed point, with sub-pixel precision, top-left fill
     rule and perspective-correct attributes.
   - **Textures:** nearest and bilinear, mipmaps, the GL 1.1 environments (replace, modulate, decal, blend), and the
@@ -113,12 +115,30 @@ include the WARP, AGP, dual texture, the HAL's 2D engine and GLOS's GPU lock. Th
 ## Order and coordination
 
 - **In RetroGPU:** the merge has landed (2026-11-08), so B1 moves files across the GL layer there.
-- **With GLOS's API 2.0:** GLOS's phase B moves DOS-GL's GLOS path to API 2.0 at the same time. B1 and that move
-  touch the same files (`src/dgl/glos.c`, the window surfaces). Doing B1 first gives GLOS's phase B a cleaner place
-  to change (the GLOS window surface in one back-end call).
-- **Ready by GLOS's phase D,** for the screensavers.
+- **Who and when:** the DOS-GL session (RetroGPU's, which also builds the ViRGE/DX's layer), B1 to B5, from
+  2026-11-13 (the owner's answers below). GLOS's phase B moved `src/dgl/glos.c` to API 2.0 first (step 14); B1
+  moves it behind the back end. GLOS's screensavers on cards other than Matrox (its phase D) wait for B2 and B3,
+  so the software renderer is wanted by GLOS's phase D.
+- **With GLOS's session:** its gate suites check B1 (`docs/b1.md`); it runs full gates on devserver several times
+  a day from one checkout there, so a B1 gate run is agreed with it first, and it is told when B1 lands on main
+  (its gates build against RetroGPU's main).
 - **Merges and pushes** in RetroGPU with the owner's approval, each after the full regression (B1:
   pixel-identical on every card).
+
+## The owner's answers (2026-11-13)
+
+1. **Who:** the DOS-GL session takes B1 over from GLOS v1's session (the owner, to this session: "suggest that you
+   take over B1 to the other session unless they have any reasonable rejections"; GLOS's session had none), and
+   B2 to B5 with it (the owner, to GLOS's session: "The DOS-GL session carries on").
+
+## The owner's answers (2026-11-09)
+
+1. **Who and when:** GLOS v1's session, after GLOS's phase B (since moved to the DOS-GL session: 2026-11-13, above).
+2. **One rasteriser core for GL and Glide.** Its state covers GL's environments and Glide's combiners, fog table,
+   chroma key and W-buffer. GL's back end comes first and Glide's next, both on B0's two levels. A full software
+   Glide and GL lets 3D games run on the CPU alone, on a PC with no card RetroGPU drives. A Haswell-class CPU's
+   single core with SSE2 should play the 1997-2000 games at 640x480.
+3. **Rendering in screen tiles,** so other cores can be used later. Multi-core isn't in GLOS v1.
 
 ## The owner's answers (2026-11-06)
 
