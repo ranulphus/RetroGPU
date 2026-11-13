@@ -7,6 +7,7 @@
  *              point inside the fan must hold the colour (watertight edges) */
 #include "hx.h"
 #include "../../src/dgl/dgl.h"
+#include "rg/mga_dev.h"                /* (the Matrox device: its buffers and the HAL) */
 #include "mga/mmio.h"
 #include "mga/regs_mga.h"
 #include "mga/setup.h"
@@ -43,14 +44,14 @@ static int xor_fan(void)
         setup_triangle(&c, &a, &b, &ctx);
     }
     engine_sync(500000);
-    fb = (volatile uint16_t *)(mga_fb + (dgl_ctx.front_is_a ? dgl_ctx.back_off : dgl_ctx.front_off));
+    fb = (volatile uint16_t *)(mga_fb + (rg_mga.front_is_a ? rg_mga.back_off : rg_mga.front_off));
     for (y = 60; y < 420; y++)
         for (x = 140; x < 500; x++) {
             double d = hypot(x + 0.5 - cx, y + 0.5 - cy);
             if (d > r * cos(M_PI / n) - 2.0)
                 continue;                /* stay inside the polygon */
             samples++;
-            bad += fb[y * dgl_ctx.pitch_px + x] != 0xFFE0;
+            bad += fb[y * rg_mga.pitch_px + x] != 0xFFE0;
         }
     hx_test("xor-fan", bad == 0, "interior pixels=%d wrong=%d (double hits or holes)", samples, bad);
     return bad;

@@ -3,6 +3,7 @@
  * rate; the last frame is a known colour checked in the snapshot. */
 #include "hx.h"
 #include "../../src/dgl/dgl.h"
+#include "rg/mga_dev.h"                /* (the Matrox device: its buffers and the HAL) */
 #include <time.h>
 
 int main(int argc, char **argv)

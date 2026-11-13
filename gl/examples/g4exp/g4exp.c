@@ -21,6 +21,7 @@
 #include <GL/gl.h>
 #include <GL/dosgl.h>
 #include "../../src/dgl/dgl.h"
+#include "rg/mga_dev.h"                /* (the Matrox device: its buffers and the HAL) */
 #include "../../src/gl/gl_tex.h"
 #include <stdlib.h>
 #include <string.h>

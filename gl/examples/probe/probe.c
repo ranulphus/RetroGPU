@@ -2,10 +2,11 @@
  * the filtered mode list, dglInit at 640x480x16, a pattern drawn by direct
  * framebuffer writes into the hidden buffer and shown by a swap, then back
  * to text mode. --crash faults while in graphics mode; the crash path must
- * restore text mode and log the exception. Uses DOS-GL internals for the
- * framebuffer pointer, as a diagnostic may. */
+ * restore text mode and log the exception. Uses the Matrox device's own side
+ * (rg/mga_dev.h: its buffers) for the framebuffer pointer, as a diagnostic may. */
 #include "hx.h"
 #include "../../src/dgl/dgl.h"
+#include "rg/mga_dev.h"
 #include <stdio.h>
 
 #if !defined(__WATCOMC__)
@@ -45,15 +46,15 @@ int main(int argc, char **argv)
         hx_test("init", 0, "%s", dglGetErrorString());
         hx_done(HX_INIT_FAILED);
     }
-    hx_test("init", 1, "640x480 pitch=%d heap=%lu", dgl_ctx.pitch_px, (unsigned long)dgl_ctx.heap_off);
+    hx_test("init", 1, "640x480 pitch=%d heap=%lu", rg_mga.pitch_px, (unsigned long)rg_mga.heap_off);
     /* Colour bars and a grid, straight into the hidden buffer. */
-    fb = (volatile uint16_t *)(mga_fb + (dgl_ctx.front_is_a ? dgl_ctx.back_off : dgl_ctx.front_off));
+    fb = (volatile uint16_t *)(mga_fb + (rg_mga.front_is_a ? rg_mga.back_off : rg_mga.front_off));
     for (y = 0; y < 480; y++)
         for (x = 0; x < 640; x++)
-            fb[y * dgl_ctx.pitch_px + x] = pattern(x, y);
+            fb[y * rg_mga.pitch_px + x] = pattern(x, y);
     for (y = 1; y < 480; y += 67)
         for (x = 1; x < 640; x += 71)
-            bad += fb[y * dgl_ctx.pitch_px + x] != pattern(x, y);
+            bad += fb[y * rg_mga.pitch_px + x] != pattern(x, y);
     hx_test("pattern", bad == 0, "readback mismatches=%d", bad);
     dglSwapBuffers();
     hx_snap_screen("probe");
