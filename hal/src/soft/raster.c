@@ -2,18 +2,36 @@
  * b2.md B2.2): scanline spans. Exactness first: edges walked in integers on
  * the 1/16-pixel grid (two divisions an edge a row), attributes as planes in
  * double precision through the snapped vertices, taken at pixel centres.
- * The speed work (fixed-point steps, span routines per state, MMX, tiles)
- * comes in later steps against the same pixels. */
+ * Tiles (B2.7): the same drawing, kept and binned, then done tile by tile.
+ * The speed work (fixed-point steps, span routines per state, MMX) comes in
+ * later steps against the same pixels. */
 #include "soft/soft.h"
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 static soft_target T;
-static soft_state S;
+static soft_state S;                    /* the state drawing uses: the caller's, or a kept one's at a flush */
+static soft_state U;                    /* the caller's */
+static int state_new = 1;               /* U changed since it was last kept */
 soft_stats soft_count;
 
-void soft_target_set(const soft_target *t) { T = *t; }
-void soft_state_set(const soft_state *s) { S = *s; }
+static int tile_size;                   /* 0: draw at once */
+static int kept_cmds;
+static void keep_reset(void);
+
+void soft_target_set(const soft_target *t)
+{
+    if (kept_cmds && memcmp(&T, t, sizeof T))
+        soft_flush();
+    T = *t;
+}
+
+void soft_state_set(const soft_state *s)
+{
+    S = U = *s;
+    state_new = 1;
+}
 
 static int64_t ceil_div(int64_t n, int64_t d)   /* d > 0 */
 {
@@ -105,7 +123,7 @@ static void color_put(int x, int y, int r, int g, int b, int a)
 
 /* ---- Clears -------------------------------------------------------------- */
 
-void soft_clear(unsigned what, const float rgba[4], double depth, unsigned stencil)
+static void draw_clear(unsigned what, const float rgba[4], double depth, unsigned stencil)
 {
     int x, y, r = to8(rgba[0] * 255.0), g = to8(rgba[1] * 255.0), b = to8(rgba[2] * 255.0), a = to8(rgba[3] * 255.0);
     uint32_t z = (uint32_t)(depth <= 0 ? 0 : depth >= 1 ? depth_max() : depth * depth_max());
@@ -230,29 +248,26 @@ typedef struct {
     plane r, g, b, a, z, q, f, s[2], t[2];
 } attrs;
 
-/* Row j's pixels xl..xr-1 (inside the scissor): the fragment pipeline. */
+/* Row j's pixels xl..xr-1 (inside the scissor): the fragment pipeline.
+ * Each attribute at pixel i is the row's base (from j alone) plus i steps,
+ * so a pixel's values do not depend on where its span starts: a span cut at
+ * a tile's edge (B2.7) draws the same pixels as the whole one. */
 static void span(int j, int xl, int xr, const attrs *A)
 {
     int i, k, texturing = S.stage[0].tex || S.stage[1].tex;
     int depth_on = T.depth && S.depth_test, stencil_on = T.stencil && S.stencil_test;
     uint32_t zmax = depth_max();
-    double fx = (xl + 0.5) - A->ox, fy = (j + 0.5) - A->oy;
-    double r = A->r.a0 + A->r.dx * fx + A->r.dy * fy;
-    double g = A->g.a0 + A->g.dx * fx + A->g.dy * fy;
-    double bl = A->b.a0 + A->b.dx * fx + A->b.dy * fy;
-    double al = A->a.a0 + A->a.dx * fx + A->a.dy * fy;
-    double z = A->z.a0 + A->z.dx * fx + A->z.dy * fy;
-    double q = A->q.a0 + A->q.dx * fx + A->q.dy * fy;
-    double fv = A->f.a0 + A->f.dx * fx + A->f.dy * fy;
-    double sv[2] = { 0, 0 }, tv[2] = { 0, 0 };
+    double fx0 = 0.5 - A->ox, fy = (j + 0.5) - A->oy;
+#define ROW(P) ((P).a0 + (P).dx * fx0 + (P).dy * fy)
+    double r0 = ROW(A->r), g0 = ROW(A->g), b0 = ROW(A->b), a0 = ROW(A->a), z0 = ROW(A->z), q0 = ROW(A->q),
+           f0 = ROW(A->f), s0r[2], t0r[2];
     for (k = 0; k < 2; k++)
-        if (S.stage[k].tex) {
-            sv[k] = A->s[k].a0 + A->s[k].dx * fx + A->s[k].dy * fy;
-            tv[k] = A->t[k].a0 + A->t[k].dx * fx + A->t[k].dy * fy;
-        }
-    for (i = xl; i < xr; i++, r += A->r.dx, g += A->g.dx, bl += A->b.dx, al += A->a.dx, z += A->z.dx, q += A->q.dx,
-                          fv += A->f.dx, sv[0] += A->s[0].dx, tv[0] += A->t[0].dx, sv[1] += A->s[1].dx,
-                          tv[1] += A->t[1].dx) {
+        s0r[k] = ROW(A->s[k]), t0r[k] = ROW(A->t[k]);
+#undef ROW
+    for (i = xl; i < xr; i++) {
+        double r = r0 + A->r.dx * i, g = g0 + A->g.dx * i, bl = b0 + A->b.dx * i, al = a0 + A->a.dx * i;
+        double z = z0 + A->z.dx * i, q = q0 + A->q.dx * i, fv = f0 + A->f.dx * i;
+        double sv[2], tv[2];
         float c[4];
         uint32_t zi = 0;
         uint8_t *sp = stencil_on ? T.stencil + (size_t)j * T.stencil_pitch + i : NULL;
@@ -269,7 +284,9 @@ static void span(int j, int xl, int xr, const attrs *A)
             prim[0] = c[0], prim[1] = c[1], prim[2] = c[2], prim[3] = c[3];
             for (k = 0; k < 2; k++)
                 if (S.stage[k].tex) {
-                    double s0 = sv[k] / q, t0 = tv[k] / q;
+                    double s0, t0;
+                    sv[k] = s0r[k] + A->s[k].dx * i, tv[k] = t0r[k] + A->t[k].dx * i;
+                    s0 = sv[k] / q, t0 = tv[k] / q;
                     soft_sample(S.stage[k].tex, s0, t0, (A->s[k].dx - s0 * A->q.dx) / q, (A->s[k].dy - s0 * A->q.dy) / q,
                                 (A->t[k].dx - t0 * A->q.dx) / q, (A->t[k].dy - t0 * A->q.dy) / q, tex);
                     soft_combine_apply(&S.stage[k], tex, prim, c, c);
@@ -367,6 +384,10 @@ static void cover(const int64_t *Xin, const int64_t *Yin, const attrs *A)
     }
 }
 
+/* Drawing now, or kept for the tiles (below). */
+static void emit_cover(const int64_t *X, const int64_t *Y, const attrs *A, const attrs **kept);
+static void emit_rect(int x0, int y0, int x1, int y1, const attrs *A);
+
 /* ---- Triangles ----------------------------------------------------------- */
 
 static plane plane_of(double a0, double a1, double a2, const double *px, const double *py, double det)
@@ -439,7 +460,10 @@ void soft_triangle(const soft_vertex *a, const soft_vertex *b, const soft_vertex
             f0 = fog_factor(f0), f1 = fog_factor(f1), f2 = fog_factor(f2);
         A.f = plane_of(f0 * v[0]->oow, f1 * v[1]->oow, f2 * v[2]->oow, px, py, det);
     }
-    cover(X, Y, &A);
+    {
+        const attrs *kept = NULL;
+        emit_cover(X, Y, &A, &kept);
+    }
 }
 
 /* ---- Lines and points ---------------------------------------------------- */
@@ -607,8 +631,9 @@ void soft_line(const soft_vertex *a, const soft_vertex *b, float width)
     {
         int64_t tx[3] = { X[0], X[1], X[2] }, ty[3] = { Y[0], Y[1], Y[2] };
         int64_t ux[3] = { X[0], X[2], X[3] }, uy[3] = { Y[0], Y[2], Y[3] };
-        cover(tx, ty, &A);
-        cover(ux, uy, &A);
+        const attrs *kept = NULL;                /* (one copy of the attributes for both halves) */
+        emit_cover(tx, ty, &A, &kept);
+        emit_cover(ux, uy, &A, &kept);
     }
 }
 
@@ -629,11 +654,309 @@ void soft_point(const soft_vertex *v, float size)
         x0 = floor_div(X + 128, 256) - w / 2, y0 = floor_div(Y + 128, 256) - w / 2;
     soft_count.points++;
     line_attrs(&A, v, v, -1);
-    xl = x0 < S.scissor[0] ? S.scissor[0] : (int)x0;
-    xr = x0 + w > S.scissor[2] ? S.scissor[2] : (int)(x0 + w);
-    j = y0 < S.scissor[1] ? S.scissor[1] : (int)y0;
-    j1 = y0 + w > S.scissor[3] ? S.scissor[3] : (int)(y0 + w);
-    if (xl < xr)
-        for (; j < j1; j++)
-            span(j, xl, xr, &A);
+    xl = x0 < -1 ? -1 : x0 > T.width ? T.width : (int)x0;      /* (within a pixel of the target: the rest is clipped) */
+    j = y0 < -1 ? -1 : y0 > T.height ? T.height : (int)y0;
+    xr = x0 + w < -1 ? -1 : x0 + w > T.width ? T.width : (int)(x0 + w);
+    j1 = y0 + w < -1 ? -1 : y0 + w > T.height ? T.height : (int)(y0 + w);
+    emit_rect(xl, j, xr, j1, &A);
 }
+
+/* A rectangle of pixels [x0, x1) x [y0, y1) within the scissor (a point's). */
+static void draw_rect(int x0, int y0, int x1, int y1, const attrs *A)
+{
+    int j;
+    if (x0 < S.scissor[0]) x0 = S.scissor[0];
+    if (x1 > S.scissor[2]) x1 = S.scissor[2];
+    if (y0 < S.scissor[1]) y0 = S.scissor[1];
+    if (y1 > S.scissor[3]) y1 = S.scissor[3];
+    if (x0 < x1)
+        for (j = y0; j < y1; j++)
+            span(j, x0, x1, A);
+}
+
+/* ---- Tiles (B2.7) ---------------------------------------------------------- */
+
+/* The store: kept commands, their attributes and the states they were given
+ * under, emptied at each flush. Each tile's bin lists the commands touching
+ * it, in order. A command whose scissor is cut to the tile draws exactly the
+ * tile's share of its pixels (rows and columns are clipped, and span's
+ * values do not depend on where a span starts), so the tiles together draw
+ * what the commands would have drawn at once. */
+#define KEEP_BYTES (1u << 20)
+
+enum { CMD_COVER, CMD_RECT, CMD_CLEAR };
+
+typedef struct {
+    soft_state st;
+    soft_texture tex[2];                /* the stages' textures as they were (the texels by pointer) */
+} kept_state;
+
+typedef struct {
+    int kind;
+    const kept_state *ks;
+    const attrs *A;
+    int64_t X[3], Y[3];                 /* a triangle (1/16 pixels) */
+    int x0, y0, x1, y1;                 /* a rectangle */
+    unsigned what, stencil;             /* a clear */
+    float rgba[4];
+    double depth;
+} kept_cmd;
+
+typedef struct { uint32_t *at; int n, cap; } bin;
+
+static uint8_t *store;
+static size_t store_used;
+static const kept_state *ks_now;        /* U as last kept (NULL: not since the flush) */
+static bin *bins;
+static int nbins, tiles_x, tiles_y;
+static unsigned epoch_n;
+
+static void *keep_bytes(size_t n)
+{
+    void *p;
+    n = (n + 7) & ~(size_t)7;
+    if (!store && !(store = (uint8_t *)malloc(KEEP_BYTES)))
+        return NULL;
+    if (store_used + n > KEEP_BYTES)
+        return NULL;
+    p = store + store_used;
+    store_used += n;
+    return p;
+}
+
+static void keep_reset(void)
+{
+    int i;
+    for (i = 0; i < nbins; i++)
+        bins[i].n = 0;
+    store_used = 0;
+    ks_now = NULL;
+    state_new = 1;
+    kept_cmds = 0;
+    epoch_n++;
+}
+
+/* U is the state k kept (its textures' descriptions compared too). */
+static int same_as_kept(const kept_state *k)
+{
+    soft_state a = U;
+    int i;
+    for (i = 0; i < 2; i++) {
+        if (!a.stage[i].tex != !k->st.stage[i].tex)
+            return 0;
+        if (a.stage[i].tex) {
+            if (memcmp(a.stage[i].tex, &k->tex[i], sizeof k->tex[i]))
+                return 0;
+            a.stage[i].tex = k->st.stage[i].tex;
+        }
+    }
+    return !memcmp(&a, &k->st, sizeof a);
+}
+
+/* U as kept: the last copy if it is the same, else a new one; NULL: no room. */
+static const kept_state *state_kept(void)
+{
+    kept_state *k;
+    int i;
+    if (ks_now && (!state_new || same_as_kept(ks_now))) {
+        state_new = 0;
+        return ks_now;
+    }
+    if (!(k = (kept_state *)keep_bytes(sizeof *k)))
+        return NULL;
+    k->st = U;
+    for (i = 0; i < 2; i++)
+        if (U.stage[i].tex) {
+            k->tex[i] = *U.stage[i].tex;
+            k->st.stage[i].tex = &k->tex[i];
+        }
+    ks_now = k;
+    state_new = 0;
+    return k;
+}
+
+/* The bins for the target's size; 0: no memory. */
+static int grid(void)
+{
+    int tx = (T.width + tile_size - 1) / tile_size, ty = (T.height + tile_size - 1) / tile_size, i;
+    if (tx * ty > nbins) {
+        bin *b = (bin *)realloc(bins, (size_t)(tx * ty) * sizeof *b);
+        if (!b)
+            return 0;
+        for (i = nbins; i < tx * ty; i++)
+            b[i].at = NULL, b[i].n = b[i].cap = 0;
+        bins = b, nbins = tx * ty;
+    }
+    tiles_x = tx, tiles_y = ty;
+    return 1;
+}
+
+/* A new command under U; NULL: no room. */
+static kept_cmd *new_cmd(int kind)
+{
+    const kept_state *k;
+    kept_cmd *c;
+    if ((!kept_cmds && !grid()) || !(k = state_kept()) || !(c = (kept_cmd *)keep_bytes(sizeof *c)))
+        return NULL;
+    memset(c, 0, sizeof *c);
+    c->kind = kind;
+    c->ks = k;
+    return c;
+}
+
+/* Command c into the bins of the tiles its pixels [x0, x1) x [y0, y1) touch
+ * within its scissor; 0: no memory (then nothing is binned). */
+static int bin_cmd(const kept_cmd *c, int x0, int y0, int x1, int y1)
+{
+    const int *sc = c->ks->st.scissor;
+    uint32_t off = (uint32_t)((const uint8_t *)c - store);
+    int tx, ty, tx0, ty0, tx1, ty1, pass;
+    if (x0 < sc[0]) x0 = sc[0];
+    if (y0 < sc[1]) y0 = sc[1];
+    if (x1 > sc[2]) x1 = sc[2];
+    if (y1 > sc[3]) y1 = sc[3];
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > T.width) x1 = T.width;
+    if (y1 > T.height) y1 = T.height;
+    kept_cmds++;
+    if (x0 >= x1 || y0 >= y1)
+        return 1;                               /* (nothing of it is drawn) */
+    tx0 = x0 / tile_size, tx1 = (x1 - 1) / tile_size, ty0 = y0 / tile_size, ty1 = (y1 - 1) / tile_size;
+    for (pass = 0; pass < 2; pass++)            /* (room first, then the entries: all or none) */
+        for (ty = ty0; ty <= ty1; ty++)
+            for (tx = tx0; tx <= tx1; tx++) {
+                bin *b = &bins[ty * tiles_x + tx];
+                if (pass)
+                    b->at[b->n++] = off;
+                else if (b->n == b->cap) {
+                    int cap = b->cap ? 2 * b->cap : 64;
+                    uint32_t *a = (uint32_t *)realloc(b->at, (size_t)cap * sizeof *a);
+                    if (!a) {
+                        kept_cmds--;
+                        return 0;
+                    }
+                    b->at = a, b->cap = cap;
+                }
+            }
+    return 1;
+}
+
+static int clampi(int64_t v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : (int)v; }
+
+static void emit_cover(const int64_t *X, const int64_t *Y, const attrs *A, const attrs **kept)
+{
+    int tries;
+    for (tries = 0; tile_size && tries < 2; tries++) {
+        kept_cmd *c = NULL;
+        if (!*kept) {
+            attrs *k = (attrs *)keep_bytes(sizeof *k);
+            if (k)
+                *k = *A, *kept = k;
+        }
+        if (*kept && (c = new_cmd(CMD_COVER)) != NULL) {
+            int64_t xmin = X[0], xmax = X[0], ymin = Y[0], ymax = Y[0];
+            int i;
+            for (i = 0; i < 3; i++) {
+                c->X[i] = X[i], c->Y[i] = Y[i];
+                if (X[i] < xmin) xmin = X[i];
+                if (X[i] > xmax) xmax = X[i];
+                if (Y[i] < ymin) ymin = Y[i];
+                if (Y[i] > ymax) ymax = Y[i];
+            }
+            c->A = *kept;
+            /* (a pixel drawn has its centre within the bounds: its index from floor(min / 16) to floor(max / 16)) */
+            if (bin_cmd(c, clampi(floor_div(xmin, 16), -1, T.width + 1), clampi(floor_div(ymin, 16), -1, T.height + 1),
+                        clampi(floor_div(xmax, 16) + 1, -1, T.width + 1),
+                        clampi(floor_div(ymax, 16) + 1, -1, T.height + 1)))
+                return;
+        }
+        soft_count.overflows++;                 /* (no room: draw what is kept, then try again) */
+        soft_flush();
+        *kept = NULL;
+    }
+    cover(X, Y, A);
+}
+
+static void emit_rect(int x0, int y0, int x1, int y1, const attrs *A)
+{
+    int tries;
+    for (tries = 0; tile_size && tries < 2; tries++) {
+        attrs *k = (attrs *)keep_bytes(sizeof *k);
+        kept_cmd *c = k ? new_cmd(CMD_RECT) : NULL;
+        if (c) {
+            *k = *A;
+            c->A = k, c->x0 = x0, c->y0 = y0, c->x1 = x1, c->y1 = y1;
+            if (bin_cmd(c, x0, y0, x1, y1))
+                return;
+        }
+        soft_count.overflows++;
+        soft_flush();
+    }
+    draw_rect(x0, y0, x1, y1, A);
+}
+
+void soft_clear(unsigned what, const float rgba[4], double depth, unsigned stencil)
+{
+    int tries;
+    for (tries = 0; tile_size && tries < 2; tries++) {
+        kept_cmd *c = new_cmd(CMD_CLEAR);
+        if (c) {
+            c->what = what, c->stencil = stencil, c->depth = depth;
+            memcpy(c->rgba, rgba, sizeof c->rgba);
+            if (bin_cmd(c, 0, 0, T.width, T.height))
+                return;
+        }
+        soft_count.overflows++;
+        soft_flush();
+    }
+    draw_clear(what, rgba, depth, stencil);
+}
+
+void soft_flush(void)
+{
+    int tx, ty, i;
+    if (!kept_cmds)
+        return;
+    soft_count.flushes++;
+    for (ty = 0; ty < tiles_y; ty++)
+        for (tx = 0; tx < tiles_x; tx++) {
+            const bin *b = &bins[ty * tiles_x + tx];
+            const kept_state *cur = NULL;
+            for (i = 0; i < b->n; i++) {
+                const kept_cmd *c = (const kept_cmd *)(store + b->at[i]);
+                if (c->ks != cur) {             /* its state, its scissor cut to the tile */
+                    const int *sc = c->ks->st.scissor;
+                    cur = c->ks;
+                    S = cur->st;
+                    S.scissor[0] = sc[0] > tx * tile_size ? sc[0] : tx * tile_size;
+                    S.scissor[1] = sc[1] > ty * tile_size ? sc[1] : ty * tile_size;
+                    S.scissor[2] = sc[2] < (tx + 1) * tile_size ? sc[2] : (tx + 1) * tile_size;
+                    S.scissor[3] = sc[3] < (ty + 1) * tile_size ? sc[3] : (ty + 1) * tile_size;
+                }
+                if (c->kind == CMD_COVER)
+                    cover(c->X, c->Y, c->A);
+                else if (c->kind == CMD_RECT)
+                    draw_rect(c->x0, c->y0, c->x1, c->y1, c->A);
+                else
+                    draw_clear(c->what, c->rgba, c->depth, c->stencil);
+            }
+        }
+    S = U;
+    keep_reset();
+}
+
+void soft_drop(void)
+{
+    S = U;
+    keep_reset();
+}
+
+void soft_tiles(int size)
+{
+    soft_flush();
+    tile_size = size > 0 ? size : 0;
+}
+
+int soft_pending(void) { return kept_cmds != 0; }
+unsigned soft_epoch(void) { return epoch_n; }

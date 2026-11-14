@@ -31,7 +31,17 @@ typedef struct {
     const dgl_palette *pal;
     unsigned pal_gen;
     int complete;
+    int used;                           /* prepared for drawing in epoch `epoch` (the core's tiles) */
+    unsigned epoch;
 } stex;
+
+/* Drawing the core has kept that samples x's texels is done now (before
+ * they change or go). */
+static void unkeep(const stex *x)
+{
+    if (x && x->used && x->epoch == soft_epoch() && soft_pending())
+        soft_flush();
+}
 
 static int is_mip(GLenum f) { return f >= GL_NEAREST_MIPMAP_NEAREST && f <= GL_LINEAR_MIPMAP_LINEAR; }
 
@@ -77,6 +87,7 @@ static const soft_texture *prepare(dgl_texture *t)
                 int bytes = L->w * L->h * 4, i;
                 if (!pal)
                     break;
+                unkeep(x);                      /* (the expanded texels are rewritten in place) */
                 if (x->expanded_bytes[l] < bytes) {
                     uint8_t *p = (uint8_t *)realloc(x->expanded[l], (size_t)bytes);
                     if (!p)
@@ -111,6 +122,8 @@ static const soft_texture *prepare(dgl_texture *t)
     x->st.mag_filter = filter_of(t->mag_filter);
     if (!is_mip(t->min_filter) && x->st.levels > 1)
         x->st.levels = 1;                       /* (re-made from the levels when the filter goes back to a mipmap one) */
+    x->used = 1;
+    x->epoch = soft_epoch();
     return x->complete ? &x->st : NULL;
 }
 
@@ -419,8 +432,14 @@ static void sb_point(const dgl_cvtx *a)
     soft_point(&v, dgl_gl.point_size);
 }
 
+/* DGL_SOFT_TILE: the tiles' side in pixels (gl/docs/b2.md B2.7; default 64);
+ * 0 draws each primitive at once. */
 static void install(void)
 {
+    const char *e = getenv("DGL_SOFT_TILE");
+    soft_tiles(e && *e ? atoi(e) : 64);
+    rg_sb.flush = soft_flush;
+    rg_sb.drop = soft_drop;
     dgl_sink.begin = sb_begin;
     dgl_sink.triangle = sb_triangle;
     dgl_sink.fast = NULL;                       /* (the general path only) */
@@ -466,6 +485,7 @@ static void tex_free(dgl_texture *t)
 {
     stex *x = (stex *)t->be;
     int l;
+    unkeep(x);                                  /* (GL frees its levels next) */
     if (x)
         for (l = 0; l < SOFT_MAX_LEVELS; l++)
             free(x->expanded[l]);
@@ -481,6 +501,8 @@ static int tex_info(const dgl_texture *t, int rgba[4])
 }
 
 static void tex_reset(uint32_t start, uint32_t end) { (void)start, (void)end; }
+
+static void tex_change(dgl_texture *t) { unkeep((const stex *)t->be); }
 
 static void stats(dgl_be_stats *s)
 {
@@ -499,5 +521,6 @@ const dgl_backend dgl_soft_backend = {
     .tex_free = tex_free,
     .tex_info = tex_info,
     .tex_reset = tex_reset,
+    .tex_change = tex_change,
     .stats = stats,
 };

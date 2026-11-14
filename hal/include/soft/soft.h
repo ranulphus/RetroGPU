@@ -142,9 +142,25 @@ void soft_sample(const soft_texture *tx, double s, double t, double dsdx, double
 void soft_combine_apply(const soft_stage *st, const float tex[4], const float prim[4], const float prev[4],
                         float out[4]);
 
+/* Tiles (gl/docs/b2.md B2.7). With a tile size set, triangles, lines,
+ * points and clears are kept, each with the state in force (the textures'
+ * descriptions copied, their texels not), binned by the tiles they touch,
+ * and drawn tile by tile in the order given at soft_flush: the same pixels,
+ * bit for bit, as drawing each at once. Until then the target's buffers and
+ * the texels the kept work samples must stay as they are; soft_target_set
+ * flushes when the target changes, and the core flushes when its store is
+ * full. soft_epoch() changes at each flush: a texture used since the last
+ * flush was used in the current epoch. */
+void soft_tiles(int size);          /* 0: draw at once (the default); else the tiles' side in pixels */
+void soft_flush(void);              /* draw everything kept */
+void soft_drop(void);               /* forget everything kept (its buffers are going) */
+int  soft_pending(void);            /* 1: something is kept */
+unsigned soft_epoch(void);
+
 /* Counters. */
 typedef struct {
     uint32_t tris, lines, points, pixels;
+    uint32_t flushes, overflows;    /* tiles: flushes, and of them those for a full store */
 } soft_stats;
 extern soft_stats soft_count;
 

@@ -9,6 +9,7 @@
 #   make sdl / sdl-examples / loopa-sdl   SDL3 on DOS with DOS-GL (tools/sdl, docs/sdl.md)
 #   make conform-bench PC=bench-g400 [TESTS=...]   the conformance suite on a bench PC
 #   make soft-conform [BPP=8|16|32] [TESTS=...]   the software renderer's, natively (docs/b2.md)
+#   make soft-tilecheck   its tiles against drawing at once, every frame byte for byte (docs/b2.md B2.7)
 # The Matrox HAL, harness and 86Box patches are RetroGPU's: this directory's
 # parent, the repository root (PRD D15), so a HAL change and its effect on GL
 # are one commit. MGAHAL is always the parent, whatever the environment says.
@@ -55,7 +56,7 @@ ct_flags = $(if $(filter t33,$(1)),-DCT_STENCIL=8)
 DGL_SRCS := $(wildcard src/dgl/*.c) $(wildcard src/gl/*.c) $(wildcard src/backend/mga/*.c) $(wildcard src/backend/soft/*.c)
 LIB := build/lib/libGL.a
 
-.PHONY: all lib examples sdl sdl-host sdl-examples loopa-sdl tests-host loopa conform conform-dos conform-host classicube loopa-classicube quake loopa-quake halflife loopa-halflife doom loopa-doom setup-djgpp setup-ow dostools 86box clean help
+.PHONY: all lib examples sdl sdl-host sdl-examples loopa-sdl tests-host loopa conform conform-dos conform-host soft-conform soft-tilecheck classicube loopa-classicube quake loopa-quake halflife loopa-halflife doom loopa-doom setup-djgpp setup-ow dostools 86box clean help
 all: lib examples
 
 build/djgpp/%.o: %.c build/prof_mode
@@ -154,6 +155,9 @@ conform-host: $(foreach t,$(CONFORM),build/host/conform/$(t))
 # The software renderer's conformance (docs/b2.md): each test's Linux build
 # drawing in memory, compared with OSMesa natively, in the dev container; at
 # BPP bits a pixel (16 by default; 8 dithered, 32).
+soft-tilecheck:
+	MGA_EXTRA_DIR=$(GLOS) $(MGAHAL)/tools/dev $(MAKE) -s rig-build
+	sh tools/conform/tilecheck.sh
 soft-conform:
 	MGA_EXTRA_DIR=$(GLOS) $(MGAHAL)/tools/dev sh -c '$(MAKE) -s rig-build conform-host && \
 	  python3 tools/conform/run.py --soft --bpp $(or $(BPP),16) $(TESTS)'

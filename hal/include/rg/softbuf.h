@@ -17,6 +17,11 @@ typedef struct {
     int      depth_bits, depth_pitch;
     uint8_t *stencil;               /* NULL: none */
     int      stencil_pitch;
+    /* The drawing back end's, set after each open: draw what it has kept
+       (B2.7's tiles), at a sync, a swap or a read; or forget it, when the
+       buffers go. NULL: nothing is kept. */
+    void   (*flush)(void);
+    void   (*drop)(void);
 } rg_softbuf;
 extern rg_softbuf rg_sb;
 

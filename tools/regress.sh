@@ -104,6 +104,7 @@ step gl-conform-host       tools/dev make -s -C gl conform-host
 step gl-soft-conform       make -s -C gl soft-conform              # (the software renderer against OSMesa: gl/docs/b2.md)
 step gl-soft-conform-32    make -s -C gl soft-conform BPP=32
 step gl-soft-conform-8     make -s -C gl soft-conform BPP=8
+step gl-soft-tilecheck     make -s -C gl soft-tilecheck            # (its tiles = drawing at once, byte for byte)
 
 # ---- smoke: a short Loop A run of each part ---------------------------------
 if [ "$tier" = smoke ]; then

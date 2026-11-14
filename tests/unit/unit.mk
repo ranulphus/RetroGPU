@@ -19,6 +19,7 @@ UNIT_test_vram := hal/src/vram.c
 UNIT_test_rgdev := hal/src/rg/device.c
 UNIT_test_softcov := hal/src/soft/raster.c hal/src/soft/texture.c
 UNIT_test_softfmt := hal/src/soft/raster.c hal/src/soft/texture.c
+UNIT_test_softtile := hal/src/soft/raster.c hal/src/soft/texture.c
 UNIT32_TESTS := test_trap test_setupgold test_fp test_edges
 
 tests-host: $(UNIT_TESTS:%=build/host/tests/%) $(UNIT32_TESTS:%=build/host32/tests/%) build/ow/GLIDE2X.OVL

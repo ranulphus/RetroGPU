@@ -531,6 +531,8 @@ void APIENTRY glTexImage2D(GLenum target, GLint level, GLint internalformat, GLs
     t = get(bound, 1);
     if (!t) { dgl_gl_error(GL_OUT_OF_MEMORY); return; }
     L = &t->level[level];
+    if (dgl_be->tex_change)
+        dgl_be->tex_change(t);
     free(L->rgba);
     free(L->idx);
     L->rgba = L->idx = NULL;
@@ -575,6 +577,8 @@ void APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint x, GLint y, GLsi
         dgl_gl_error(GL_INVALID_VALUE);
         return;
     }
+    if (w && h && dgl_be->tex_change)
+        dgl_be->tex_change(t);
     if (L->idx)
         unpack_idx(pixels, w, h, L->idx + (size_t)y * L->w + x, L->w);
     else

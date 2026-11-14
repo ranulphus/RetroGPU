@@ -46,6 +46,8 @@ static int modes(rg_mode *out, int max)
 
 static void close_dev(void)
 {
+    if (rg_sb.drop)
+        rg_sb.drop();
     free(rg_sb.color[0]);
     free(rg_sb.color[1]);
     free(rg_sb.depth);
@@ -111,6 +113,8 @@ static int open_mem(const rg_open *o, rg_opened *out)
 static int swap(int vsync)
 {
     (void)vsync;
+    if (rg_sb.flush)
+        rg_sb.flush();
     if (rg_sb.color[1])
         rg_sb.front_is_a = !rg_sb.front_is_a;
     return 0;
@@ -118,8 +122,14 @@ static int swap(int vsync)
 
 static int present_front(void) { return 0; }
 static void draw_buffer(int front) { rg_sb.draw_front = front; }
-static int idle(void) { return 1; }
-static int sync(void) { return 0; }
+static int idle(void) { return 1; }           /* (kept drawing is done by sync, never in the background) */
+
+static int sync(void)
+{
+    if (rg_sb.flush)
+        rg_sb.flush();
+    return 0;
+}
 
 static int read_px(int front, int x, int y, int w, int h, uint8_t *rgba, int stride)
 {
@@ -127,6 +137,8 @@ static int read_px(int front, int x, int y, int w, int h, uint8_t *rgba, int str
     int i, j;
     if (!rg_sb.active)
         return -1;
+    if (rg_sb.flush)
+        rg_sb.flush();
     for (j = 0; j < h; j++, rgba += stride) {
         int sy = y + j;
         uint8_t *p = rgba;

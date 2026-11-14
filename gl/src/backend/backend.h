@@ -45,6 +45,9 @@ typedef struct dgl_backend {
     void (*tex_free)(dgl_texture *t);                               /* its back-end part gone */
     int  (*tex_info)(const dgl_texture *t, int rgba_bits[4]);       /* its copy: resident (1), bits a component */
     void (*tex_reset)(uint32_t mem_start, uint32_t mem_end);        /* every texture freed: a new context's memory */
+    void (*tex_change)(dgl_texture *t);     /* GL's copy of its levels is about to change (glTexImage2D,
+                                       glTexSubImage2D): drawing kept that samples it is done first (the
+                                       software back end's tiles); NULL: nothing reads GL's copy later */
 
     /* Diagnostics */
     void (*stats)(dgl_be_stats *s);
