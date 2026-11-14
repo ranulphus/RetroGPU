@@ -70,7 +70,7 @@ include the WARP, AGP, dual texture, the HAL's 2D engine and GLOS's GPU lock. Th
     (ClassiCube, GLQuake, Quake 2, Half-Life); GLOS's windowed suites; DOSBench's DOS-GL timings within noise.
   - The bench (bench-g400) by the usual checks.
 - **B2, the software renderer** (`src/backend/soft/`, its core shared with Glide: the owner's answer of
-  2026-11-09, below):
+  2026-11-09, below; its own plan is `docs/b2.md`):
   - **Rasterising:** a half-space or scanline rasteriser in fixed point, with sub-pixel precision, top-left fill
     rule and perspective-correct attributes.
   - **Textures:** nearest and bilinear, mipmaps, the GL 1.1 environments (replace, modulate, decal, blend), and the
