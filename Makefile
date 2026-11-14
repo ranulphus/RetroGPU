@@ -83,8 +83,9 @@ build/djgpp/libvirge.a: $(VIRGE_SRCS:%.c=build/djgpp/%.o)
 	@rm -f $@
 	$(DJAR) rcs $@ $^
 # RetroGPU's device level (hal/include/rg, gl/docs/b1.md; docs/virge.md V3): the devices behind one table, the
-# Matrox one on the HAL and the ViRGE/DX's on its layer; RGDEV drives either through the table alone.
-RG_SRCS := hal/src/rg/device.c hal/src/rg/glos.c hal/src/rg/mga.c hal/src/rg/mga_glos.c hal/src/rg/virge.c
+# Matrox one on the HAL, the ViRGE/DX's on its layer and the memory one (gl/docs/b2.md); RGDEV drives them through
+# the table alone.
+RG_SRCS := hal/src/rg/device.c hal/src/rg/glos.c hal/src/rg/mga.c hal/src/rg/mga_glos.c hal/src/rg/virge.c hal/src/rg/mem.c
 $(RG_SRCS:%.c=build/djgpp/%.o): DJ_CFLAGS += -I$(GLOS)/include
 build/djgpp/librg.a: $(RG_SRCS:%.c=build/djgpp/%.o)
 	@rm -f $@
