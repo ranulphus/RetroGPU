@@ -281,6 +281,7 @@ static void validate(void)
                     (dgl_gl.color_mask[3] ? 8u : 0);
     st.smooth = dgl_gl.shade_model != GL_FLAT;
     st.fill_rule = SOFT_FILL_BOTTOM_LEFT;       /* (OpenGL's with y down, as the references draw) */
+    st.dither = dgl_gl.dither;
     st.depth_test = dgl_gl.depth_test && tg.depth;
     st.depth_func = (int)(dgl_gl.depth_func - GL_NEVER);
     st.depth_write = dgl_gl.depth_mask;

@@ -12,7 +12,7 @@ extern "C" {
 
 typedef struct {
     int width, height;      /* any enumerated mode; 0 = 640x480 */
-    int color_bits;         /* 16 only in v1.0 (0 = 16) */
+    int color_bits;         /* 16 (0 = 16); 8 or 32 where the device draws them (the software renderer) */
     int depth_bits;         /* 0 or 16 */
     int refresh_hz;         /* 0 = BIOS default; VBE 3.0 only */
     int double_buffer;      /* nonzero for double buffering */

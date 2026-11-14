@@ -54,6 +54,8 @@ int main(void)
     c.depth_bits = 16;
     c.stencil_bits = CT_STENCIL;
     c.vsync = 0;                               /* no display: nothing to wait for */
+    if (getenv("CT_BPP"))                      /* the colour depth (8, 16 or 32: run.py --soft --bpp) */
+        c.color_bits = atoi(getenv("CT_BPP"));
     printf("HX-START %s %s\n", CT_NAME, dglVersion());
     if (dglInit(&c) != 0) {
         printf("HX-TEST init FAIL %s\nHX-DONE 2\n", dglGetErrorString());

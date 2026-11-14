@@ -101,6 +101,9 @@ step gl-build              make -s -C gl lib examples conform-dos
 step gl-tests-host         make -s -C gl tests-host
 step gl-layers             sh gl/tools/layers.sh
 step gl-conform-host       tools/dev make -s -C gl conform-host
+step gl-soft-conform       make -s -C gl soft-conform              # (the software renderer against OSMesa: gl/docs/b2.md)
+step gl-soft-conform-32    make -s -C gl soft-conform BPP=32
+step gl-soft-conform-8     make -s -C gl soft-conform BPP=8
 
 # ---- smoke: a short Loop A run of each part ---------------------------------
 if [ "$tier" = smoke ]; then

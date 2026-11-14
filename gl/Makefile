@@ -8,6 +8,7 @@
 #   make doom / loopa-doom MODE=timedemo   PrBoom-plus on SDL3 and DOS-GL (tools/doom)
 #   make sdl / sdl-examples / loopa-sdl   SDL3 on DOS with DOS-GL (tools/sdl, docs/sdl.md)
 #   make conform-bench PC=bench-g400 [TESTS=...]   the conformance suite on a bench PC
+#   make soft-conform [BPP=8|16|32] [TESTS=...]   the software renderer's, natively (docs/b2.md)
 # The Matrox HAL, harness and 86Box patches are RetroGPU's: this directory's
 # parent, the repository root (PRD D15), so a HAL change and its effect on GL
 # are one commit. MGAHAL is always the parent, whatever the environment says.
@@ -151,10 +152,11 @@ build/host/conform/%: $$(wildcard tests/conform/$$*_*.c) tests/conform/ct_host.c
 conform-dos: $(foreach t,$(CONFORM),build/exe/conform/$(shell echo $(t) | tr a-z A-Z).EXE)
 conform-host: $(foreach t,$(CONFORM),build/host/conform/$(t))
 # The software renderer's conformance (docs/b2.md): each test's Linux build
-# drawing in memory, compared with OSMesa natively, in the dev container.
+# drawing in memory, compared with OSMesa natively, in the dev container; at
+# BPP bits a pixel (16 by default; 8 dithered, 32).
 soft-conform:
 	MGA_EXTRA_DIR=$(GLOS) $(MGAHAL)/tools/dev sh -c '$(MAKE) -s rig-build conform-host && \
-	  python3 tools/conform/run.py --soft $(TESTS)'
+	  python3 tools/conform/run.py --soft --bpp $(or $(BPP),16) $(TESTS)'
 conform: conform-dos dostools
 	$(MGAHAL)/tools/dev sh -c '$(MAKE) conform-host && python3 tools/conform/run.py --card $(CARD) \
 	  $(if $(PRE),--pre "$(PRE)") $(TESTS)'

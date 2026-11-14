@@ -50,6 +50,7 @@ typedef struct {
     uint32_t vram_bytes;
     int display_width, display_height;
     const char *fit;                /* "native", "zoom", "integer", "fill", "aspect"; "window" */
+    int color_bits;                 /* 8, 16 or 32 (0: 16) */
 } rg_opened;
 
 /* dglGetDeviceInfo's fields, and Glide's and GLOS's later. */

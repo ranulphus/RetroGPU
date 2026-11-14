@@ -21,8 +21,9 @@ static int query(GLenum p, double *v)
     case GL_MAX_PROJECTION_STACK_DEPTH: v[0] = DGL_PROJ_DEPTH; return 1;
     case GL_MAX_TEXTURE_STACK_DEPTH: v[0] = DGL_TEX_DEPTH; return 1;
     case GL_MAX_VIEWPORT_DIMS: v[0] = v[1] = 4096; return 2;
-    case GL_RED_BITS: case GL_BLUE_BITS: v[0] = 5; return 1;
-    case GL_GREEN_BITS: v[0] = 6; return 1;
+    case GL_RED_BITS: v[0] = dgl_ctx.color_bits == 32 ? 8 : dgl_ctx.color_bits == 8 ? 3 : 5; return 1;
+    case GL_GREEN_BITS: v[0] = dgl_ctx.color_bits == 32 ? 8 : dgl_ctx.color_bits == 8 ? 3 : 6; return 1;
+    case GL_BLUE_BITS: v[0] = dgl_ctx.color_bits == 32 ? 8 : dgl_ctx.color_bits == 8 ? 2 : 5; return 1;
     case GL_ALPHA_BITS: v[0] = 0; return 1;
     case GL_DEPTH_BITS: v[0] = dgl_ctx.depth_bits ? 16 : 0; return 1;
     case GL_DEPTH_FUNC: v[0] = dgl_gl.depth_func; return 1;

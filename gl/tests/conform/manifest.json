@@ -48,5 +48,21 @@
   "tol": 24,
   "frac": 0,
   "_why": "Every pixel compared, edges too: lines and points are all edge; positions on a 1/16 grid both renderers share."
+ },
+ "_default_soft8": {
+  "box": true,
+  "_why": "The software renderer at 8 bits: a fixed 3-3-2 palette, ordered-dithered 4x4, so both frames are compared through imgcmp's 4x4 box (the dither averages back to the colour there)."
+ },
+ "t09_0": {
+  "soft8": {
+   "frac": 0.03,
+   "_why": "8 bits: the destination is read back as a dithered palette level, blended, and dithered again with the same pixel's threshold, so the errors correlate and the 4x4 box no longer averages them away (worst 46 levels on 1.8% of pixels). A property of blending into a dithered 3-3-2 buffer."
+  }
+ },
+ "t16_0": {
+  "soft8": {
+   "frac": 0.03,
+   "_why": "8 bits: checkerboards fine enough to change colour at the dither's own scale; their 4x4 averages cannot come back exactly through a 3-3-2 palette (worst 50 levels on 1.5% of pixels)."
+  }
  }
 }

@@ -58,6 +58,20 @@ static void depth_put(int x, int y, uint32_t z)
         ((uint16_t *)p)[x] = (uint16_t)z;
 }
 
+/* 8 bits to n levels (top = 2^n - 1), with pixel (x, y)'s ordered-dither
+ * threshold when dithering: floor(v * top / 255 + (B + 0.5) / 16), B the 4x4
+ * Bayer matrix's entry, so a block's average is the colour; else rounded. */
+static const uint8_t bayer4[4][4] = { { 0, 8, 2, 10 }, { 12, 4, 14, 6 }, { 3, 11, 1, 9 }, { 15, 7, 13, 5 } };
+
+static unsigned levels(int v, unsigned top, int x, int y)
+{
+    unsigned q;
+    if (!S.dither)
+        return ((unsigned)v * top + 127) / 255;
+    q = ((unsigned)v * top * 32 + (2u * bayer4[y & 3][x & 3] + 1) * 255) / 8160;
+    return q > top ? top : q;
+}
+
 /* A pixel of 8-bit channels into the colour buffer, through the colour mask. */
 static void color_put(int x, int y, int r, int g, int b, int a)
 {
@@ -80,7 +94,7 @@ static void color_put(int x, int y, int r, int g, int b, int a)
         }
         *p = v;
     } else {
-        uint8_t *p = row + x, v = (uint8_t)((r >> 5) << 5 | (g >> 5) << 2 | (b >> 6));
+        uint8_t *p = row + x, v = (uint8_t)(levels(r, 7, x, y) << 5 | levels(g, 7, x, y) << 2 | levels(b, 3, x, y));
         if ((m & 7u) != 7u) {
             uint8_t keep = (uint8_t)(((m & 1u) ? 0 : 0xE0u) | ((m & 2u) ? 0 : 0x1Cu) | ((m & 4u) ? 0 : 0x03u));
             v = (uint8_t)((*p & keep) | (v & ~keep));

@@ -29,20 +29,38 @@ def q565(rgb):
 
 
 def box4(w, h, rgb):
+    """Each pixel the mean (rounded down) of the 4x4 block from (x-1, y-1) to
+    (x+2, y+2), clipped to the image: sums along rows, then down columns."""
+    rows = [None] * h                           # each row's 4-wide sums, per channel interleaved
+    cx = [min(x + 3, w) - max(x - 1, 0) for x in range(w)]
+    for y in range(h):
+        r = rgb[y * w * 3:(y + 1) * w * 3]
+        pre = [0, 0, 0]
+        p = [[0] * (w + 1) for _ in range(3)]
+        for x in range(w):
+            for c in range(3):
+                pre[c] += r[x * 3 + c]
+                p[c][x + 1] = pre[c]
+        row = [0] * (w * 3)
+        for x in range(w):
+            a, b = max(x - 1, 0), min(x + 3, w)
+            for c in range(3):
+                row[x * 3 + c] = p[c][b] - p[c][a]
+        rows[y] = row
     out = bytearray(len(rgb))
     for y in range(h):
+        y0, y1 = max(y - 1, 0), min(y + 3, h)
+        ny = y1 - y0
+        acc = [0] * (w * 3)
+        for yy in range(y0, y1):
+            ry = rows[yy]
+            for i in range(w * 3):
+                acc[i] += ry[i]
+        base = y * w * 3
         for x in range(w):
-            acc = [0, 0, 0]
-            n = 0
-            for dy in range(-1, 3):
-                for dx in range(-1, 3):
-                    xx, yy = x + dx, y + dy
-                    if 0 <= xx < w and 0 <= yy < h:
-                        i = (yy * w + xx) * 3
-                        acc[0] += rgb[i]; acc[1] += rgb[i + 1]; acc[2] += rgb[i + 2]
-                        n += 1
-            i = (y * w + x) * 3
-            out[i], out[i + 1], out[i + 2] = acc[0] // n, acc[1] // n, acc[2] // n
+            n = cx[x] * ny
+            i = x * 3
+            out[base + i], out[base + i + 1], out[base + i + 2] = acc[i] // n, acc[i + 1] // n, acc[i + 2] // n
     return bytes(out)
 
 

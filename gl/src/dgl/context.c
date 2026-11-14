@@ -150,6 +150,7 @@ static int opened(const DGLConfig *c, const rg_opened *op)
     dgl_ctx.double_buffer = op->double_buffer;
     dgl_ctx.depth_bits = op->depth_bits;
     dgl_ctx.stencil_bits = op->stencil_bits;
+    dgl_ctx.color_bits = op->color_bits ? op->color_bits : 16;
     dgl_ctx.vsync = op->vsync;
     dgl_ctx.window = op->window;
     dgl_ctx.active = 1;
@@ -191,11 +192,8 @@ int dglInit(const DGLConfig *cfg)
         c = *cfg;
         if (!c.width || !c.height) { c.width = 640; c.height = 480; }
     }
-    /* (16-bit colour only until a device has more: B2's software one.) */
-    if (c.color_bits && c.color_bits != 16) {
-        dgl_set_error("only 16-bit colour is supported");
-        return -1;
-    }
+    /* (The colour depth is the device's to refuse: the Matrox cards draw 16 bits, the memory device 8, 16
+       or 32.) */
     if (dgl_glos_want()) {
         /* Under GLOS with a desktop that can show GL in a window: a window of
          * the context's size, its buffers and texture heap in memory GLOS

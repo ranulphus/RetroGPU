@@ -58,7 +58,7 @@ void dgl_emit_install(void);
 typedef struct {
     int      active;
     int      width, height;
-    int      double_buffer, depth_bits, stencil_bits, vsync;
+    int      double_buffer, color_bits, depth_bits, stencil_bits, vsync;
     int      draw_front, read_front;      /* glDrawBuffer/glReadBuffer chose GL_FRONT */
     unsigned window;                      /* a GLOS window's handle, 0 full screen */
 } dgl_context;

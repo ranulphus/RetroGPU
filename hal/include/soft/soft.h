@@ -22,7 +22,9 @@
 #define SOFT_SOFT_H
 #include <stdint.h>
 
-/* Colour buffer formats. */
+/* Colour buffer formats. RGB332 is a fixed palette (red and green 3 bits,
+ * blue 2), ordered-dithered (4x4) when the state's dither is set; the others
+ * are written undithered. XRGB8888 keeps no destination alpha (it reads as 1). */
 enum { SOFT_RGB565, SOFT_XRGB8888, SOFT_RGB332 };
 
 typedef struct {
@@ -99,6 +101,7 @@ typedef struct {
     int      scissor[4];            /* x0, y0, x1, y1 (exclusive), within the target */
     int      fill_rule;             /* SOFT_FILL_*: a centre on a horizontal edge */
     unsigned color_mask;            /* bit 0 red, 1 green, 2 blue, 3 alpha */
+    int      dither;                /* RGB332: ordered dither (GL_DITHER) */
     int      smooth;                /* 0: flat (the first vertex's colour) */
     int      depth_test, depth_func, depth_write;
     soft_stage stage[2];

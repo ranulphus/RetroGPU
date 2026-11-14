@@ -100,6 +100,7 @@ static int open_mem(const rg_open *o, rg_opened *out)
     out->double_buffer = o->double_buffer != 0;
     out->depth_bits = rg_sb.depth_bits;
     out->stencil_bits = rg_sb.stencil ? 8 : 0;
+    out->color_bits = bpp;
     out->vsync = 0;
     out->display_width = o->width;
     out->display_height = o->height;

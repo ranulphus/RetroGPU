@@ -9,10 +9,12 @@ Runs inside the dev container (make conform CARD=g450 [TESTS="t01 t02"]
 Results: out/conform/<card>/<test>/ (serial.log, frames, diffs, result.json)
 and out/conform/summary-<card>.json. Exit status 0 when every test passes.
 
-The software renderer (make soft-conform; docs/b2.md): --soft runs each
-test's 32-bit Linux build (make rig, ct_rig.c) on the memory device
-(DGL_DEVICE=mem) natively, no emulator, and compares its frames the same way.
-Results: out/conform/soft/<test>/ and out/conform/summary-soft.json.
+The software renderer (make soft-conform [BPP=8|32]; docs/b2.md): --soft
+runs each test's 32-bit Linux build (make rig, ct_rig.c) on the memory device
+(DGL_DEVICE=mem) natively, no emulator, and compares its frames the same way,
+at 16 bits, or with --bpp 8 or 32 (the manifest's "_default_soft8" and a
+frame's "soft8" entries add to its settings there). Results:
+out/conform/soft[8|32]/<test>/ and out/conform/summary-soft[8|32].json.
 
 On a bench PC (make conform-bench PC=bench-g400): --refs makes the Mesa
 references in the dev container, then --bench PC runs each test on the PC
@@ -56,12 +58,15 @@ def run_dos(test, card, out):
     return json.load(open(os.path.join(out, "result.json")))
 
 
+SOFT_BPP = 16                                   # (--soft --bpp)
+
+
 def run_soft(test, out):
     """The test's Linux build drawing in memory (the software renderer); its frames as PNGs in `out`."""
     exe = os.path.join(ROOT, "build", "rig", "conform", test)
     shutil.rmtree(out, ignore_errors=True)
     os.makedirs(out)
-    env = dict(os.environ, CT_OUT=out, DGL_DEVICE="mem")
+    env = dict(os.environ, CT_OUT=out, DGL_DEVICE="mem", CT_BPP=str(SOFT_BPP))
     for line in MANIFEST.get(test, {}).get("pre", []):      # (SET DGL_... lines: the same as environment here)
         if line.upper().startswith("SET ") and "=" in line:
             k, v = line[4:].split("=", 1)
@@ -112,9 +117,10 @@ def check(test, card, pc=None):
     out = os.path.join(ROOT, "out", "conform", pc or card, test)
     ref = os.path.join(ROOT, "out", "conform", "ref", test)
     only = MANIFEST.get(test, {}).get("only")
-    if only and (pc or card) not in only:       # (a test for some renderers only: t33's stencil)
+    who = "soft" if card.startswith("soft") and not pc else (pc or card)    # (soft8, soft32: the software renderer)
+    if only and who not in only:                # (a test for some renderers only: t33's stencil)
         return {"test": test, "card": pc or card, "run": "SKIPPED", "frames": {}, "ok": True}
-    if card == "soft" and not pc:
+    if card.startswith("soft") and not pc:
         run_ref(test, ref)
         res = run_soft(test, out)
     elif pc:
@@ -129,13 +135,17 @@ def check(test, card, pc=None):
     for rp in sorted(glob.glob(os.path.join(ref, "*.png"))):
         name = os.path.basename(rp)[:-4]
         got = os.path.join(out, name + ".png")
-        m = dict(MANIFEST.get("_default", {}), **MANIFEST.get(name, {}))
+        # The defaults, a card's or depth's ("_default_soft8"), the frame's own, and the frame's for that card ("soft8").
+        m = dict(MANIFEST.get("_default", {}))
+        m.update(MANIFEST.get("_default_" + card, {}))
+        m.update({k: v for k, v in MANIFEST.get(name, {}).items() if not isinstance(v, dict)})
+        m.update(MANIFEST.get(name, {}).get(card, {}))
         if not os.path.exists(got):
             report["frames"][name] = {"ok": False, "reason": "missing"}
             ok = False
             continue
         c = imgcmp.compare(rp, got, m.get("tol", 24), m.get("frac", 0.005), m.get("edge", True),
-                           False, os.path.join(out, name + ".diff.png"), m.get("ignore", ()))
+                           m.get("box", False), os.path.join(out, name + ".diff.png"), m.get("ignore", ()))
         report["frames"][name] = c
         ok = ok and c["ok"]
     report["ok"] = ok
@@ -152,9 +162,13 @@ def main():
     ap.add_argument("--bench", metavar="PC", help="run on this bench PC (on the host; references from --refs)")
     ap.add_argument("--refs", action="store_true", help="only make the Mesa references (in the dev container)")
     ap.add_argument("--soft", action="store_true", help="the software renderer natively (the Linux builds, in memory)")
+    ap.add_argument("--bpp", type=int, default=16, choices=(8, 16, 32),
+                    help="--soft: the colour depth (results as soft, soft8, soft32)")
     a = ap.parse_args()
     if a.soft:
-        a.card = "soft"
+        global SOFT_BPP
+        SOFT_BPP = a.bpp
+        a.card = "soft" if a.bpp == 16 else "soft%d" % a.bpp
     PRE.extend(a.pre)
     tests = a.tests or tests_available()
     if a.refs:
