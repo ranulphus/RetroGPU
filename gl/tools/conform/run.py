@@ -23,6 +23,7 @@ out/conform/<pc>/<test>/ and out/conform/summary-<pc>.json.
 """
 import argparse
 import concurrent.futures as cf
+import functools
 import glob
 import json
 import os
@@ -175,8 +176,11 @@ def main():
         for t in tests:
             run_ref(t, os.path.join(ROOT, "out", "conform", "ref", t))
         return 0
-    with cf.ThreadPoolExecutor(1 if a.bench else a.jobs) as ex:   # one PC: one job at a time
-        reports = list(ex.map(lambda t: check(t, a.card, a.bench), tests))
+    # One PC: one job at a time. The software renderer's runs are all CPU here, the comparisons in Python too:
+    # processes, not threads (which take turns on the interpreter's lock).
+    pool = cf.ProcessPoolExecutor if a.soft else cf.ThreadPoolExecutor
+    with pool(1 if a.bench else a.jobs) as ex:
+        reports = list(ex.map(functools.partial(check, card=a.card, pc=a.bench), tests))
     for r in reports:
         worst = max([f.get("frac", 1.0) or 0 for f in r["frames"].values()] or [1.0])
         print("conform %-4s %-5s %s run=%-9s frames=%d worst-frac=%.4f" % (
