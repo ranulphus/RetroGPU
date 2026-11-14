@@ -378,7 +378,7 @@ static int present_front(void)
 static void retrace_wait(void)
 {
     uint32_t t0 = sys_time_us();
-    PROF_SCOPE(PROF_D_VSYNC);
+    PROF_SCOPE(PROF_VSYNC);
     if (rg_mga.hooks.wait)
         rg_mga.hooks.wait();
     engine_vsync_wait(50000);

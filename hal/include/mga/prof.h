@@ -19,6 +19,7 @@ enum {
     PROF_SPLANE,        /* setup_triangle: sorting and plane gradients */
     PROF_SINC,          /* setup_triangle: per-triangle increments */
     PROF_STRAP,         /* setup_triangle: per trapezoid (edges, starts, start) */
+    PROF_VSYNC,         /* a swap waiting for the retrace (the device's: rg/mga.c) */
     PROF_CLIENT = 8,    /* the first stage a client may use */
     PROF_N = 24
 };

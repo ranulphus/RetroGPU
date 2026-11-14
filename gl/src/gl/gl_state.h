@@ -17,9 +17,9 @@ enum {
     PROF_D_TEX,                     /* glTexImage2D, glTexSubImage2D */
     PROF_D_CLEAR,                   /* glClear */
     PROF_D_DRAIN,                   /* SwapBuffers waiting for the engine */
-    PROF_D_VSYNC,                   /* SwapBuffers waiting for retrace */
     PROF_D_SWAP                     /* the rest of SwapBuffers (flip, statistics) */
 };
+#define PROF_D_VSYNC PROF_VSYNC     /* SwapBuffers waiting for retrace: the device's stage (mga/prof.h) */
 
 /* Column-major 4x4, as GL stores matrices. */
 typedef struct { GLfloat m[16]; } dgl_mat4;
