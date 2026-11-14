@@ -163,6 +163,10 @@ unsigned soft_epoch(void);
  * routines without the specialised runs (they must draw the same pixels). */
 void soft_exact(int mode);
 
+/* MMX versions of the untextured spans and the specialised runs (B2.8): on
+ * where the CPU has MMX (the default), off with on = 0; the same pixels. */
+void soft_mmx(int on);
+
 /* Counters. */
 typedef struct {
     uint32_t tris, lines, points, pixels;

@@ -11,6 +11,11 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
+#  include <cpuid.h>
+#  include <mmintrin.h>
+#  define SOFT_MMX 1
+#endif
 
 /* The x87 at 53 bits, rounding to nearest, inside the core's entry points:
  * GL's drawing calls already run so, but a flush can come from a swap or a
@@ -762,6 +767,244 @@ static fast_span_fn *const fast_tab[24] = {
     fast_1110, fast_1111, fast_1120, fast_1121,
 };
 
+/* ---- MMX spans (B2.8) ------------------------------------------------------ */
+
+/* The untextured spans and the specialised textured runs again, their
+ * per-pixel arithmetic in MMX: colour stepped two channels a register and
+ * clamped by the saturating packs, texels widened to 16-bit lanes, the
+ * bilinear filter (soft_lerp8), modulate (mul255) and the common blends lane
+ * by lane. The same formulas as the C, so the same pixels (soft-tilecheck
+ * compares them on every frame). Depth, the alpha test, the general blend and
+ * the write stay scalar. MMX shares the x87's registers: EMMS before each
+ * piece's set-up (doubles), before a pixel divided, and at the span's end;
+ * those helpers are called, not inlined, so nothing x87 lands among MMX code.
+ * Chosen when the CPU has MMX (CPUID) unless soft_mmx(0). */
+#ifdef SOFT_MMX
+static int mmx_on = -1;                 /* -1: not asked yet */
+
+static int cpu_has_mmx(void)
+{
+    unsigned a = 0, b = 0, c = 0, d = 0;
+    if (!__get_cpuid(1, &a, &b, &c, &d))    /* (0 where the CPU has no CPUID: a 486 before the DX4's) */
+        return 0;
+    return (d >> 23) & 1;
+}
+
+static __attribute__((noinline)) const soft_pick *chunk_start_x87(int k, stagecur *C, int x, int32_t *U, int32_t *V,
+                                                                   int32_t *dU, int32_t *dV, int *pp)
+{
+    return chunk_start(k, C, x, U, V, dU, dV, pp);
+}
+
+static __attribute__((noinline)) void pp_fetch_x87(int k, stagecur *C, int x, int t[4])
+{
+    int32_t u, v;
+    const soft_pick *p1 = pp_at(k, &C[0], x, &u, &v);
+    soft_fetch8(S.stage[k].tex, p1, u, v, t);
+}
+
+#define MMXFN __attribute__((target("mmx"), always_inline)) static inline
+
+MMXFN __m64 mmx_mul255(__m64 a, __m64 b)        /* mul255 lane by lane */
+{
+    __m64 x = _mm_add_pi16(_mm_mullo_pi16(a, b), _mm_set1_pi16(128));
+    return _mm_srli_pi16(_mm_add_pi16(x, _mm_srli_pi16(x, 8)), 8);
+}
+
+MMXFN __m64 mmx_lerp(__m64 a, __m64 b, __m64 f, __m64 nf)  /* soft_lerp8: f, nf = 256 - f in every lane */
+{
+    return _mm_srli_pi16(_mm_add_pi16(_mm_add_pi16(_mm_mullo_pi16(a, nf), _mm_mullo_pi16(b, f)), _mm_set1_pi16(128)), 8);
+}
+
+MMXFN __m64 mmx_texel(const uint8_t *p)        /* RGBA8 into four 16-bit lanes */
+{
+    uint32_t v;
+    memcpy(&v, p, 4);
+    return _mm_unpacklo_pi8(_mm_cvtsi32_si64((int)v), _mm_setzero_si64());
+}
+
+MMXFN __m64 mmx_clamp255(__m64 v)              /* signed 16-bit lanes to 0..255 (clamp255) */
+{
+    return _mm_unpacklo_pi8(_mm_packs_pu16(v, v), _mm_setzero_si64());
+}
+
+MMXFN void mmx_lanes(__m64 v, int c[4])
+{
+    uint32_t lo = (uint32_t)_mm_cvtsi64_si32(v), hi = (uint32_t)_mm_cvtsi64_si32(_mm_srli_si64(v, 32));
+    c[0] = (int)(lo & 0xFFFF), c[1] = (int)(lo >> 16), c[2] = (int)(hi & 0xFFFF), c[3] = (int)(hi >> 16);
+}
+
+MMXFN __m64 mmx_fetch(const inlevel *L, int32_t U, int32_t V)   /* inl_fetch */
+{
+    int32_t u = U >> L->sh_s, v = V >> L->sh_t;
+    if (!L->linear)
+        return mmx_texel(L->p + ((size_t)((v >> 16) & L->hm) * (size_t)L->w + (size_t)((u >> 16) & L->wm)) * 4);
+    else {
+        int fu, fv, ia, ib, ja, jb;
+        const uint8_t *r0, *r1;
+        __m64 f, nf, top, bot;
+        u -= 0x8000, v -= 0x8000;
+        fu = (u >> 8) & 255, fv = (v >> 8) & 255;
+        ia = (u >> 16) & L->wm, ib = (ia + 1) & L->wm, ja = (v >> 16) & L->hm, jb = (ja + 1) & L->hm;
+        r0 = L->p + (size_t)ja * (size_t)L->w * 4, r1 = L->p + (size_t)jb * (size_t)L->w * 4;
+        f = _mm_set1_pi16((short)fu), nf = _mm_set1_pi16((short)(256 - fu));
+        top = mmx_lerp(mmx_texel(r0 + ia * 4), mmx_texel(r0 + ib * 4), f, nf);
+        bot = mmx_lerp(mmx_texel(r1 + ia * 4), mmx_texel(r1 + ib * 4), f, nf);
+        return mmx_lerp(top, bot, _mm_set1_pi16((short)fv), _mm_set1_pi16((short)(256 - fv)));
+    }
+}
+
+MMXFN __m64 mmx_blend(int x, int y, __m64 c)   /* blend8 */
+{
+    int d[4], cc[4];
+    __m64 dv;
+    color_get8(x, y, d);
+    dv = _mm_set_pi16((short)d[3], (short)d[2], (short)d[1], (short)d[0]);
+    switch (blend_kind) {
+    case BK_ALPHA: {
+        __m64 aa = _mm_unpackhi_pi16(c, c);
+        aa = _mm_unpackhi_pi32(aa, aa);         /* (alpha in every lane) */
+        return mmx_clamp255(_mm_add_pi16(mmx_mul255(c, aa), mmx_mul255(dv, _mm_sub_pi16(_mm_set1_pi16(255), aa))));
+    }
+    case BK_ADD:
+        return mmx_clamp255(_mm_add_pi16(c, dv));
+    case BK_MUL:
+        return mmx_mul255(c, dv);
+    default:
+        mmx_lanes(c, cc);
+        blend8(x, y, cc);
+        return _mm_set_pi16((short)cc[3], (short)cc[2], (short)cc[1], (short)cc[0]);
+    }
+}
+
+/* The loop, all integer and MMX: its caller (no MMX) does the x87 set-up,
+ * the alpha test's reference and the texture's row, before it starts. */
+__attribute__((target("mmx"), always_inline)) static inline void mmx_loop(int j, int xl, int xr, const attrs *A,
+                                                                          stagecur *C, int aref, const int SMOOTH,
+                                                                          const int DEPTH, const int TEX,
+                                                                          const int BLEND)
+{
+    int64_t ox = xl - A->xref, oy = j - A->yref;
+    int i, atest = S.alpha_test, z_on = DEPTH;
+    int32_t z = 0, dz = A->fz.dx;
+    inlevel IL = { NULL, 0, 0, 0, 0, 0, 0 };
+    __m64 rg, ba, drg, dba, half, zero, mrgb, malpha;
+#define AT(F) ((int32_t)(uint32_t)(uint64_t)((F).v + ox * (F).dx + oy * (F).dy))
+    if (DEPTH)
+        z = AT(A->fz);
+    rg = _mm_set_pi32(AT(A->fg), AT(A->fr)), ba = _mm_set_pi32(AT(A->fa), AT(A->fb));
+#undef AT
+    drg = _mm_set_pi32(A->fg.dx, A->fr.dx), dba = _mm_set_pi32(A->fa.dx, A->fb.dx);
+    half = _mm_set1_pi32(0x8000), zero = _mm_setzero_si64();
+    mrgb = _mm_set_pi16(0, -1, -1, -1), malpha = _mm_set_pi16(-1, 0, 0, 0);
+    (void)z_on;
+    for (i = xl; i < xr;) {
+        int end = TEX ? ((i | 15) + 1 < xr ? (i | 15) + 1 : xr) : xr, inl = 0, pp = 0;
+        int32_t U = 0, V = 0, dU = 0, dV = 0;
+        const soft_pick *pk = NULL;
+        if (TEX) {
+            _mm_empty();                        /* (the piece's set-up is x87) */
+            pk = chunk_start_x87(0, &C[0], i, &U, &V, &dU, &dV, &pp);
+            if ((inl = !pp && pk->n == 1))
+                inlevel_of(S.stage[0].tex, pk, &IL);
+        }
+        for (; i < end; i++) {
+            __m64 prim, c;
+            uint32_t zi = 0;
+            int a8;
+            if (DEPTH) {
+                int32_t zz = z >> 14;
+                zi = zz < 0 ? 0 : zz > 65535 ? 65535 : (uint32_t)zz;
+                if (!atest && !depth_pass(zi, depth_get(i, j)))
+                    goto next;
+            }
+            prim = _mm_packs_pi32(_mm_srai_pi32(_mm_add_pi32(rg, half), 16), _mm_srai_pi32(_mm_add_pi32(ba, half), 16));
+            prim = mmx_clamp255(prim);
+            c = prim;
+            if (TEX) {
+                __m64 t, prod, rgb, alpha;
+                if (inl)
+                    t = mmx_fetch(&IL, U, V);
+                else {
+                    int tt[4];
+                    _mm_empty();
+                    if (pp)
+                        pp_fetch_x87(0, C, i, tt);
+                    else
+                        soft_fetch8(S.stage[0].tex, pk, U, V, tt);
+                    t = _mm_set_pi16((short)tt[3], (short)tt[2], (short)tt[1], (short)tt[0]);
+                }
+                prod = mmx_mul255(t, prim);
+                rgb = simple_rgb == SM_MOD ? prod : simple_rgb == SM_TEX ? t : prim;
+                alpha = simple_alpha == SM_MOD ? prod : simple_alpha == SM_TEX ? t : prim;
+                c = _mm_or_si64(_mm_and_si64(rgb, mrgb), _mm_and_si64(alpha, malpha));
+            }
+            a8 = (int)((uint32_t)_mm_cvtsi64_si32(_mm_srli_si64(c, 48)) & 0xFFFF);
+            if (atest && !compare(S.alpha_func, (unsigned)a8, (unsigned)aref))
+                goto next;
+            if (DEPTH) {
+                if (atest && !depth_pass(zi, depth_get(i, j)))
+                    goto next;
+                if (S.depth_write)
+                    depth_put(i, j, zi);
+            }
+            if (BLEND)
+                c = mmx_blend(i, j, c);
+            {
+                int cc[4];
+                mmx_lanes(c, cc);
+                soft_count.pixels++;
+                color_put(i, j, cc[0], cc[1], cc[2], cc[3]);
+            }
+        next:
+            if (SMOOTH)
+                rg = _mm_add_pi32(rg, drg), ba = _mm_add_pi32(ba, dba);
+            if (DEPTH)
+                z = (int32_t)((uint32_t)z + (uint32_t)dz);
+            if (TEX)
+                U = (int32_t)((uint32_t)U + (uint32_t)dU), V = (int32_t)((uint32_t)V + (uint32_t)dV);
+        }
+    }
+    (void)zero;
+    _mm_empty();
+}
+
+#define MMX(SM, DE, TE, BL) \
+    __attribute__((target("mmx"), noinline)) static void mmxl_##SM##DE##TE##BL(int j, int xl, int xr, const attrs *A, \
+                                                                              stagecur *C, int aref) \
+    { mmx_loop(j, xl, xr, A, C, aref, SM, DE, TE, BL); } \
+    static void mmx_##SM##DE##TE##BL(int j, int xl, int xr, const attrs *A) \
+    { \
+        stagecur C[1]; \
+        int aref = to8(S.alpha_ref * 255.0); \
+        if (TE) \
+            stage_row(0, A, j, &C[0]); \
+        mmxl_##SM##DE##TE##BL(j, xl, xr, A, C, aref); \
+    }
+#define MMX_TE(SM, DE, TE) MMX(SM, DE, TE, 0) MMX(SM, DE, TE, 1)
+#define MMX_DE(SM, DE) MMX_TE(SM, DE, 0) MMX_TE(SM, DE, 2)
+MMX_DE(0, 0) MMX_DE(0, 1) MMX_DE(1, 0) MMX_DE(1, 1)
+#undef MMX_DE
+#undef MMX_TE
+#undef MMX
+/* Indexed ((smooth * 2 + depth) * 2 + textured (the simple runs)) * 2 + blended. */
+static fast_span_fn *const mmx_tab[16] = {
+    mmx_0000, mmx_0001, mmx_0020, mmx_0021, mmx_0100, mmx_0101, mmx_0120, mmx_0121,
+    mmx_1000, mmx_1001, mmx_1020, mmx_1021, mmx_1100, mmx_1101, mmx_1120, mmx_1121,
+};
+#endif
+
+void soft_mmx(int on)
+{
+#ifdef SOFT_MMX
+    soft_flush();
+    mmx_on = on && cpu_has_mmx();
+    select_span();
+#else
+    (void)on;
+#endif
+}
+
 /* A combine the simple runs do: SM_MOD (texture times primary), SM_TEX
  * (texture), SM_PRIM (primary); -1 otherwise. Stage 0's previous colour is
  * the primary; for alpha an operand's COLOR is its alpha too. */
@@ -821,6 +1064,12 @@ static void select_span(void)
             blend_kind = BK_MUL;
     }
     fast_fn = fast_tab[((S.smooth != 0) * 2 + depth) * 6 + tex * 2 + (S.blend != 0)];
+#ifdef SOFT_MMX
+    if (mmx_on < 0)
+        mmx_on = cpu_has_mmx();
+    if (mmx_on && exact_mode == 0 && tex != 1 && (tex || S.smooth || S.blend))   /* (flat fills gain nothing) */
+        fast_fn = mmx_tab[((S.smooth != 0) * 2 + depth) * 4 + (tex == 2) * 2 + (S.blend != 0)];
+#endif
 }
 
 void soft_exact(int mode)

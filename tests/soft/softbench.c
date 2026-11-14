@@ -1,7 +1,7 @@
 /* softbench.c - the software core's speed by class of state (gl/docs/b2.md
  * B2.8, B2.9): a 320x240 RGB565 screen covered by a jittered mesh of
  * triangles (about 320 pixels each), drawn again and again in each state, on
- * the reference spans and the integer ones (and later MMX); millions of
+ * the reference spans, the integer ones in C and with MMX; millions of
  * pixels a second and nanoseconds a pixel. Built 32-bit with x87 maths and
  * the DOS library's flags (make softbench), so the code is close to what a
  * Pentium II runs; the host's numbers say which routines matter and by how
@@ -128,13 +128,14 @@ static void state_for(int c, soft_state *s)
 }
 
 /* Millions of pixels a second for case c on the given spans. */
-static double run(int c, int exact, double secs)
+static double run(int c, int exact, int mmx, double secs)
 {
     soft_state s;
     uint32_t px0;
     double t0, t;
     int frames = 0;
     soft_exact(exact);
+    soft_mmx(mmx);
     state_for(c, &s);
     soft_state_set(&s);
     px0 = soft_count.pixels;
@@ -159,10 +160,10 @@ int main(int argc, char **argv)
     soft_target_set(&tg);
     soft_tiles(64);
     printf("softbench: %dx%d RGB565, %d triangles a frame, tiles of 64\n", W, H, 2 * GX * GY);
-    printf("  %-38s %12s %12s %8s\n", "state", "reference", "integer", "ratio");
+    printf("  %-38s %12s %12s %12s %8s\n", "state", "reference", "integer C", "MMX", "MMX/ref");
     for (c = 0; c < C_COUNT; c++) {
-        double ref = run(c, 1, secs), fast = run(c, 0, secs);
-        printf("  %-38s %8.1f Mp/s %8.1f Mp/s %7.2fx\n", names[c], ref, fast, fast / ref);
+        double ref = run(c, 1, 0, secs), fast = run(c, 0, 0, secs), mmx = run(c, 0, 1, secs);
+        printf("  %-38s %8.1f Mp/s %8.1f Mp/s %8.1f Mp/s %7.2fx\n", names[c], ref, fast, mmx, mmx / ref);
     }
     return 0;
 }
