@@ -918,15 +918,16 @@ static int seq_kinds = 7;               /* DGL_SEQ: 1 fans and polygons, 2 strip
 
 /* The fast path, twice (fast.inc): for the Pentium (-march=i586, as the
  * rest), and for the Pentium II and later, chosen at start by CPUID (fe.md
- * F3; DGL_P6=0 keeps the Pentium's). Only on 32-bit x86, where the
- * attribute means something; elsewhere both copies are the same code. */
+ * F3; DGL_P6=0 keeps the Pentium's). Only in DOS builds: elsewhere (the
+ * Linux rig) both copies are the same code, and glibc's fortified memcpy, an
+ * always_inline function, won't inline into another target's. */
 #define FAST(n) n##_p5
 #define FAST_ATTR
 #include "fast.inc"
 #undef FAST
 #undef FAST_ATTR
 #define FAST(n) n##_p6
-#if defined(__GNUC__) && defined(__i386__)
+#if defined(__GNUC__) && defined(__i386__) && defined(__DJGPP__)
 #  define FAST_ATTR __attribute__((target("arch=pentium2")))
 #else
 #  define FAST_ATTR
