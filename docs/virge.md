@@ -1,8 +1,9 @@
 # The S3 ViRGE/DX: a plan
 
-**Status (2026-11-13): v1, the owner's answers in (below). V0 and V1 done in Loop A (on main); V2 done in Loop A
-(branch `virge`): Gouraud, Z, blending, fog and textures (three formats, NEAREST/LINEAR, perspective, mipmaps,
-modulate) within VTRI's tolerances on both boards; bench C pending.**
+**Status (2026-11-14): v1, the owner's answers in (below). V0, V1 and V2 done in Loop A and on main (V2:
+Gouraud, Z, blending, fog and textures in three formats, NEAREST/LINEAR, perspective, mipmaps, modulate, within
+VTRI's tolerances on both boards). B1 has landed, so V3 (the ViRGE/DX as a RetroGPU device) is next, before B2 (the
+owner's order); bench C pending.**
 
 The owner's decisions (2026-11-12, `gl/docs/backends.md`): the ViRGE/DX is the first card after the Matrox ones,
 before the Riva TNT2; DOS-GL, GLOS's desktop and Glide all run on it; the card is bench C's (the 486DX4, PCI,

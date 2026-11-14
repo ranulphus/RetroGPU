@@ -1,8 +1,9 @@
 # DOS-GL with more than one back end: the software renderer first, a plan
 
 **Status (2026-11-13): plan v1, approved by the owner. B0 written and reviewed (`docs/backend-interface.md`); the
-merge into RetroGPU has landed (2026-11-08). B1's own plan is `docs/b1.md`, for the owner's review; nothing built
-yet. 2026-11-12: the S3 ViRGE/DX added to the order of the other cards, first (see the end). 2026-11-13: B1 to B5
+merge into RetroGPU has landed (2026-11-08). B1 is done (2026-11-14, `docs/b1.md`): the Matrox code behind the
+device level (`hal/src/rg`) and GL's drawing back end (`src/backend/mga`), pixel and register identical. Next, by
+the owner's order, the ViRGE/DX's device (`docs/virge.md` V3), then B2. 2026-11-12: the S3 ViRGE/DX added to the order of the other cards, first (see the end). 2026-11-13: B1 to B5
 built by the DOS-GL session (below).**
 
 The owner's decision (2026-11-06), from GLOS's v1 route (GLOS `docs/v1-route.md`): **DOS-GL gains a software
