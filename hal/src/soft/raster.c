@@ -9,6 +9,7 @@
 #include "internal.h"
 #include "mga/fp.h"
 #include <math.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
@@ -139,19 +140,55 @@ static void color_put(int x, int y, int r, int g, int b, int a)
 
 /* ---- Clears -------------------------------------------------------------- */
 
+/* Inside the scissor. Where a pixel's value doesn't depend on where it is
+ * (the whole colour mask, no 8-bit dither), the first is written by
+ * color_put and its raw value copied along the rows; else pixel by pixel. */
 static void draw_clear(unsigned what, const float rgba[4], double depth, unsigned stencil)
 {
-    int x, y, r = to8(rgba[0] * 255.0), g = to8(rgba[1] * 255.0), b = to8(rgba[2] * 255.0), a = to8(rgba[3] * 255.0);
+    int x0 = S.scissor[0], y0 = S.scissor[1], x1 = S.scissor[2], y1 = S.scissor[3], x, y;
+    int r = to8(rgba[0] * 255.0), g = to8(rgba[1] * 255.0), b = to8(rgba[2] * 255.0), a = to8(rgba[3] * 255.0);
     uint32_t z = (uint32_t)(depth <= 0 ? 0 : depth >= 1 ? depth_max() : depth * depth_max());
-    for (y = S.scissor[1]; y < S.scissor[3]; y++)
-        for (x = S.scissor[0]; x < S.scissor[2]; x++) {
-            if ((what & SOFT_CLEAR_COLOR) && (S.color_mask & 15u))
-                color_put(x, y, r, g, b, a);
-            if ((what & SOFT_CLEAR_DEPTH) && T.depth)
-                depth_put(x, y, z);
-            if ((what & SOFT_CLEAR_STENCIL) && T.stencil)
-                T.stencil[(size_t)y * T.stencil_pitch + x] = (uint8_t)stencil;
+    if (x0 >= x1 || y0 >= y1)
+        return;
+    if ((what & SOFT_CLEAR_COLOR) && (S.color_mask & 15u)) {
+        int full = T.format == SOFT_XRGB8888 ? (S.color_mask & 15u) == 15u : (S.color_mask & 7u) == 7u;
+        if (full && !(T.format == SOFT_RGB332 && S.dither)) {
+            const uint8_t *first = T.color + (size_t)y0 * T.color_pitch;
+            color_put(x0, y0, r, g, b, a);
+            for (y = y0; y < y1; y++) {
+                uint8_t *row = T.color + (size_t)y * T.color_pitch;
+                if (T.format == SOFT_RGB565) {
+                    uint16_t v = ((const uint16_t *)first)[x0], *p = (uint16_t *)row;
+                    for (x = x0; x < x1; x++)
+                        p[x] = v;
+                } else if (T.format == SOFT_XRGB8888) {
+                    uint32_t v = ((const uint32_t *)first)[x0], *p = (uint32_t *)row;
+                    for (x = x0; x < x1; x++)
+                        p[x] = v;
+                } else
+                    memset(row + x0, first[x0], (size_t)(x1 - x0));
+            }
+        } else
+            for (y = y0; y < y1; y++)
+                for (x = x0; x < x1; x++)
+                    color_put(x, y, r, g, b, a);
+    }
+    if ((what & SOFT_CLEAR_DEPTH) && T.depth)
+        for (y = y0; y < y1; y++) {
+            uint8_t *row = T.depth + (size_t)y * T.depth_pitch;
+            if (T.depth_bits == 32) {
+                uint32_t *p = (uint32_t *)row;
+                for (x = x0; x < x1; x++)
+                    p[x] = z;
+            } else {
+                uint16_t *p = (uint16_t *)row;
+                for (x = x0; x < x1; x++)
+                    p[x] = (uint16_t)z;
+            }
         }
+    if ((what & SOFT_CLEAR_STENCIL) && T.stencil)
+        for (y = y0; y < y1; y++)
+            memset(T.stencil + (size_t)y * T.stencil_pitch + x0, (int)(stencil & 255u), (size_t)(x1 - x0));
 }
 
 /* ---- The per-pixel tests, fog and blending -------------------------------- */
@@ -261,17 +298,23 @@ typedef struct { double a0, dx, dy; } plane;
  * coordinate over w, and 1/w (q), for perspective. */
 typedef struct { int64_t v; int32_t dx, dy; } fixplane;    /* an integer plane: at the reference pixel, steps */
 
+/* In the order the spans read them, so the tiles keep only what they need
+ * (attrs_size): the integer spans the integer planes, and the texture's part
+ * where they texture; the reference spans everything. */
 typedef struct {
     double ox, oy;
-    plane r, g, b, a, z, q, f, s[2], t[2];
-    /* The same as integer planes for the integer spans (B2.8), at the centre
-     * of pixel (xref, yref), the origin's: colour in 16.16, depth in 16.14;
-     * and, where a stage's coordinates are linear on the screen (q constant,
-     * GL_REPEAT), s and t in level-0 texels, 16.16, modulo 2^32. */
+    /* The integer spans' planes (B2.8), at the centre of pixel (xref, yref),
+     * the origin's: colour in 16.16, depth in 16.14. */
     int xref, yref;
     fixplane fr, fg, fb, fa, fz;
+    /* Textured: where a stage's coordinates are linear on the screen (q
+     * constant, GL_REPEAT), s and t in level-0 texels, 16.16, modulo 2^32;
+     * and the coordinates (over w) and 1/w as planes. */
     int affine[2];
     fixplane fu[2], fv[2];
+    plane q, s[2], t[2];
+    /* The reference spans': colour, depth and fog as planes. */
+    plane r, g, b, a, z, f;
 } attrs;
 
 /* Row j's pixels xl..xr-1 (inside the scissor): the fragment pipeline.
@@ -1228,9 +1271,10 @@ static void fix_planes(attrs *A)
     fix_tex(A, fx, fy);
 }
 
-static int32_t clamp28r(double d)       /* rounded in the current mode (nearest), held to +-2^28 */
+static int32_t clamp28r(double d)       /* rounded in the current mode (nearest), held to +-2^28: in integers */
 {
-    return d < -268435456.0 ? -268435456 : d > 268435456.0 ? 268435456 : mga_irint(d);
+    int64_t r = mga_irint64(d);                 /* (beyond 2^63 the x87's "indefinite": still clamped) */
+    return r < -268435456 ? -268435456 : r > 268435456 ? 268435456 : (int32_t)r;
 }
 
 /* A triangle's planes for the integer spans, straight from its vertices (the
@@ -1251,8 +1295,7 @@ static void fast_planes(attrs *A, const soft_vertex *const *v, const double *px,
     do { \
         double d1_ = ((a1) - (a0)) * (sc), d2_ = ((a2) - (a0)) * (sc); \
         double gx_ = (d1_ * y2 - d2_ * y1) * idet, gy_ = (d2_ * x1 - d1_ * x2) * idet; \
-        double v_ = (a0) * (sc) + gx_ * fx + gy_ * fy; \
-        (F).v = v_ > -4e18 && v_ < 4e18 ? mga_irint64(v_) : 0; \
+        (F).v = mga_irint64((a0) * (sc) + gx_ * fx + gy_ * fy); \
         (F).dx = clamp28r(gx_), (F).dy = clamp28r(gy_); \
     } while (0)
 #define FLAT(F, a0, sc) ((F).v = mga_irint64((a0) * (sc)), (F).dx = (F).dy = 0)
@@ -1308,32 +1351,24 @@ static plane plane_of(double a0, double a1, double a2, const double *px, const d
 static void triangle_now(const soft_vertex *a, const soft_vertex *b, const soft_vertex *c)
 {
     const soft_vertex *v[3] = { a, b, c }, *t;
-    int64_t X[3], Y[3], area2;
+    int64_t X[3], Y[3], area2, ti;
     double px[3], py[3], det;
     attrs A;
-    int i, j, k;
+    int i, k;
     double zmax = (double)depth_max();
 
-    /* Snapped to 1/16 of a pixel, sorted top (smallest y) first: the planes' origin the top vertex. */
-    if (v[1]->y < v[0]->y) t = v[0], v[0] = v[1], v[1] = t;
-    if (v[2]->y < v[1]->y) t = v[1], v[1] = v[2], v[2] = t;
-    if (v[1]->y < v[0]->y) t = v[0], v[0] = v[1], v[1] = t;
-    for (i = 0; i < 3; i++) {
-        X[i] = mga_ifloor64((double)v[i]->x * 16.0 + 0.5);
-        Y[i] = mga_ifloor64((double)v[i]->y * 16.0 + 0.5);
-        px[i] = (double)X[i] / 16.0;
-        py[i] = (double)Y[i] / 16.0;
-    }
-    if (Y[1] < Y[0] || Y[2] < Y[1]) {           /* (snapping can reorder equal-ish y: sort again on the grid) */
-        for (i = 0; i < 2; i++)
-            for (j = 0; j < 2 - i; j++)
-                if (Y[j + 1] < Y[j]) {
-                    int64_t ty = Y[j], tx = X[j];
-                    double tpx = px[j], tpy = py[j];
-                    Y[j] = Y[j + 1], X[j] = X[j + 1], px[j] = px[j + 1], py[j] = py[j + 1], t = v[j], v[j] = v[j + 1];
-                    Y[j + 1] = ty, X[j + 1] = tx, px[j + 1] = tpx, py[j + 1] = tpy, v[j + 1] = t;
-                }
-    }
+    /* Snapped to 1/16 of a pixel, to the nearest (halves to even, as lines
+     * snap: one FISTP, no comparison), then sorted top (smallest y) first,
+     * stably: the planes' origin the top vertex. */
+    for (i = 0; i < 3; i++)
+        X[i] = mga_irint64((double)v[i]->x * 16.0), Y[i] = mga_irint64((double)v[i]->y * 16.0);
+#define SWAP(m, n) (ti = X[m], X[m] = X[n], X[n] = ti, ti = Y[m], Y[m] = Y[n], Y[n] = ti, t = v[m], v[m] = v[n], v[n] = t)
+    if (Y[1] < Y[0]) SWAP(0, 1);
+    if (Y[2] < Y[1]) SWAP(1, 2);
+    if (Y[1] < Y[0]) SWAP(0, 1);
+#undef SWAP
+    for (i = 0; i < 3; i++)
+        px[i] = (double)X[i] * (1.0 / 16.0), py[i] = (double)Y[i] * (1.0 / 16.0);
     area2 = (X[1] - X[0]) * (Y[2] - Y[0]) - (X[2] - X[0]) * (Y[1] - Y[0]);
     if (area2 == 0 || Y[2] == Y[0])
         return;
@@ -1611,12 +1646,20 @@ typedef struct {
     int kind;
     const kept_state *ks;
     const attrs *A;
-    int64_t X[3], Y[3];                 /* a triangle (1/16 pixels) */
-    int x0, y0, x1, y1;                 /* a rectangle */
-    unsigned what, stencil;             /* a clear */
-    float rgba[4];
-    double depth;
+    union {
+        struct { int32_t X[3], Y[3]; } t;               /* a triangle (1/16 pixels) */
+        struct { int x0, y0, x1, y1; } r;               /* a rectangle */
+        struct { unsigned what, stencil; float rgba[4]; double depth; } c;  /* a clear */
+    } u;
 } kept_cmd;
+
+/* The part of a primitive's attrs its span reads, under U (attrs). */
+static size_t attrs_size(void)
+{
+    if (!fast_fn)
+        return sizeof(attrs);
+    return S.stage[0].tex || S.stage[1].tex ? offsetof(attrs, r) : offsetof(attrs, affine);
+}
 
 typedef struct { uint32_t *at; int n, cap; } bin;
 
@@ -1714,9 +1757,9 @@ static kept_cmd *new_cmd(int kind)
     kept_cmd *c;
     if ((!kept_cmds && !grid()) || !(k = state_kept()) || !(c = (kept_cmd *)keep_bytes(sizeof *c)))
         return NULL;
-    memset(c, 0, sizeof *c);
     c->kind = kind;
     c->ks = k;
+    c->A = NULL;
     return c;
 }
 
@@ -1765,16 +1808,19 @@ static void emit_cover(const int64_t *X, const int64_t *Y, const attrs *A, const
     int tries;
     for (tries = 0; tile_size && tries < 2; tries++) {
         kept_cmd *c = NULL;
-        if (!*kept) {
-            attrs *k = (attrs *)keep_bytes(sizeof *k);
+        int i, fits = 1;
+        for (i = 0; i < 3; i++)                 /* (kept in 32 bits: anything wider is drawn now, after the rest) */
+            fits &= X[i] > -0x40000000 && X[i] < 0x40000000 && Y[i] > -0x40000000 && Y[i] < 0x40000000;
+        if (fits && !*kept) {
+            size_t n = attrs_size();
+            attrs *k = (attrs *)keep_bytes(n);
             if (k)
-                *k = *A, *kept = k;
+                memcpy(k, A, n), *kept = k;
         }
-        if (*kept && (c = new_cmd(CMD_COVER)) != NULL) {
+        if (fits && *kept && (c = new_cmd(CMD_COVER)) != NULL) {
             int64_t xmin = X[0], xmax = X[0], ymin = Y[0], ymax = Y[0];
-            int i;
             for (i = 0; i < 3; i++) {
-                c->X[i] = X[i], c->Y[i] = Y[i];
+                c->u.t.X[i] = (int32_t)X[i], c->u.t.Y[i] = (int32_t)Y[i];
                 if (X[i] < xmin) xmin = X[i];
                 if (X[i] > xmax) xmax = X[i];
                 if (Y[i] < ymin) ymin = Y[i];
@@ -1790,6 +1836,8 @@ static void emit_cover(const int64_t *X, const int64_t *Y, const attrs *A, const
         soft_count.overflows++;                 /* (no room: draw what is kept, then try again) */
         soft_flush();
         *kept = NULL;
+        if (!fits)
+            break;
     }
     cover(X, Y, A);
 }
@@ -1798,11 +1846,12 @@ static void emit_rect(int x0, int y0, int x1, int y1, const attrs *A)
 {
     int tries;
     for (tries = 0; tile_size && tries < 2; tries++) {
-        attrs *k = (attrs *)keep_bytes(sizeof *k);
+        size_t n = attrs_size();
+        attrs *k = (attrs *)keep_bytes(n);
         kept_cmd *c = k ? new_cmd(CMD_RECT) : NULL;
         if (c) {
-            *k = *A;
-            c->A = k, c->x0 = x0, c->y0 = y0, c->x1 = x1, c->y1 = y1;
+            memcpy(k, A, n);
+            c->A = k, c->u.r.x0 = x0, c->u.r.y0 = y0, c->u.r.x1 = x1, c->u.r.y1 = y1;
             if (bin_cmd(c, x0, y0, x1, y1))
                 return;
         }
@@ -1818,8 +1867,8 @@ static void clear_now(unsigned what, const float rgba[4], double depth, unsigned
     for (tries = 0; tile_size && tries < 2; tries++) {
         kept_cmd *c = new_cmd(CMD_CLEAR);
         if (c) {
-            c->what = what, c->stencil = stencil, c->depth = depth;
-            memcpy(c->rgba, rgba, sizeof c->rgba);
+            c->u.c.what = what, c->u.c.stencil = stencil, c->u.c.depth = depth;
+            memcpy(c->u.c.rgba, rgba, sizeof c->u.c.rgba);
             if (bin_cmd(c, 0, 0, T.width, T.height))
                 return;
         }
@@ -1851,12 +1900,15 @@ static void flush_now(void)
                     S.scissor[3] = sc[3] < (ty + 1) * tile_size ? sc[3] : (ty + 1) * tile_size;
                     select_span();
                 }
-                if (c->kind == CMD_COVER)
-                    cover(c->X, c->Y, c->A);
-                else if (c->kind == CMD_RECT)
-                    draw_rect(c->x0, c->y0, c->x1, c->y1, c->A);
+                if (c->kind == CMD_COVER) {
+                    int64_t X[3], Y[3];
+                    X[0] = c->u.t.X[0], X[1] = c->u.t.X[1], X[2] = c->u.t.X[2];
+                    Y[0] = c->u.t.Y[0], Y[1] = c->u.t.Y[1], Y[2] = c->u.t.Y[2];
+                    cover(X, Y, c->A);
+                } else if (c->kind == CMD_RECT)
+                    draw_rect(c->u.r.x0, c->u.r.y0, c->u.r.x1, c->u.r.y1, c->A);
                 else
-                    draw_clear(c->what, c->rgba, c->depth, c->stencil);
+                    draw_clear(c->u.c.what, c->u.c.rgba, c->u.c.depth, c->u.c.stencil);
             }
         }
     S = U;
