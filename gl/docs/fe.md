@@ -59,25 +59,84 @@ report revises them.
   counted there too.
 - **Output:** a table in this file of cycles a triangle by stage and workload, and the order of F1 onwards.
 
-### F1 onwards: candidates, to be ordered by F0
-Each is its own commit with its own checks.
-1. **Validation only when something changed.** `emit_begin` rebuilds parts of the state at every `glBegin` (about
-   700 a frame): texture lookups and residency, the skip test and the guard band's divisions. The idea is to cache
-   them and redo them only on dirty bits.
-2. **Cheaper texture binds.** Keep each texture object's register words (`sampler()`'s results) with it, so a bind
-   writes saved words. This is the `-mtex` case: GLQuake binds a lightmap per polygon there.
-3. **The fast path's inner loop.** Act on F0's split: specialised transforms (affine matrices for 2D and
-   orthographic; the common perspective shape), the texture-matrix and fog tests hoisted out of the vertex loop,
-   fewer stores between stages, and ring writes in larger runs.
-4. **Immediate mode's copies.** Each `glVertex` copies the current colour and both texture coordinates (48 bytes)
-   whether they changed or not. The idea is to copy only what changed since the last vertex.
-5. **Arrays and buffers.** Fetch routines for the common layouts (float positions, byte colours, float texture
-   coordinates; shorts), with no type switch per component. Today `glDrawElements` copies every index into an
-   `int` buffer first.
-6. **Dynamic lightmap uploads.** `tex` was about 10% of a 320x200 frame; convert and write only the changed
-   rectangle.
-7. **The 320x200 swap** (12.8% of a frame): find out whether the CPU waits for the card's upscaling blit, and
-   overlap it with the next frame if so.
+### F0's results (bench-g400, 2026-11-14 evening)
+
+`PROF=2` builds of fe-plan 6bfbacd, `DGL_STATS=2`, GLOS's kernel with write-combining on. Runs with fixed time
+(`-fixedtime`, `fixedtime 14`, `host_framerate 0.02`), so later steps draw the same frames. Numbers are CPU cycles
+a triangle drawn, with each stage's timer entries taken out (`profsum.py`; the timers cost another 2-7%). Frame
+rates under `PROF=2` are 15-20% below normal builds'.
+
+**Games** (`lib` = DOS-GL without waits; `fifo` = waiting for room in the card's FIFO, i.e. the card is busy):
+
+| run | fps | lib | app | fifo | draw: xform+valid+vidle+batch | vertex: fxf+fprj | tri+ring | clip+proj+setup | tex | swap |
+|---|---|---|---|---|---|---|---|---|---|---|
+| GLQuake 640x480 | 37.6 | 3,615 | 916 | 956 | 951 | 1,150 | 580 | 564 | 123 | 247 |
+| GLQuake 320x200 | 40.6 | 3,972 | 768 | 93 | 940 | 1,159 | 565 | 524 | 119 | 655 |
+| GLQuake 640x480 `-mtex` | 32.1 | 6,101 | 1,596 | 1,608 | 2,489 | 1,442 | 715 | 523 | 533 | 397 |
+| GLQuake 320x200 `-mtex` | 33.9 | 6,495 | 1,409 | 454 | 2,387 | 1,417 | 688 | 482 | 515 | 992 |
+| Quake II 640x480 | 27.6 | 4,233 | 3,912 | 985 | 1,386 | 1,297 | 597 | 284 | 288 | 383 |
+| Quake II 320x240 | 29.2 | 4,836 | 2,776 | 327 | 1,434 | 1,349 | 627 | 288 | 316 | 809 |
+| Quake II 640x480 multitexture | 27.4 | 4,380 | 3,104 | 1,068 | 1,452 | 1,330 | 627 | 310 | 306 | 354 |
+| Half-Life 640x480 | 34.3 | 4,072 | 2,148 | 3,870 | 1,163 | 358 | 171 | 1,938 | 3 | 433 |
+| Half-Life 640x480 `gl_vbo 1` | 45.1 | 4,679 | 3,172 | 6,815 | 1,443 | 437 | 226 | 1,933 | 5 | 626 |
+
+A GLQuake frame: 1,750 triangles, 810 draws, 4,400 `glVertex`, 35 binds; 95% of validations find nothing to
+write. With `-mtex`: 590 draws, 103 binds, and 39% of validations rewrite registers (about 40 writes each).
+
+**DOSBench's GL set at 640x480** (cycles a triangle; S2 and S4 are synthetic):
+
+| test | lib | what dominates |
+|---|---|---|
+| S2M16, S2SA16 (shared-vertex mesh; immediate mesh drawn as arrays) | 635 | ring 186, batch 181, vertex 191 |
+| S2SL16 (display lists) | 717 | as arrays |
+| S2SI16 (immediate mode, unshared vertices) | 2,245 | vertex 1,607 (three a triangle) |
+| S4D1 against S4D16 (a draw per triangle against per 16) | 2,984 / 2,087 | a draw: about 1,100-1,500 cycles before its vertices |
+| S4T1 (a texture change per triangle) | 6,950 | validation 3,347: a texture change rewrites everything |
+| S4B1 (a blend change per triangle) | 8,746 | validation 4,756 |
+| G4CITY (fog) | 3,484 | projection 986: the fog factor is computed per vertex with `expf` |
+| L1LQ2P (lightmapped level) | 3,429 | waits on the card 4,646 |
+
+**What the numbers say:**
+1. **A vertex costs about 500 cycles** on the fast path (about 250 to fetch, transform and outcode, 250 to
+   project and form). The code is compiled for the Pentium (`-march=i586`): every x87 comparison is
+   `FCOM`/`FNSTSW`/`SAHF`, and a vertex makes about 20 (six outcodes, colour clamps, the depth clamp, the
+   texture floors' range checks). The Pentium II has `FCOMI` and `CMOV`.
+2. **A draw costs about 1,100-2,000 cycles** before its vertices: validation (about 300 even with nothing to
+   write), the fast path's set-up, `dgl_assemble`. GLQuake makes 810 a frame.
+3. **A state change costs 3,000-4,800 cycles** and about 40 register writes: any texture or blend change rebuilds
+   and rewrites the whole register block. This is all of `-mtex`'s loss, and much of Quake II's validation.
+4. **Ring writes and per-triangle work, about 580 cycles a triangle.** Quads (4 vertices) don't go as sequences
+   (the minimum is 5), so each of their triangles writes three vertices.
+5. **The general path** (triangles past the guard band, or draws the fast path refuses): about 380 cycles a
+   GLQuake triangle; Half-Life takes it for most vertices (1.5 general against 0.7-0.9 fast a triangle).
+6. **The card is busy at 640x480** in GLQuake (16% waiting), Quake II (about 20%) and Half-Life (40-60%). So
+   CPU savings there are capped by the card; `-mtex` halves GLQuake's world fill as well, so fixing 3 helps both.
+7. 320x200's swap (the card's upscale) costs 650-1,000 cycles a triangle; fog's `expf` per vertex in G4CITY.
+
+**Revised targets.** GLQuake 320x200 is CPU-bound: 52 to 80 fps stands. At 640x480 the card caps it: 45 to 60
+fps if the card's share holds, more with `-mtex` once it pays. Quake II gains less (its own CPU work is as large as
+DOS-GL's). Half-Life is mostly the card's.
+
+### F1 onwards, in F0's order
+Each is its own commit with its own checks; each step is measured with `PROF=2` against F0's table.
+1. **F1, state changes write only what changed** (finding 3). Split the register block by what each GL state
+   feeds (texture unit 0, unit 1, blend, alpha test, depth, fog); a texture change rewrites its unit's words, kept
+   with the texture object (`sampler()`'s results). Target: S4T1 and S4B1 validation under 800 cycles, GLQuake
+   `-mtex` faster than two passes.
+2. **F2, a draw with nothing changed costs little** (finding 2). Validation that returns at once when no group is
+   dirty and the bound textures are the same (their residency and busy marks once a frame, not once a draw); the
+   fast path's per-draw values (colour, texture scales, matrices) only when they change. Target: under 500 cycles a
+   draw.
+3. **F3, the vertex on the Pentium II** (finding 1). The fast path's vertex and triangle routines built twice,
+   `-march=i586` and `-march=pentium2`, chosen by CPUID at start (as the software renderer chooses MMX), with the
+   same arithmetic: the results are the same, only the comparisons and selections differ. Then reorder the
+   routine's work (outcodes from the values already in registers, fewer `volatile` stores) where REGCRC shows
+   nothing moves. Target: 500 cycles a vertex down to about 300.
+4. **F4, rings and triangles** (finding 4): quads and four-vertex polygons as sequences; fewer per-triangle tests.
+5. **F5, the general path** (finding 5): why Half-Life's draws leave the fast path, and the clipped triangles'
+   cost.
+6. **F6, the rest**, if the numbers still point at them: fog's factor without `expf` per vertex (exactly the same
+   values or not at all), immediate mode's copies, array fetches by layout, lightmap uploads, the 320x200 swap.
 
 ### F-last. Docs and numbers
 - Update this file, `gl/docs/porting.md` and DOSBench's records with before and after on bench-g400.
