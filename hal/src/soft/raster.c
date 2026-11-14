@@ -254,9 +254,19 @@ typedef struct { double a0, dx, dy; } plane;
 /* A primitive's attributes as planes about one origin (pixels). Colour in
  * 0..255, depth in the buffer's units; texture coordinates and the fog
  * coordinate over w, and 1/w (q), for perspective. */
+typedef struct { int64_t v; int32_t dx, dy; } fixplane;    /* an integer plane: at the reference pixel, steps */
+
 typedef struct {
     double ox, oy;
     plane r, g, b, a, z, q, f, s[2], t[2];
+    /* The same as integer planes for the integer spans (B2.8), at the centre
+     * of pixel (xref, yref), the origin's: colour in 16.16, depth in 16.14;
+     * and, where a stage's coordinates are linear on the screen (q constant,
+     * GL_REPEAT), s and t in level-0 texels, 16.16, modulo 2^32. */
+    int xref, yref;
+    fixplane fr, fg, fb, fa, fz;
+    int affine[2];
+    fixplane fu[2], fv[2];
 } attrs;
 
 /* Row j's pixels xl..xr-1 (inside the scissor): the fragment pipeline.
@@ -355,9 +365,14 @@ static void span(int j, int xl, int xr, const attrs *A)
  * fog, 32-bit depth and GL_CLAMP's border take the reference span, and so
  * does everything with soft_exact(1). */
 
-static int exact_only;
+static int exact_mode;                  /* soft_exact: 0 every fast path, 1 the reference span, 2 the generic
+                                           integer spans only (the specialised runs checked against them) */
 static int const8[2][4];                /* the stages' constants in 8 bits */
-static uint8_t wide5[32], wide6[64], wide3[8];   /* a buffer's channel widened to 8 bits, rounded */
+static uint8_t wide5[32], wide6[64], wide3[8];   /* a buffer's channel widened to 8 bits (its bits repeated) */
+enum { BK_GENERIC, BK_ALPHA, BK_ADD, BK_MUL };
+static int blend_kind;                  /* S's blending, where it is one of the common ones */
+enum { SM_MOD, SM_TEX, SM_PRIM };
+static int simple_rgb, simple_alpha;    /* the specialised textured runs' combine: modulate, texture, primary */
 
 static int clamp255(int v) { return v < 0 ? 0 : v > 255 ? 255 : v; }
 
@@ -400,12 +415,30 @@ static int factor8(int f, const int *s, const int *d, int k)
     }
 }
 
+/* (The common kinds give what the general factors give, without them:
+ * mul255(v, 255) is v, mul255(v, 0) is 0.) */
 static void blend8(int x, int y, int c[4])
 {
     int d[4], out[4], k;
     color_get8(x, y, d);
-    for (k = 0; k < 4; k++)
-        out[k] = clamp255(mul255(c[k], factor8(S.blend_src, c, d, k)) + mul255(d[k], factor8(S.blend_dst, c, d, k)));
+    switch (blend_kind) {
+    case BK_ALPHA:                              /* SRC_ALPHA, ONE_MINUS_SRC_ALPHA */
+        for (k = 0; k < 4; k++)
+            out[k] = clamp255(mul255(c[k], c[3]) + mul255(d[k], 255 - c[3]));
+        break;
+    case BK_ADD:                                /* ONE, ONE */
+        for (k = 0; k < 4; k++)
+            out[k] = clamp255(c[k] + d[k]);
+        break;
+    case BK_MUL:                                /* DST_COLOR, ZERO or ZERO, SRC_COLOR */
+        for (k = 0; k < 4; k++)
+            out[k] = mul255(c[k], d[k]);
+        break;
+    default:
+        for (k = 0; k < 4; k++)
+            out[k] = clamp255(mul255(c[k], factor8(S.blend_src, c, d, k)) + mul255(d[k], factor8(S.blend_dst, c, d, k)));
+        break;
+    }
     c[0] = out[0], c[1] = out[1], c[2] = out[2], c[3] = out[3];
 }
 
@@ -461,17 +494,15 @@ typedef struct {
     soft_pick pick;
 } texpiece;
 
-/* u (level-0 texels) into 16.16: wrapped into [0, n) for GL_REPEAT (the
- * steps stay as they were), held within 8192 texels for GL_CLAMP_TO_EDGE. */
-static int32_t texfix(double u, int n, int mode)
+/* u (level-0 texels) into 16.16: for GL_REPEAT modulo 2^32, a multiple of
+ * every level's size in 16.16 (the masks wrap the rest); for
+ * GL_CLAMP_TO_EDGE held within 8192 texels. */
+static int32_t texfix(double u, int mode)
 {
-    if (mode == SOFT_REPEAT) {
-        double f = u / n;
-        if (f > -1e9 && f < 1e9)                /* (wildly outside: the clamp below keeps it in range) */
-            u -= (double)mga_ifloor(f) * n;
-        u = u < -8192 ? -8192 : u > 8192 ? 8192 : u;
-    } else
-        u = u < -8192 ? -8192 : u > 8192 ? 8192 : u;
+    double v = u * 65536.0;
+    if (mode == SOFT_REPEAT)
+        return v > -4e18 && v < 4e18 ? (int32_t)(uint32_t)(uint64_t)mga_ifloor64(v + 0.5) : 0;
+    u = u < -8192 ? -8192 : u > 8192 ? 8192 : u;
     return mga_ifloor(u * 65536.0 + 0.5);
 }
 
@@ -479,6 +510,11 @@ static int32_t stepfix(double du)       /* a step a pixel, within 1024 texels */
 {
     du = du < -1024 ? -1024 : du > 1024 ? 1024 : du;
     return mga_ifloor(du * 65536.0 + 0.5);
+}
+
+static int32_t step_at(int32_t U0, int n, int32_t dU)  /* U0 + n dU, modulo 2^32 */
+{
+    return (int32_t)((uint32_t)U0 + (uint32_t)n * (uint32_t)dU);
 }
 
 static void piece_at(const soft_texture *tx, const rowtex *R, int x, texpiece *P)
@@ -492,81 +528,115 @@ static void piece_at(const soft_texture *tx, const rowtex *R, int x, texpiece *P
         double s0 = sv0 / q0, t0 = tv0 / q0, s1 = (sv0 + R->sdx * 16) / q1, t1 = (tv0 + R->tdx * 16) / q1;
         soft_pick_lod(tx, (R->sdx - s0 * R->qdx) / q0, (R->sdy - s0 * R->qdy) / q0, (R->tdx - t0 * R->qdx) / q0,
                       (R->tdy - t0 * R->qdy) / q0, &P->pick);
-        P->U0 = texfix(s0 * w, w, tx->wrap_s), P->V0 = texfix(t0 * h, h, tx->wrap_t);
+        P->U0 = texfix(s0 * w, tx->wrap_s), P->V0 = texfix(t0 * h, tx->wrap_t);
         P->dU = stepfix((s1 - s0) * w / 16), P->dV = stepfix((t1 - t0) * h / 16);
     }
 }
 
-/* Stage k's texel at column x. */
-static void tex_at(int k, const rowtex *R, texpiece *P, int x, int out[4])
+/* A stage on a span: its coordinates' row (perspective) and piece, or, linear
+ * on the screen, U and V at column 0 of the row and their steps (modulo 2^32)
+ * with the primitive's one level of detail. */
+typedef struct {
+    int affine;
+    rowtex R;
+    texpiece P;
+    int32_t U0, V0, dU, dV;
+    soft_pick pick;
+} stagecur;
+
+static void stage_row(int k, const attrs *A, int j, stagecur *C)
 {
     const soft_texture *tx = S.stage[k].tex;
-    int32_t U, V;
-    if ((x >> 4) != P->piece)
-        piece_at(tx, R, x, P);
-    if (P->per_pixel) {
-        double q = R->qb + R->qdx * x, sv = R->sb + R->sdx * x, tv = R->tb + R->tdx * x, s0, t0;
+    double fx0 = 0.5 - A->ox, fy = (j + 0.5) - A->oy;
+    C->affine = A->affine[k];
+    if (C->affine) {
+        int64_t oy = j - A->yref, ox = -(int64_t)A->xref;
+        double q = A->q.a0;
+        C->U0 = (int32_t)(uint32_t)(uint64_t)(A->fu[k].v + ox * A->fu[k].dx + oy * A->fu[k].dy);
+        C->V0 = (int32_t)(uint32_t)(uint64_t)(A->fv[k].v + ox * A->fv[k].dx + oy * A->fv[k].dy);
+        C->dU = A->fu[k].dx, C->dV = A->fv[k].dx;
+        soft_pick_lod(tx, A->s[k].dx / q, A->s[k].dy / q, A->t[k].dx / q, A->t[k].dy / q, &C->pick);
+    } else {
+        C->R.sb = A->s[k].a0 + A->s[k].dx * fx0 + A->s[k].dy * fy, C->R.sdx = A->s[k].dx, C->R.sdy = A->s[k].dy;
+        C->R.tb = A->t[k].a0 + A->t[k].dx * fx0 + A->t[k].dy * fy, C->R.tdx = A->t[k].dx, C->R.tdy = A->t[k].dy;
+        C->R.qb = A->q.a0 + A->q.dx * fx0 + A->q.dy * fy, C->R.qdx = A->q.dx, C->R.qdy = A->q.dy;
+        C->P.piece = INT32_MIN;
+    }
+}
+
+/* Stage k's coordinates and level at column x: the pick for it. */
+static const soft_pick *stage_at(int k, stagecur *C, int x, int32_t *U, int32_t *V)
+{
+    const soft_texture *tx = S.stage[k].tex;
+    if (C->affine) {
+        *U = step_at(C->U0, x, C->dU), *V = step_at(C->V0, x, C->dV);
+        return &C->pick;
+    }
+    if ((x >> 4) != C->P.piece)
+        piece_at(tx, &C->R, x, &C->P);
+    if (C->P.per_pixel) {
+        double q = C->R.qb + C->R.qdx * x, sv = C->R.sb + C->R.sdx * x, tv = C->R.tb + C->R.tdx * x, s0, t0;
         if (q == 0)
             q = 1e-30;
         s0 = sv / q, t0 = tv / q;
-        soft_pick_lod(tx, (R->sdx - s0 * R->qdx) / q, (R->sdy - s0 * R->qdy) / q, (R->tdx - t0 * R->qdx) / q,
-                      (R->tdy - t0 * R->qdy) / q, &P->pick);
-        U = texfix(s0 * tx->level[0].w, tx->level[0].w, tx->wrap_s);
-        V = texfix(t0 * tx->level[0].h, tx->level[0].h, tx->wrap_t);
+        soft_pick_lod(tx, (C->R.sdx - s0 * C->R.qdx) / q, (C->R.sdy - s0 * C->R.qdy) / q,
+                      (C->R.tdx - t0 * C->R.qdx) / q, (C->R.tdy - t0 * C->R.qdy) / q, &C->P.pick);
+        *U = texfix(s0 * tx->level[0].w, tx->wrap_s), *V = texfix(t0 * tx->level[0].h, tx->wrap_t);
     } else
-        U = P->U0 + (x - P->x0) * P->dU, V = P->V0 + (x - P->x0) * P->dV;
-    soft_fetch8(tx, &P->pick, U, V, out);
+        *U = step_at(C->P.U0, x - C->P.x0, C->P.dU), *V = step_at(C->P.V0, x - C->P.x0, C->P.dV);
+    return &C->P.pick;
 }
 
-/* A step a pixel in fixed point, held to +-2^28 (a primitive steeper than
- * that is under a pixel wide: its spans are single pixels, which take no
- * step). */
-static int32_t fixstep(double d, double sc)
+/* One level of a GL_REPEAT texture, fetched in the span (the same texels and
+ * weights as soft_fetch8, the wrap by masks). */
+typedef struct {
+    const uint8_t *p;
+    int w, wm, hm, sh_s, sh_t, linear;
+} inlevel;
+
+static void inlevel_of(const soft_texture *tx, const soft_pick *pk, inlevel *L)
 {
-    d *= sc;
-    return d < -268435456.0 ? -268435456 : d > 268435456.0 ? 268435456 : mga_ifloor(d + 0.5);
+    const soft_level *lv = &tx->level[pk->lv[0]];
+    L->p = lv->rgba, L->w = lv->w, L->wm = lv->w - 1, L->hm = lv->h - 1;
+    L->sh_s = pk->sh_s[0], L->sh_t = pk->sh_t[0], L->linear = pk->linear;
 }
 
-/* The value at column xl from the row's value at column xref (inside the
- * primitive) and the step: integers from xref on, modulo 2^32 as the steps
- * after it are, so the same at any xl. (Values in range need no wrap: colour
- * in 16.16 and depth in 16.14 leave room above their largest.) */
-static int32_t fixat(double vref, double sc, int xref, int xl, int32_t d)
+static __attribute__((always_inline)) inline void inl_fetch(const inlevel *L, int32_t U, int32_t V, int t[4])
 {
-    double v = vref * sc;
-    int64_t f = (v > -4e18 && v < 4e18 ? mga_ifloor64(v + 0.5) : 0) + (int64_t)(xl - xref) * d;
-    return (int32_t)(uint32_t)(uint64_t)f;
+    int32_t u = U >> L->sh_s, v = V >> L->sh_t;
+    if (!L->linear) {
+        const uint8_t *p = L->p + ((size_t)((v >> 16) & L->hm) * (size_t)L->w + (size_t)((u >> 16) & L->wm)) * 4;
+        t[0] = p[0], t[1] = p[1], t[2] = p[2], t[3] = p[3];
+    } else {
+        int fu, fv, ia, ib, ja, jb, k;
+        const uint8_t *r0, *r1;
+        u -= 0x8000, v -= 0x8000;
+        fu = (u >> 8) & 255, fv = (v >> 8) & 255;
+        ia = (u >> 16) & L->wm, ib = (ia + 1) & L->wm, ja = (v >> 16) & L->hm, jb = (ja + 1) & L->hm;
+        r0 = L->p + (size_t)ja * (size_t)L->w * 4, r1 = L->p + (size_t)jb * (size_t)L->w * 4;
+        for (k = 0; k < 4; k++)
+            t[k] = soft_lerp8(soft_lerp8(r0[ia * 4 + k], r0[ib * 4 + k], fu), soft_lerp8(r1[ia * 4 + k], r1[ib * 4 + k], fu), fv);
+    }
 }
 
 static __attribute__((always_inline)) inline void fast_span(int j, int xl, int xr, const attrs *A, const int SMOOTH,
                                                             const int DEPTH, const int TEX, const int BLEND)
 {
-    int xref = A->ox > -1e9 && A->ox < 1e9 ? mga_ifloor(A->ox) : 0;    /* (the planes' origin's column) */
-    double fxr = (xref + 0.5) - A->ox, fx0 = 0.5 - A->ox, fy = (j + 0.5) - A->oy;
+    int64_t ox = xl - A->xref, oy = j - A->yref;
     int i, k, atest = S.alpha_test;
-    int32_t r, g, b, a, z = 0, dr, dg, db, da, dz = 0;
-    rowtex R[2];
-    texpiece P[2];
-#define ROWV(P_) ((P_).a0 + (P_).dx * fx0 + (P_).dy * fy)
-#define REFV(P_) ((P_).a0 + (P_).dx * fxr + (P_).dy * fy)
-    dr = fixstep(A->r.dx, 65536.0), dg = fixstep(A->g.dx, 65536.0), db = fixstep(A->b.dx, 65536.0);
-    da = fixstep(A->a.dx, 65536.0);
-    r = fixat(REFV(A->r), 65536.0, xref, xl, dr), g = fixat(REFV(A->g), 65536.0, xref, xl, dg);
-    b = fixat(REFV(A->b), 65536.0, xref, xl, db), a = fixat(REFV(A->a), 65536.0, xref, xl, da);
-    if (DEPTH) {
-        dz = fixstep(A->z.dx, 16384.0);
-        z = fixat(REFV(A->z), 16384.0, xref, xl, dz);
-    }
+    int32_t r, g, b, a, z = 0, dr = A->fr.dx, dg = A->fg.dx, db = A->fb.dx, da = A->fa.dx, dz = A->fz.dx;
+    stagecur C[2];
+    inlevel IL;                                 /* (TEX 2: the level fetched here, for the piece ilkey) */
+    int inl = 0, ilkey = INT32_MIN, ilset = 0;
+#define AT(F) ((int32_t)(uint32_t)(uint64_t)((F).v + ox * (F).dx + oy * (F).dy))
+    r = AT(A->fr), g = AT(A->fg), b = AT(A->fb), a = AT(A->fa);
+    if (DEPTH)
+        z = AT(A->fz);
+#undef AT
     if (TEX)
         for (k = 0; k < 2; k++)
-            if (S.stage[k].tex) {
-                R[k].sb = ROWV(A->s[k]), R[k].sdx = A->s[k].dx, R[k].sdy = A->s[k].dy;
-                R[k].tb = ROWV(A->t[k]), R[k].tdx = A->t[k].dx, R[k].tdy = A->t[k].dy;
-                R[k].qb = ROWV(A->q), R[k].qdx = A->q.dx, R[k].qdy = A->q.dy;
-                P[k].piece = INT32_MIN;
-            }
-#undef ROWV
-#undef REFV
+            if (S.stage[k].tex)
+                stage_row(k, A, j, &C[k]);
     for (i = xl; i < xr; i++) {
         int c[4], prim[4];
         uint32_t zi = 0;
@@ -578,13 +648,36 @@ static __attribute__((always_inline)) inline void fast_span(int j, int xl, int x
         }
         prim[0] = c[0] = clamp255((r + 0x8000) >> 16), prim[1] = c[1] = clamp255((g + 0x8000) >> 16);
         prim[2] = c[2] = clamp255((b + 0x8000) >> 16), prim[3] = c[3] = clamp255((a + 0x8000) >> 16);
-        if (TEX)
+        if (TEX == 1)
             for (k = 0; k < 2; k++)
                 if (S.stage[k].tex) {
                     int t[4];
-                    tex_at(k, &R[k], &P[k], i, t);
+                    int32_t U, V;
+                    const soft_pick *pk = stage_at(k, &C[k], i, &U, &V);
+                    soft_fetch8(S.stage[k].tex, pk, U, V, t);
                     comb8(k, t, prim, c);
                 }
+        if (TEX == 2) {                         /* one GL_REPEAT texture, a simple combine (select_span) */
+            int t[4];
+            int32_t U, V;
+            const soft_pick *pk = stage_at(0, &C[0], i, &U, &V);
+            int key = C[0].affine ? INT32_MAX : C[0].P.piece;
+            if (!ilset || key != ilkey || (!C[0].affine && C[0].P.per_pixel)) {  /* (a new piece, or a pick a pixel) */
+                ilset = 1, ilkey = key;
+                inl = pk->n == 1;
+                if (inl)
+                    inlevel_of(S.stage[0].tex, pk, &IL);
+            }
+            if (inl)
+                inl_fetch(&IL, U, V, t);
+            else
+                soft_fetch8(S.stage[0].tex, pk, U, V, t);
+            if (simple_rgb == SM_MOD)
+                c[0] = mul255(t[0], prim[0]), c[1] = mul255(t[1], prim[1]), c[2] = mul255(t[2], prim[2]);
+            else if (simple_rgb == SM_TEX)
+                c[0] = t[0], c[1] = t[1], c[2] = t[2];
+            c[3] = simple_alpha == SM_MOD ? mul255(t[3], prim[3]) : simple_alpha == SM_TEX ? t[3] : prim[3];
+        }
         if (atest && !alpha_pass(c[3]))
             goto next;
         if (DEPTH) {
@@ -598,7 +691,7 @@ static __attribute__((always_inline)) inline void fast_span(int j, int xl, int x
         soft_count.pixels++;
         color_put(i, j, c[0], c[1], c[2], c[3]);
     next:
-        if (SMOOTH)                             /* (modulo 2^32, as fixat's base) */
+        if (SMOOTH)                             /* (modulo 2^32, as the planes) */
             r = (int32_t)((uint32_t)r + (uint32_t)dr), g = (int32_t)((uint32_t)g + (uint32_t)dg),
             b = (int32_t)((uint32_t)b + (uint32_t)db), a = (int32_t)((uint32_t)a + (uint32_t)da);
         if (DEPTH)
@@ -608,14 +701,37 @@ static __attribute__((always_inline)) inline void fast_span(int j, int xl, int x
 
 #define FAST(SM, DE, TE, BL) \
     static void fast_##SM##DE##TE##BL(int j, int xl, int xr, const attrs *A) { fast_span(j, xl, xr, A, SM, DE, TE, BL); }
-FAST(0, 0, 0, 0) FAST(0, 0, 0, 1) FAST(0, 0, 1, 0) FAST(0, 0, 1, 1) FAST(0, 1, 0, 0) FAST(0, 1, 0, 1) FAST(0, 1, 1, 0)
-FAST(0, 1, 1, 1) FAST(1, 0, 0, 0) FAST(1, 0, 0, 1) FAST(1, 0, 1, 0) FAST(1, 0, 1, 1) FAST(1, 1, 0, 0) FAST(1, 1, 0, 1)
-FAST(1, 1, 1, 0) FAST(1, 1, 1, 1)
+#define FAST_TE(SM, DE, TE) FAST(SM, DE, TE, 0) FAST(SM, DE, TE, 1)
+#define FAST_DE(SM, DE) FAST_TE(SM, DE, 0) FAST_TE(SM, DE, 1) FAST_TE(SM, DE, 2)
+FAST_DE(0, 0) FAST_DE(0, 1) FAST_DE(1, 0) FAST_DE(1, 1)
+#undef FAST_DE
+#undef FAST_TE
 #undef FAST
-static fast_span_fn *const fast_tab[16] = {
-    fast_0000, fast_0001, fast_0010, fast_0011, fast_0100, fast_0101, fast_0110, fast_0111,
-    fast_1000, fast_1001, fast_1010, fast_1011, fast_1100, fast_1101, fast_1110, fast_1111,
+/* Indexed ((smooth * 2 + depth) * 3 + textured) * 2 + blended; textured 0 none, 1 general, 2 the simple runs. */
+static fast_span_fn *const fast_tab[24] = {
+    fast_0000, fast_0001, fast_0010, fast_0011, fast_0020, fast_0021, fast_0100, fast_0101, fast_0110, fast_0111,
+    fast_0120, fast_0121, fast_1000, fast_1001, fast_1010, fast_1011, fast_1020, fast_1021, fast_1100, fast_1101,
+    fast_1110, fast_1111, fast_1120, fast_1121,
 };
+
+/* A combine the simple runs do: SM_MOD (texture times primary), SM_TEX
+ * (texture), SM_PRIM (primary); -1 otherwise. Stage 0's previous colour is
+ * the primary; for alpha an operand's COLOR is its alpha too. */
+static int simple_mode(const soft_combine *cb, int alpha)
+{
+    int ok0 = cb->op[0] == SOFT_O_COLOR || (alpha && cb->op[0] == SOFT_O_ALPHA);
+    int ok1 = cb->op[1] == SOFT_O_COLOR || (alpha && cb->op[1] == SOFT_O_ALPHA);
+    int tex0 = cb->src[0] == SOFT_S_TEXTURE, tex1 = cb->src[1] == SOFT_S_TEXTURE;
+    int prim0 = cb->src[0] == SOFT_S_PRIMARY || cb->src[0] == SOFT_S_PREVIOUS;
+    int prim1 = cb->src[1] == SOFT_S_PRIMARY || cb->src[1] == SOFT_S_PREVIOUS;
+    if (cb->scale != 1.0f || !ok0)
+        return -1;
+    if (cb->func == SOFT_C_REPLACE)
+        return tex0 ? SM_TEX : prim0 ? SM_PRIM : -1;
+    if (cb->func == SOFT_C_MODULATE && ok1 && ((tex0 && prim1) || (prim0 && tex1)))
+        return SM_MOD;
+    return -1;
+}
 
 static void select_span(void)
 {
@@ -624,12 +740,12 @@ static void select_span(void)
     fast_fn = NULL;
     if (!ready) {
         int v;
-        for (v = 0; v < 32; v++) wide5[v] = (uint8_t)((v * 255 + 15) / 31);
-        for (v = 0; v < 64; v++) wide6[v] = (uint8_t)((v * 255 + 31) / 63);
-        for (v = 0; v < 8; v++) wide3[v] = (uint8_t)((v * 255 + 3) / 7);
+        for (v = 0; v < 32; v++) wide5[v] = (uint8_t)(v << 3 | v >> 2);
+        for (v = 0; v < 64; v++) wide6[v] = (uint8_t)(v << 2 | v >> 4);
+        for (v = 0; v < 8; v++) wide3[v] = (uint8_t)(v << 5 | v << 2 | v >> 1);
         ready = 1;
     }
-    if (exact_only || (S.stencil_test && T.stencil) || S.fog || (depth && T.depth_bits != 16))
+    if (exact_mode == 1 || (S.stencil_test && T.stencil) || S.fog || (depth && T.depth_bits != 16))
         return;
     for (k = 0; k < 2; k++)
         if (S.stage[k].tex) {
@@ -642,13 +758,27 @@ static void select_span(void)
                 const8[k][c] = to8(S.stage[k].constant[c] * 255.0);
             tex = 1;
         }
-    fast_fn = fast_tab[(S.smooth != 0) * 8 + depth * 4 + tex * 2 + (S.blend != 0)];
+    if (tex && exact_mode == 0 && S.stage[0].tex && !S.stage[1].tex && S.stage[0].tex->wrap_s == SOFT_REPEAT &&
+        S.stage[0].tex->wrap_t == SOFT_REPEAT && (simple_rgb = simple_mode(&S.stage[0].rgb, 0)) >= 0 &&
+        (simple_alpha = simple_mode(&S.stage[0].alpha, 1)) >= 0)
+        tex = 2;
+    blend_kind = BK_GENERIC;
+    if (S.blend && exact_mode == 0) {
+        int sf = S.blend_src, df = S.blend_dst;
+        if (sf == SOFT_B_SRC_ALPHA && df == SOFT_B_ONE_MINUS_SRC_ALPHA)
+            blend_kind = BK_ALPHA;
+        else if (sf == SOFT_B_ONE && df == SOFT_B_ONE)
+            blend_kind = BK_ADD;
+        else if ((sf == SOFT_B_DST_COLOR && df == SOFT_B_ZERO) || (sf == SOFT_B_ZERO && df == SOFT_B_SRC_COLOR))
+            blend_kind = BK_MUL;
+    }
+    fast_fn = fast_tab[((S.smooth != 0) * 2 + depth) * 6 + tex * 2 + (S.blend != 0)];
 }
 
-void soft_exact(int on)
+void soft_exact(int mode)
 {
     soft_flush();
-    exact_only = on != 0;
+    exact_mode = mode;
     select_span();
 }
 
@@ -743,6 +873,48 @@ static void cover(const int64_t *Xin, const int64_t *Yin, const attrs *A)
     }
 }
 
+/* A plane as an integer one (fixplane) at pixel (xref, yref)'s centre, its
+ * steps held to +-2^28 (a primitive steeper than that is under a pixel wide:
+ * its spans are single pixels, which take no step). */
+static int32_t fixstep28(double d)
+{
+    return d < -268435456.0 ? -268435456 : d > 268435456.0 ? 268435456 : mga_ifloor(d + 0.5);
+}
+
+static fixplane fixp(double a0, double pdx, double pdy, double fx, double fy, double sc)
+{
+    fixplane f;
+    double v = (a0 + pdx * fx + pdy * fy) * sc;
+    f.v = v > -4e18 && v < 4e18 ? mga_ifloor64(v + 0.5) : 0;
+    f.dx = fixstep28(pdx * sc), f.dy = fixstep28(pdy * sc);
+    return f;
+}
+
+/* A primitive's integer planes (attrs), under S (the caller's state). */
+static void fix_planes(attrs *A)
+{
+    double fx, fy;
+    int k;
+    A->xref = A->ox > -1e9 && A->ox < 1e9 ? mga_ifloor(A->ox) : 0;
+    A->yref = A->oy > -1e9 && A->oy < 1e9 ? mga_ifloor(A->oy) : 0;
+    fx = A->xref + 0.5 - A->ox, fy = A->yref + 0.5 - A->oy;
+    A->fr = fixp(A->r.a0, A->r.dx, A->r.dy, fx, fy, 65536.0);
+    A->fg = fixp(A->g.a0, A->g.dx, A->g.dy, fx, fy, 65536.0);
+    A->fb = fixp(A->b.a0, A->b.dx, A->b.dy, fx, fy, 65536.0);
+    A->fa = fixp(A->a.a0, A->a.dx, A->a.dy, fx, fy, 65536.0);
+    A->fz = fixp(A->z.a0, A->z.dx, A->z.dy, fx, fy, 16384.0);
+    for (k = 0; k < 2; k++) {
+        const soft_texture *tx = S.stage[k].tex;
+        A->affine[k] = tx && A->q.dx == 0 && A->q.dy == 0 && A->q.a0 > 0 && tx->wrap_s == SOFT_REPEAT &&
+                       tx->wrap_t == SOFT_REPEAT;
+        if (A->affine[k]) {
+            double su = tx->level[0].w / A->q.a0 * 65536.0, sv = tx->level[0].h / A->q.a0 * 65536.0;
+            A->fu[k] = fixp(A->s[k].a0, A->s[k].dx, A->s[k].dy, fx, fy, su);
+            A->fv[k] = fixp(A->t[k].a0, A->t[k].dx, A->t[k].dy, fx, fy, sv);
+        }
+    }
+}
+
 /* Drawing now, or kept for the tiles (below). */
 static void emit_cover(const int64_t *X, const int64_t *Y, const attrs *A, const attrs **kept);
 static void emit_rect(int x0, int y0, int x1, int y1, const attrs *A);
@@ -819,6 +991,7 @@ static void triangle_now(const soft_vertex *a, const soft_vertex *b, const soft_
             f0 = fog_factor(f0), f1 = fog_factor(f1), f2 = fog_factor(f2);
         A.f = plane_of(f0 * v[0]->oow, f1 * v[1]->oow, f2 * v[2]->oow, px, py, det);
     }
+    fix_planes(&A);
     {
         const attrs *kept = NULL;
         emit_cover(X, Y, &A, &kept);
@@ -987,6 +1160,7 @@ static void line_now(const soft_vertex *a, const soft_vertex *b, float width)
         X[1] = snap16(b->x + obx) - half, X[2] = X[1] + 2 * half;
     }
     line_attrs(&A, a, b, xmajor ? 0 : 1);
+    fix_planes(&A);
     {
         int64_t tx[3] = { X[0], X[1], X[2] }, ty[3] = { Y[0], Y[1], Y[2] };
         int64_t ux[3] = { X[0], X[2], X[3] }, uy[3] = { Y[0], Y[2], Y[3] };
@@ -1013,6 +1187,7 @@ static void point_now(const soft_vertex *v, float size)
         x0 = floor_div(X + 128, 256) - w / 2, y0 = floor_div(Y + 128, 256) - w / 2;
     soft_count.points++;
     line_attrs(&A, v, v, -1);
+    fix_planes(&A);
     xl = x0 < -1 ? -1 : x0 > T.width ? T.width : (int)x0;      /* (within a pixel of the target: the rest is clipped) */
     j = y0 < -1 ? -1 : y0 > T.height ? T.height : (int)y0;
     xr = x0 + w < -1 ? -1 : x0 + w > T.width ? T.width : (int)(x0 + w);

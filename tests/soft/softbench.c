@@ -23,6 +23,7 @@ static uint16_t color[W * H], depth[W * H];
 static uint8_t texels[2][64 * 64 * 4 * 2];  /* (a 64x64 level 0 and its smaller levels) */
 static soft_texture tex[2];
 static soft_vertex mesh[(GX + 1) * (GY + 1)];
+static int levels0;
 
 static double now(void)
 {
@@ -47,7 +48,7 @@ static void make_texture(int k)
         tex[k].level[l].rgba = p, tex[k].level[l].w = w, tex[k].level[l].h = w;
         off += w * w * 4;
     }
-    tex[k].levels = l;
+    tex[k].levels = levels0 = l;
     tex[k].wrap_s = tex[k].wrap_t = SOFT_REPEAT;
 }
 
@@ -110,6 +111,8 @@ static void state_for(int c, soft_state *s)
         s->depth_test = 1, s->depth_func = SOFT_ALWAYS, s->depth_write = 1;
     tex[0].min_filter = tex[0].mag_filter = SOFT_LINEAR;
     tex[1].min_filter = tex[1].mag_filter = SOFT_LINEAR;
+    tex[0].levels = c == C_TEX_MIP ? levels0 : 1;  /* (one level without a mipmap filter, as GL's back end sets it) */
+    tex[1].levels = 1;
     if (c == C_TEX_NEAREST)
         tex[0].min_filter = tex[0].mag_filter = SOFT_NEAREST;
     if (c == C_TEX_MIP)

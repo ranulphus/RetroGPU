@@ -9,6 +9,7 @@
  * as the four MIPMAP filters say. In floating point: exactness first. */
 #include "soft/soft.h"
 #include "internal.h"
+#include "mga/fp.h"
 #include <math.h>
 #include <stddef.h>
 
@@ -122,12 +123,34 @@ void soft_sample(const soft_texture *tx, double s, double t, double dsdx, double
 
 /* ---- Integer sampling (B2.8's fast spans) -------------------------------- */
 
+/* Bilinear filtering in two stages, along u and then v, each rounded to 8
+ * bits (soft_lerp8: every product and sum fits 16 bits, as MMX's do). */
+
 static int ilog2(int v)
 {
     int l = 0;
     while ((1 << l) < v)
         l++;
     return l;
+}
+
+/* log2(v), v > 0, to about 1/300: the exponent and a table of the top 8
+ * bits of the mantissa (a level of detail needs no more; log() costs a
+ * hundred cycles a piece). */
+static float log2_tab[256];
+
+static double fast_log2(double v)
+{
+    union { double d; uint64_t u; } x;
+    int e;
+    if (!log2_tab[255]) {
+        int m;
+        for (m = 0; m < 256; m++)
+            log2_tab[m] = (float)(log(1.0 + (m + 0.5) / 256.0) / log(2.0));
+    }
+    x.d = v;
+    e = (int)((x.u >> 52) & 0x7FF) - 1023;
+    return e + log2_tab[(x.u >> 44) & 255];
 }
 
 void soft_pick_lod(const soft_texture *tx, double dsdx, double dsdy, double dtdx, double dtdy, soft_pick *p)
@@ -141,7 +164,7 @@ void soft_pick_lod(const soft_texture *tx, double dsdx, double dsdy, double dtdx
         rho = ux > uy ? ux : uy;
         if (vx > rho) rho = vx;
         if (vy > rho) rho = vy;
-        lambda = rho > 0 ? log(rho) / log(2.0) : -1e30;
+        lambda = rho > 0 ? fast_log2(rho) : -1e30;
         if (tx->mag_filter == SOFT_LINEAR && (min == SOFT_NEAREST_MIPMAP_NEAREST || min == SOFT_NEAREST_MIPMAP_LINEAR))
             c = 0.5;
     }
@@ -155,13 +178,13 @@ void soft_pick_lod(const soft_texture *tx, double dsdx, double dsdy, double dtdx
             break;
         case SOFT_NEAREST_MIPMAP_NEAREST:
         case SOFT_LINEAR_MIPMAP_NEAREST: {
-            int d = lambda <= 0.5 ? 0 : (int)ceil(lambda + 0.5) - 1;
+            int d = lambda <= 0.5 ? 0 : lambda > 64 ? 64 : -mga_ifloor(-(lambda + 0.5)) - 1;
             p->lv[0] = d > last ? last : d;
             p->linear = min == SOFT_LINEAR_MIPMAP_NEAREST;
             break;
         }
         default: {
-            int d = (int)floor(lambda);
+            int d = lambda > 64 ? 64 : mga_ifloor(lambda);
             double f = lambda - d;
             p->linear = min == SOFT_LINEAR_MIPMAP_LINEAR;
             if (d >= last)
@@ -207,8 +230,7 @@ static void level8(const soft_texture *tx, int lv, int sh_s, int sh_t, int linea
     ja = wrap8(j0, L->h, tx->wrap_t), jb = wrap8(j0 + 1, L->h, tx->wrap_t);
     texel8(L, ia, ja, t00), texel8(L, ib, ja, t10), texel8(L, ia, jb, t01), texel8(L, ib, jb, t11);
     for (k = 0; k < 4; k++)
-        out[k] = (t00[k] * (256 - fu) * (256 - fv) + t10[k] * fu * (256 - fv) + t01[k] * (256 - fu) * fv +
-                  t11[k] * fu * fv + 32768) >> 16;
+        out[k] = soft_lerp8(soft_lerp8(t00[k], t10[k], fu), soft_lerp8(t01[k], t11[k], fu), fv);
 }
 
 void soft_fetch8(const soft_texture *tx, const soft_pick *p, int32_t U, int32_t V, int out[4])
@@ -218,7 +240,7 @@ void soft_fetch8(const soft_texture *tx, const soft_pick *p, int32_t U, int32_t 
         int b[4], k;
         level8(tx, p->lv[1], p->sh_s[1], p->sh_t[1], p->linear, U, V, b);
         for (k = 0; k < 4; k++)
-            out[k] = (out[k] * (256 - p->f8) + b[k] * p->f8 + 128) >> 8;
+            out[k] = soft_lerp8(out[k], b[k], p->f8);
     }
 }
 

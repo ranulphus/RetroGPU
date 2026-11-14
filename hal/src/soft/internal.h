@@ -19,4 +19,7 @@ void soft_pick_lod(const soft_texture *tx, double dsdx, double dsdy, double dtdx
  * GL_CLAMP_TO_EDGE only: GL_CLAMP's border is the reference span's. */
 void soft_fetch8(const soft_texture *tx, const soft_pick *p, int32_t U, int32_t V, int out[4]);
 
+/* a and b (0..255) mixed by f (0..256 for b), rounded: the filters' step. */
+static inline int soft_lerp8(int a, int b, int f) { return (a * (256 - f) + b * f + 128) >> 8; }
+
 #endif

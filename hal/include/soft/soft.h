@@ -157,9 +157,11 @@ void soft_drop(void);               /* forget everything kept (its buffers are g
 int  soft_pending(void);            /* 1: something is kept */
 unsigned soft_epoch(void);
 
-/* The spans (B2.8): integer routines where the state allows (the default),
- * or the reference span (double precision) for everything with on = 1. */
-void soft_exact(int on);
+/* The spans (B2.8): mode 0 (the default) the integer routines where the
+ * state allows, specialised runs for the common states among them; 1 the
+ * reference span (double precision) for everything; 2 the general integer
+ * routines without the specialised runs (they must draw the same pixels). */
+void soft_exact(int mode);
 
 /* Counters. */
 typedef struct {
