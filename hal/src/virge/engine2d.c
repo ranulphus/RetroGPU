@@ -30,6 +30,11 @@ static void fifo_wait(int n)
         ;
 }
 
+int virge_idle(void)
+{
+    return (RD(VIRGE_SUBSYS_STAT) & VIRGE_STAT_IDLE) != 0;
+}
+
 int virge_sync(uint32_t timeout_us)
 {
     uint32_t t0 = sys_time_us();

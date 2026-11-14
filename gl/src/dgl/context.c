@@ -208,6 +208,10 @@ int dglInit(const DGLConfig *cfg)
         dgl_set_error("%s", rg_error());
         return -1;
     }
+    if (dgl_dev != dgl_be->dev) {               /* (GL draws on the Matrox device only until V4 and B2) */
+        dgl_set_error("DOS-GL has no drawing back end for the %s device yet", dgl_dev->name);
+        return -1;
+    }
     memset(&dgl_ctx, 0, sizeof dgl_ctx);
     memset(&stats, 0, sizeof stats);
     open_args(&o, &c);

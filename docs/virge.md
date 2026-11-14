@@ -2,8 +2,8 @@
 
 **Status (2026-11-14): v1, the owner's answers in (below). V0, V1 and V2 done in Loop A and on main (V2:
 Gouraud, Z, blending, fog and textures in three formats, NEAREST/LINEAR, perspective, mipmaps, modulate, within
-VTRI's tolerances on both boards). B1 has landed, so V3 (the ViRGE/DX as a RetroGPU device) is next, before B2 (the
-owner's order); bench C pending.**
+VTRI's tolerances on both boards). B1 has landed; V3 (the ViRGE/DX as a RetroGPU device) built in Loop A (below), GLOS's
+desktop on it to come with GLOS's session; then B2 (the owner's order); bench C pending.**
 
 The owner's decisions (2026-11-12, `gl/docs/backends.md`): the ViRGE/DX is the first card after the Matrox ones,
 before the Riva TNT2; DOS-GL, GLOS's desktop and Glide all run on it; the card is bench C's (the 486DX4, PCI,
@@ -151,6 +151,31 @@ licences are listed in V1 before any code is written from them.
 - **References:** the data book and measurement only. Mesa's old ViRGE driver (`s3v`, Mesa 6-7) carries no licence
   in its files (an author's name only) and is not in Mesa's licence list, so nothing is taken from it; 86Box's
   model is GPL and only run against (its behaviour read for facts, its code not used).
+
+## V3 so far
+
+- **The device table grew 2D and the cursor** (`hal/include/rg/device.h`), as B0 drew them and B1 left out (GL
+  did not need them): `surface` (the open context's colour buffers), `target`, `clip`, `fill`, `copy`,
+  `copy_from`, `image`, `mono` (`RG_MONO_TRANSPARENT`), and `cursor_load`, `cursor_colours` (0xRRGGBB, the
+  Matrox HAL's meaning), `cursor_show`, `cursor_move`. The Matrox device maps them onto the HAL's `engine_*` and
+  `cursor_*`; nothing GL draws changes.
+- **The ViRGE/DX device** (`hal/src/rg/virge.c`, on the ViRGE layer): the BIOS's 15-, 16- and 24-bit modes (8 is
+  palettized, and neither engine draws 32); colour buffers A and B, a 16-bit depth buffer (the 3D engine's Z, its
+  pitch rounded to the 2D engine's 8 bytes), the rest for textures, each 4 KB aligned; a swap by the display start
+  in the vertical blank; reads to RGBA8 at 15, 16 and 24 bits; no GLOS window (B3's software path will show a
+  window's pixels for cards other than Matrox ones). The layer gained `virge_list_modes` and `virge_idle`.
+- **The choice:** DGL_DEVICE `mga` or `virge`; unset, the Matrox card first, then the ViRGE/DX. With neither,
+  the reasons of both. DOS-GL itself draws on the Matrox device only until V4 (and B2): on a ViRGE-only PC
+  `dglInit` refuses ("DOS-GL has no drawing back end for the virge device yet"), while `dglEnumModes` and
+  `dglGetDeviceInfo` describe the card.
+- **`RGDEV`** (`tests/rg/rgdev.c`): a device driven through the table alone: chosen as DOS-GL chooses, its
+  modes listed, a 640x480 context opened (double buffered, with depth) and found black, 200 random 2D operations
+  into the hidden buffer compared pixel for pixel through the device's own read with `tests/hal/sw2d.c`'s model,
+  shown by a swap and read again from the front, the cursor shown and its colour checked white on the screen (the
+  unit tester's capture), closed. In Loop A it passes on the ViRGE/DX (486 and P2 boards, 16 and 15 bits) and on
+  the Matrox device (G400 and G200), the same program and the same script: the table fits a second card. In the
+  smoke tier on the P2 board, and the merge tier on all four.
+- **Still V3's:** GLOS's desktop on the device (its session's plan, with the API above); bench C on silicon.
 
 ## The owner's answers (2026-11-12)
 

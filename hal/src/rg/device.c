@@ -7,7 +7,7 @@
 #include <string.h>
 
 
-static const rg_device *const devices[] = { &rg_mga_device };
+static const rg_device *const devices[] = { &rg_mga_device, &rg_virge_device };   /* (DGL_DEVICE unset: in this order) */
 #define NDEV ((int)(sizeof devices / sizeof devices[0]))
 
 
@@ -54,10 +54,21 @@ const rg_device *rg_choose_from(const rg_device *const *list, int n, const char 
         rg_set_error("DGL-DEVICE %s: not built", want);
         return NULL;
     }
-    for (i = 0; i < n; i++)
-        if (list[i]->probe() == 0)
-            return list[i];
-    return NULL;                    /* (the last probe's reason stands) */
+    {
+        char why[sizeof error] = "";
+        for (i = 0; i < n; i++) {
+            error[0] = 0;
+            if (list[i]->probe() == 0)
+                return list[i];
+            if (error[0] && strlen(why) + strlen(error) + 3 < sizeof why) {
+                if (why[0])
+                    strcat(why, "; ");
+                strcat(why, error);             /* (each probe's reason, in order) */
+            }
+        }
+        memcpy(error, why, sizeof error);
+    }
+    return NULL;
 }
 
 

@@ -119,13 +119,16 @@ void virge_unmap(void)
     virge.fb = virge.mmio = 0;
 }
 
-int virge_find_mode(int w, int h, int bpp, virge_mode *out)
+/* The BIOS's graphics modes this layer can use: 8-bit palettized, or direct
+ * colour at 15, 16, 24 or 32 bits (15 when a 16-bit mode has 5 green bits),
+ * in its order. The count; up to max into out. */
+int virge_list_modes(virge_mode *out, int max)
 {
     const uint16_t *p;
     uint16_t list[128];
-    int n = 0, i;
+    int n = 0, i, got = 0;
     if (vbe_info() < 0)
-        return -1;
+        return 0;
     p = (const uint16_t *)sys_real_ptr((uint16_t)(vbuf[0x10] | (vbuf[0x11] << 8)),
                                        (uint16_t)(vbuf[0x0E] | (vbuf[0x0F] << 8)));
     while (p && *p != 0xFFFF && n < 128)
@@ -146,17 +149,29 @@ int virge_find_mode(int w, int h, int bpp, virge_mode *out)
         model = b[0x1B];
         if (mbpp == 16 && model == 6 && b[0x21] == 5)   /* 5 green bits: 15-bit colour */
             mbpp = 15;
-        if ((b[0x12] | (b[0x13] << 8)) != w || (b[0x14] | (b[0x15] << 8)) != h || mbpp != bpp)
+        if (!((mbpp == 8 && model == 4) || (mbpp > 8 && model == 6)))
             continue;
-        if (!((bpp == 8 && model == 4) || (bpp > 8 && model == 6)))
-            continue;
-        out->mode = list[i];
-        out->width = (uint16_t)w;
-        out->height = (uint16_t)h;
-        out->bpp = (uint16_t)bpp;
-        out->pitch_bytes = (uint16_t)(b[0x10] | (b[0x11] << 8));
-        return 0;
+        if (out && got < max) {
+            out[got].mode = list[i];
+            out[got].width = (uint16_t)(b[0x12] | (b[0x13] << 8));
+            out[got].height = (uint16_t)(b[0x14] | (b[0x15] << 8));
+            out[got].bpp = (uint16_t)mbpp;
+            out[got].pitch_bytes = (uint16_t)(b[0x10] | (b[0x11] << 8));
+        }
+        got++;
     }
+    return got;
+}
+
+int virge_find_mode(int w, int h, int bpp, virge_mode *out)
+{
+    virge_mode m[64];
+    int n = virge_list_modes(m, 64), i;
+    for (i = 0; i < n && i < 64; i++)
+        if (m[i].width == w && m[i].height == h && m[i].bpp == bpp) {
+            *out = m[i];
+            return 0;
+        }
     return -1;
 }
 

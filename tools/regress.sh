@@ -92,6 +92,7 @@ loopa_pass() {
 step build-platform-glide tools/dev make -s runtime runtime-prof gltrace dostests hal-ow hal-djgpp hal-host \
                                smoke-djgpp dostests-djgpp hreplay rig v86test build/djgpp/WARPTRI.EXE build/djgpp/CLOCKMON.EXE \
                                build/djgpp/VPROBE.EXE build/djgpp/VTWOD.EXE build/djgpp/VTRI.EXE
+step build-rg             make -s build/djgpp/RGDEV.EXE      # (on the host, as gl-build: GLOS's headers)
 step glide-checks          tools/dev make -s check-header check-exports check-clib
 step no-3dfx               python3 tools/ci/no_3dfx.py
 step loopa-cfgcheck        make -s loopa-cfgcheck
@@ -108,6 +109,7 @@ if [ "$tier" = smoke ]; then
     step gl-conform-g400   make -s -C gl conform CARD=g400 TESTS="t01 t16 t32"
     step virge-vtwod       loopa_pass smoke-vtwod --machine 486dx4 --card virge --exe build/djgpp/VTWOD.EXE --idle 120 --timeout 900
     step virge-vtri        loopa_pass smoke-vtri --machine bf6 --card virge --exe build/djgpp/VTRI.EXE --idle 180 --timeout 900
+    step rgdev-virge       loopa_pass smoke-rgdev --machine bf6 --card virge --exe build/djgpp/RGDEV.EXE --idle 200 --timeout 900
 fi
 
 # ---- merge: everything ------------------------------------------------------
@@ -123,6 +125,10 @@ if [ "$tier" = merge ]; then
     pstep virge-vtwod-p2     loopa_pass regress-vtwod-p2 --machine bf6 --card virge --exe build/djgpp/VTWOD.EXE --idle 120 --timeout 900
     pstep virge-vtri-486     loopa_pass regress-vtri-486 --machine 486dx4 --card virge --exe build/djgpp/VTRI.EXE --idle 400 --timeout 1500
     pstep virge-vtri-p2      loopa_pass regress-vtri-p2 --machine bf6 --card virge --exe build/djgpp/VTRI.EXE --idle 180 --timeout 900
+    pstep rgdev-virge-486    loopa_pass regress-rgdev-486 --machine 486dx4 --card virge --exe build/djgpp/RGDEV.EXE --idle 300 --timeout 1200
+    pstep rgdev-virge15-p2   loopa_pass regress-rgdev15-p2 --machine bf6 --card virge --exe build/djgpp/RGDEV.EXE --args bpp=15 --idle 200 --timeout 900
+    pstep rgdev-g400         loopa_pass regress-rgdev-g400 --card g400 --exe build/djgpp/RGDEV.EXE --idle 200 --timeout 900
+    pstep rgdev-g200         loopa_pass regress-rgdev-g200 --card g200 --exe build/djgpp/RGDEV.EXE --idle 200 --timeout 900
     pstep hreplay-check      tools/dev make -s hreplay-check
     pstep glide-conform-ci   tools/dev make -s conform-ci
     # The acceptance games' traces through Glide, three cards at once. Screamer

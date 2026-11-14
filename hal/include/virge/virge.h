@@ -38,6 +38,7 @@ typedef struct {
 /* A BIOS mode of exactly w x h at bpp bits (15 and 16 are told apart), in
  * the packed (8) or direct-colour (15, 16, 24, 32) memory models: 0, or -1. */
 int  virge_find_mode(int w, int h, int bpp, virge_mode *out);
+int  virge_list_modes(virge_mode *out, int max);   /* the usable modes: their count, up to max into out */
 /* The mode set by the BIOS, then the chip's linear window and new MMIO
  * opened (the BIOS's mode set closes them): 0, or -1. */
 int  virge_set_mode(const virge_mode *m);
@@ -47,6 +48,7 @@ void virge_text_mode(void);
  * target, any value; the clip (inclusive-exclusive, within the target)
  * trims everything drawn. Colours are pixel values in the target's format. */
 int  virge_sync(uint32_t timeout_us);              /* 0 when the engine is idle, -1 on time-out */
+int  virge_idle(void);                             /* 1: the engine is idle now */
 /* The target: its first pixel at off in VRAM (a multiple of 8), pitch_bytes
  * apart (a multiple of 8, at most 4095), bpp 8, 16 or 24 (packed). */
 void virge_set_target(uint32_t off, int pitch_bytes, int bpp);

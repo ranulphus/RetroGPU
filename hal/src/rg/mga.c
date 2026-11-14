@@ -46,6 +46,7 @@ rg_mga_state rg_mga;
 #define TEXTURE_RESERVE (512u * 1024u)   /* VRAM kept for textures when judging fit */
 
 static int discovered;                   /* 0 not yet, 1 found, -1 none */
+static char why_not[96];                 /* ... and why not */
 static rg_info info;
 static mga_vbe_mode vbe_all[MAX_MODES];  /* the BIOS's usable 16-bit modes on this card */
 static int nvbe;
@@ -169,11 +170,15 @@ static int probe(void)
         info.vram_bytes = mga.vram_bytes;
         return 0;
     }
-    if (discovered)
+    if (discovered) {
+        if (discovered < 0)
+            rg_set_error("%s", why_not);        /* (asked again: the same reason) */
         return discovered > 0 ? 0 : -1;
+    }
     discovered = -1;
+    strcpy(why_not, "no supported Matrox card found (G400, G450 or G200)");
     if (mga_find(&mga) != 0) {
-        rg_set_error("no supported Matrox card found (G400, G450 or G200)");
+        rg_set_error("%s", why_not);
         return -1;
     }
     memset(&info, 0, sizeof info);
@@ -213,7 +218,8 @@ static int probe(void)
     info.vram_bytes = vbe_total_memory();
 #endif
     if (!info.vram_bytes) {
-        rg_set_error("the card's VBE BIOS did not answer (VBE 2.0 or later needed)");
+        strcpy(why_not, "the card's VBE BIOS did not answer (VBE 2.0 or later needed)");
+        rg_set_error("%s", why_not);
         return -1;
     }
     mga.vram_bytes = info.vram_bytes;
@@ -255,6 +261,7 @@ static void caps(rg_caps *c)
     c->vram_bytes = info.vram_bytes;
     c->max_color_bits = 16;
     c->windows = 1;
+    c->cursor = 1;
 }
 
 static int list_modes(rg_mode *out, int max)
@@ -618,6 +625,65 @@ static void close_dev(void)
  * equivalent (a teardown has a window to close). */
 void rg_mga_graphics(void) { graphics = 1; }
 
+/* ---- 2D and the cursor (the HAL's engine_* and cursor_*) ------------------ */
+
+static int t_bytes = 2;                 /* the 2D target's bytes a pixel */
+
+static int surface(int which, rg_surface *s)
+{
+    if (!rg_mga.active)
+        return -1;
+    s->off = rg_mga_color_off(which == RG_SURF_FRONT);
+    s->pitch_bytes = rg_mga.pitch_px * 2;
+    s->bpp = 16;
+    s->width = rg_mga.width;
+    s->height = rg_mga.height;
+    return 0;
+}
+
+static void target(const rg_surface *s)
+{
+    mga_target t;
+    RG_GPU_ENTER();
+    memset(&t, 0, sizeof t);
+    t.bpp = s->bpp == 15 ? 16 : s->bpp;
+    t_bytes = t.bpp / 8;
+    t.color_off = s->off;
+    t.pitch_px = s->pitch_bytes / t_bytes;
+    engine_set_target(&t);
+    engine_set_clip(0, 0, s->width, s->height);
+}
+
+static void clip(int x0, int y0, int x1, int y1) { engine_set_clip(x0, y0, x1, y1); }
+static void fill(int x, int y, int w, int h, uint32_t pixel) { engine_fill(x, y, w, h, pixel); }
+static void copy(int sx, int sy, int dx, int dy, int w, int h) { engine_copy(sx, sy, dx, dy, w, h); }
+
+static void copy_from(const rg_surface *src, int sx, int sy, int dx, int dy, int w, int h)
+{
+    engine_copy_from(src->off, src->pitch_bytes / t_bytes, sx, sy, dx, dy, w, h);
+}
+
+/* Through the ILOAD: each row packed into whole dwords. */
+static void image(int x, int y, int w, int h, const void *px, int stride)
+{
+    static uint32_t row[2048];
+    const uint8_t *p = (const uint8_t *)px;
+    int dw = engine_image_begin(x, y, w, h), j;
+    if (!dw || dw > 2048)
+        return;
+    for (j = 0; j < h; j++, p += stride) {
+        row[dw - 1] = 0;
+        memcpy(row, p, (size_t)w * (size_t)t_bytes);
+        engine_iload_row(row);
+    }
+    engine_iload_end();
+}
+
+static void mono(int x, int y, int w, int h, const uint8_t *bits, int stride, uint32_t fg, uint32_t bg, int flags)
+{
+    engine_mono(x, y, w, h, bits, stride, fg, bg, (flags & RG_MONO_TRANSPARENT) ? MGA_MONO_TRANSPARENT : 0u);
+}
+
 /* ---- Reading and diagnostics -------------------------------------------- */
 
 /* RGB565 expanded to 8 bits a channel by bit replication, alpha 255; rows top
@@ -690,6 +756,18 @@ const rg_device rg_mga_device = {
     .swap = swap,
     .present_front = present_front,
     .draw_buffer = draw_buffer,
+    .surface = surface,
+    .target = target,
+    .clip = clip,
+    .fill = fill,
+    .copy = copy,
+    .copy_from = copy_from,
+    .image = image,
+    .mono = mono,
+    .cursor_load = cursor_load,
+    .cursor_colours = cursor_colours,
+    .cursor_show = cursor_show,
+    .cursor_move = cursor_move,
     .idle = idle,
     .sync = sync,
     .read = read_px,

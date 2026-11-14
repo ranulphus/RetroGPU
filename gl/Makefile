@@ -44,7 +44,9 @@ endif
 # objects are built here, under build/*/mgahal/ (the root's hal/ is only read).
 HAL_SRCS := $(addprefix $(MGAHAL)/hal/,src/debug/serial.c src/pci.c src/chip.c src/vbe.c src/fifo.c \
               src/engine.c src/dac.c src/texhw.c src/present.c src/debug/regtrace.c src/setup/trap.c src/warp.c \
-              src/rg/device.c src/rg/glos.c src/rg/mga.c src/rg/mga_glos.c port/djgpp.c)
+              src/blit.c src/cursor.c \
+              src/rg/device.c src/rg/glos.c src/rg/mga.c src/rg/mga_glos.c \
+              src/virge/chip.c src/virge/engine2d.c src/virge/cursor.c src/virge/tri.c src/rg/virge.c port/djgpp.c)
 hal_objs = $(patsubst $(MGAHAL)/%.c,build/$(1)/mgahal/%.o,$(2))
 DGL_SRCS := $(wildcard src/dgl/*.c) $(wildcard src/gl/*.c) $(wildcard src/backend/mga/*.c)
 LIB := build/lib/libGL.a

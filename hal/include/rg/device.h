@@ -6,9 +6,10 @@
  * down. What is drawn, and how, is the drawing back end's (GL's: gl/src/
  * backend), which knows its own device's private side.
  *
- * Devices: "mga" (the Matrox HAL behind the table: hal/src/rg/mga.c);
- * later "soft" (B2/B3) and "virge" (docs/virge.md V3). rg_choose picks one by
- * DGL_DEVICE, or the first whose probe succeeds. */
+ * Devices: "mga" (the Matrox HAL behind the table: hal/src/rg/mga.c) and
+ * "virge" (the S3 ViRGE/DX: hal/src/rg/virge.c, docs/virge.md V3); later
+ * "soft" (B2/B3). rg_choose picks one by DGL_DEVICE, or the first whose probe
+ * succeeds, in that order. */
 #ifndef RG_DEVICE_H
 #define RG_DEVICE_H
 #include "mga/types.h"
@@ -93,7 +94,18 @@ typedef struct {
     uint32_t vram_bytes;            /* all of it */
     int max_color_bits;
     int windows;                    /* can draw in a GLOS window */
+    int cursor;                     /* a hardware cursor (cursor_* not NULL) */
 } rg_caps;
+
+/* A surface in the device's memory, for 2D: its first pixel's offset, its
+ * pitch, its pixels' bits (8; 15 or 16; 24 packed; 32) and size. */
+typedef struct {
+    uint32_t off;
+    int pitch_bytes, bpp;
+    int width, height;
+} rg_surface;
+enum { RG_SURF_FRONT, RG_SURF_BACK };   /* the open context's colour buffers: shown, hidden */
+#define RG_MONO_TRANSPARENT 1           /* mono: a clear bit leaves the pixel as it is */
 
 /* What a swap disturbed, for its user to write again: the drawing target
  * (the engine's buffer and its access register), or the engine's drawing
@@ -120,6 +132,28 @@ typedef struct rg_device {
                                                        RG_SWAP_ flags for what it disturbed */
     int  (*present_front)(void);                    /* scaled modes: show what was drawn into the front now */
     void (*draw_buffer)(int front);                 /* where drawing goes: the shown buffer (1) or the hidden */
+
+    /* 2D, on any surface of the device's memory (pixel values in the
+     * surface's format). It shares the engine with drawing: a user that
+     * mixes the two points drawing back (draw_buffer) afterwards. */
+    int  (*surface)(int which, rg_surface *s);      /* RG_SURF_*: 0, or -1 when not open */
+    void (*target)(const rg_surface *s);            /* where 2D goes; the clip becomes the whole surface */
+    void (*clip)(int x0, int y0, int x1, int y1);   /* inclusive-exclusive, within the target */
+    void (*fill)(int x, int y, int w, int h, uint32_t pixel);
+    void (*copy)(int sx, int sy, int dx, int dy, int w, int h);                /* within the target, overlaps fine */
+    void (*copy_from)(const rg_surface *src, int sx, int sy, int dx, int dy, int w, int h);
+    void (*image)(int x, int y, int w, int h, const void *px, int stride);     /* from the CPU, rows stride bytes */
+    void (*mono)(int x, int y, int w, int h, const uint8_t *bits, int stride, uint32_t fg, uint32_t bg,
+                 int flags);                       /* 1-bit rows, bit 7 leftmost; RG_MONO_TRANSPARENT */
+
+    /* The hardware cursor (each NULL where there is none): 64x64, its AND and
+     * XOR masks (512 bytes each, rows of 8 bytes, bit 7 leftmost) stored at
+     * off in the device's memory (1 KB, the caller's: 1 KB aligned); colours
+     * 0xRRGGBB (the Matrox HAL's); moved by its top left corner. */
+    int  (*cursor_load)(uint32_t off, const uint8_t and_mask[512], const uint8_t xor_mask[512]);
+    void (*cursor_colours)(uint32_t c0, uint32_t c1);
+    void (*cursor_show)(int on);
+    void (*cursor_move)(int x, int y);
 
     /* The engine's order, and its owner */
     int  (*idle)(void);                             /* 1: nothing queued or drawing */
@@ -158,6 +192,6 @@ void rg_log_line(const char *line);                 /* one line, as it is */
 #define RG_WARN(...) do { if (RG_LOG_LEVEL >= 1) rg_logf(__VA_ARGS__); } while (0)
 #define RG_INFO(...) do { if (RG_LOG_LEVEL >= 2) rg_logf(__VA_ARGS__); } while (0)
 #define RG_DBG(...)  do { if (RG_LOG_LEVEL >= 3) rg_logf(__VA_ARGS__); } while (0)
-extern const rg_device rg_mga_device;
+extern const rg_device rg_mga_device, rg_virge_device;
 
 #endif

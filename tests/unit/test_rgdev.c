@@ -4,11 +4,13 @@
 #include "rg/device.h"
 #include <string.h>
 
-static int mga_ok, soft_ok, probes;
+static int mga_ok, virge_ok, soft_ok, probes;
 static int probe_mga(void) { probes++; if (!mga_ok) rg_set_error("no Matrox card"); return mga_ok ? 0 : -1; }
 static int probe_soft(void) { probes++; return soft_ok ? 0 : -1; }
+static int probe_virge(void) { probes++; return virge_ok ? 0 : -1; }
 
 const rg_device rg_mga_device = { .name = "mga", .probe = probe_mga };
+const rg_device rg_virge_device = { .name = "virge", .probe = probe_virge };
 static const rg_device soft = { .name = "soft", .probe = probe_soft };
 
 static char logged[256];
@@ -18,16 +20,23 @@ int unit_main(void)
 {
     const rg_device *const two[] = { &rg_mga_device, &soft };
 
-    /* The build's own list: the Matrox device alone. */
+    /* The build's own list: the Matrox device, then the ViRGE/DX's. */
     mga_ok = 1;
     CHECK(rg_choose(NULL) == &rg_mga_device);
     CHECK(rg_choose("") == &rg_mga_device);
     CHECK(rg_choose("mga") == &rg_mga_device);
     mga_ok = 0;
     CHECK(rg_choose(NULL) == NULL);
-    CHECK_STR(rg_error(), "no Matrox card");
+    CHECK_STR(rg_error(), "no Matrox card");     /* (each probe's reason; the ViRGE's fake gives none) */
     CHECK(rg_choose("soft") == NULL);
     CHECK_STR(rg_error(), "DGL-DEVICE soft: not built");
+    virge_ok = 1;
+    CHECK(rg_choose(NULL) == &rg_virge_device);  /* (no Matrox card: the next that probes) */
+    CHECK(rg_choose("virge") == &rg_virge_device);
+    mga_ok = 1;
+    CHECK(rg_choose(NULL) == &rg_mga_device);    /* (both: the Matrox one first) */
+    CHECK(rg_window_device() == NULL);           /* (neither fake has window_ok) */
+    virge_ok = 0;
 
     /* A longer list: by name, or the first that probes, in order. */
     mga_ok = 0, soft_ok = 1;

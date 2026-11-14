@@ -82,6 +82,14 @@ VIRGE_SRCS := hal/src/virge/chip.c hal/src/virge/engine2d.c hal/src/virge/cursor
 build/djgpp/libvirge.a: $(VIRGE_SRCS:%.c=build/djgpp/%.o)
 	@rm -f $@
 	$(DJAR) rcs $@ $^
+# RetroGPU's device level (hal/include/rg, gl/docs/b1.md; docs/virge.md V3): the devices behind one table, the
+# Matrox one on the HAL and the ViRGE/DX's on its layer; RGDEV drives either through the table alone.
+RG_SRCS := hal/src/rg/device.c hal/src/rg/glos.c hal/src/rg/mga.c hal/src/rg/mga_glos.c hal/src/rg/virge.c
+$(RG_SRCS:%.c=build/djgpp/%.o): DJ_CFLAGS += -I$(GLOS)/include
+build/djgpp/librg.a: $(RG_SRCS:%.c=build/djgpp/%.o)
+	@rm -f $@
+	$(DJAR) rcs $@ $^
+DJ_SRC_RGDEV := tests/rg/rgdev.c tests/hal/sw2d.c build/djgpp/librg.a build/djgpp/libvirge.a
 DJ_SRC_VPROBE := tests/virge/vprobe.c
 DJ_SRC_VTWOD := tests/virge/vtwod.c tests/hal/sw2d.c build/djgpp/libvirge.a
 DJ_SRC_VTRI := tests/virge/vtri.c build/djgpp/libvirge.a
@@ -96,6 +104,8 @@ build/djgpp/VPROBE.EXE: tests/virge/vprobe.c
 build/djgpp/VTWOD.EXE: tests/virge/vtwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libvirge.a
 build/djgpp/VTWOD.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/VTRI.EXE: tests/virge/vtri.c build/djgpp/libvirge.a
+build/djgpp/RGDEV.EXE: tests/rg/rgdev.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/librg.a build/djgpp/libvirge.a
+build/djgpp/RGDEV.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/STACKPG.EXE: tests/shim/stackpg.c
 build/djgpp/MOUSETST.EXE: tests/shim/mousetst.c
 build/djgpp/JOYTEST.EXE: tests/shim/joytest.c

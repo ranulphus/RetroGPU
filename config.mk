@@ -8,6 +8,8 @@ PYTHON        ?= python3
 
 MGA_CACHE     ?= $(HOME)/.cache/mga-glide
 GAMES_DIR     ?= $(HOME)/DOSGAMES
+# GLOS's checkout: its headers (API 2.0) for the devices' GLOS paths (hal/src/rg).
+GLOS          ?= $(HOME)/GLOS
 FIXTURES_DIR  ?= $(MGA_CACHE)/fixtures
 BOX86_DIR     ?= $(MGA_CACHE)/86box
 
