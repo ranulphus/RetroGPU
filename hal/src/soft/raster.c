@@ -307,14 +307,15 @@ typedef struct {
      * the origin's: colour in 16.16, depth in 16.14. */
     int xref, yref;
     fixplane fr, fg, fb, fa, fz;
-    /* Textured: where a stage's coordinates are linear on the screen (q
-     * constant, GL_REPEAT), s and t in level-0 texels, 16.16, modulo 2^32;
-     * and the coordinates (over w) and 1/w as planes. */
+    /* Textured or fogged: where a stage's coordinates are linear on the
+     * screen (q constant, GL_REPEAT), s and t in level-0 texels, 16.16, modulo
+     * 2^32; and 1/w, the fog coordinate (or factor) over w and the
+     * coordinates over w as planes. */
     int affine[2];
     fixplane fu[2], fv[2];
-    plane q, s[2], t[2];
-    /* The reference spans': colour, depth and fog as planes. */
-    plane r, g, b, a, z, f;
+    plane q, f, s[2], t[2];
+    /* The reference spans': colour and depth as planes. */
+    plane r, g, b, a, z;
 } attrs;
 
 /* Row j's pixels xl..xr-1 (inside the scissor): the fragment pipeline.
@@ -416,6 +417,7 @@ static void span(int j, int xl, int xr, const attrs *A)
 static int exact_mode;                  /* soft_exact: 0 every fast path, 1 the reference span, 2 the generic
                                            integer spans only (the specialised runs checked against them) */
 static int const8[2][4];                /* the stages' constants in 8 bits */
+static int fog8[3];                     /* the fog colour in 8 bits */
 static uint8_t wide5[32], wide6[64], wide3[8];   /* a buffer's channel widened to 8 bits (its bits repeated) */
 enum { BK_GENERIC, BK_ALPHA, BK_ADD, BK_MUL };
 static int blend_kind;                  /* S's blending, where it is one of the common ones */
@@ -701,6 +703,21 @@ static __attribute__((always_inline)) inline void inl_fetch(const inlevel *L, in
     }
 }
 
+/* Fog's factor (0..256) at column x's centre on a row: the fog coordinate (or
+ * per vertex the factor) over w divided by q there, fb + fdx x over
+ * qb + qdx x; -1 where q isn't positive. */
+static int fog_at(double fb, double fdx, double qb, double qdx, int x)
+{
+    double q = qb + qdx * x, f;
+    if (!(q > 0))
+        return -1;
+    f = (fb + fdx * x) / q;
+    if (!S.fog_per_vertex)
+        f = fog_factor(f);
+    f = f < 0 ? 0 : f > 1 ? 1 : f;
+    return mga_irint(f * 256.0);
+}
+
 static __attribute__((always_inline)) inline void fast_span(int j, int xl, int xr, const attrs *A, const int SMOOTH,
                                                             const int DEPTH, const int TEX, const int BLEND)
 {
@@ -709,7 +726,8 @@ static __attribute__((always_inline)) inline void fast_span(int j, int xl, int x
     int32_t r, g, b, a, z = 0, dr = A->fr.dx, dg = A->fg.dx, db = A->fb.dx, da = A->fa.dx, dz = A->fz.dx;
     stagecur C[2];
     inlevel IL = { NULL, 0, 0, 0, 0, 0, 0 };    /* (TEX 2: the chunk's level, fetched here) */
-    int inl = 0;
+    int inl = 0, fog = S.fog, fogfar_x = INT32_MIN, fogfar = 0;
+    double fqb = 0, fqdx = 0, ffb = 0, ffdx = 0;
 #define AT(F) ((int32_t)(uint32_t)(uint64_t)((F).v + ox * (F).dx + oy * (F).dy))
     r = AT(A->fr), g = AT(A->fg), b = AT(A->fb), a = AT(A->fa);
     if (DEPTH)
@@ -719,9 +737,25 @@ static __attribute__((always_inline)) inline void fast_span(int j, int xl, int x
         for (k = 0; k < 2; k++)
             if (S.stage[k].tex)
                 stage_row(k, A, j, &C[k]);
+    if (fog) {                                  /* (the row's 1/w and fog coordinate over w at column 0) */
+        double fx0 = 0.5 - A->ox, fy = (j + 0.5) - A->oy;
+        fqb = A->q.a0 + A->q.dx * fx0 + A->q.dy * fy, fqdx = A->q.dx;
+        ffb = A->f.a0 + A->f.dx * fx0 + A->f.dy * fy, ffdx = A->f.dx;
+    }
     for (i = xl; i < xr;) {
-        /* A chunk: to the next multiple of 16 (the pieces' columns) with a texture, else the span. */
-        int end = TEX ? ((i | 15) + 1 < xr ? (i | 15) + 1 : xr) : xr;
+        /* A chunk: to the next multiple of 16 (the pieces' columns) with a texture or fog, else the span. Fog's
+           factor exact at its ends (the far end shared with the next chunk), stepped in 8.8 between; each pixel
+           divided where q isn't positive at an end. */
+        int end = TEX || fog ? ((i | 15) + 1 < xr ? (i | 15) + 1 : xr) : xr;
+        int fx0 = i & ~15, f0 = 0, fd = 0, fpp = 0;
+        if (fog) {
+            int f1;
+            f0 = fogfar_x == fx0 ? fogfar : fog_at(ffb, ffdx, fqb, fqdx, fx0);
+            f1 = fog_at(ffb, ffdx, fqb, fqdx, fx0 + 16);
+            fogfar_x = fx0 + 16, fogfar = f1;
+            fpp = f0 < 0 || f1 < 0;
+            fd = f1 - f0;
+        }
         int32_t U[2] = { 0, 0 }, V[2] = { 0, 0 }, dU[2] = { 0, 0 }, dV[2] = { 0, 0 };
         int pp[2] = { 0, 0 };
         const soft_pick *pk[2] = { NULL, NULL };
@@ -769,6 +803,12 @@ static __attribute__((always_inline)) inline void fast_span(int j, int xl, int x
                 else if (simple_rgb == SM_TEX)
                     c[0] = t[0], c[1] = t[1], c[2] = t[2];
                 c[3] = simple_alpha == SM_MOD ? mul255(t[3], prim[3]) : simple_alpha == SM_TEX ? t[3] : prim[3];
+            }
+            if (fog) {
+                int f = fpp ? fog_at(ffb, ffdx, fqb, fqdx, i) : f0 + ((fd * (i - fx0) + 8) >> 4);
+                if (f < 0)
+                    f = 256;                    /* (q not positive at the pixel itself: no fog) */
+                c[0] = soft_lerp8(fog8[0], c[0], f), c[1] = soft_lerp8(fog8[1], c[1], f), c[2] = soft_lerp8(fog8[2], c[2], f);
             }
             if (atest && !alpha_pass(c[3]))
                 goto next;
@@ -1079,8 +1119,11 @@ static void select_span(void)
         for (v = 0; v < 8; v++) wide3[v] = (uint8_t)(v << 5 | v << 2 | v >> 1);
         ready = 1;
     }
-    if (exact_mode == 1 || (S.stencil_test && T.stencil) || S.fog || (depth && T.depth_bits != 16))
+    if (exact_mode == 1 || (S.stencil_test && T.stencil) || (depth && T.depth_bits != 16))
         return;
+    if (S.fog)
+        for (k = 0; k < 3; k++)
+            fog8[k] = to8(S.fog_color[k] * 255.0);
     for (k = 0; k < 2; k++)
         if (S.stage[k].tex) {
             const soft_texture *tx = S.stage[k].tex;
@@ -1110,7 +1153,7 @@ static void select_span(void)
 #ifdef SOFT_MMX
     if (mmx_on < 0)
         mmx_on = cpu_has_mmx();
-    if (mmx_on && exact_mode == 0 && tex != 1 && (tex || S.smooth || S.blend))   /* (flat fills gain nothing) */
+    if (mmx_on && exact_mode == 0 && tex != 1 && !S.fog && (tex || S.smooth || S.blend))   /* (flat fills gain nothing) */
         fast_fn = mmx_tab[((S.smooth != 0) * 2 + depth) * 4 + (tex == 2) * 2 + (S.blend != 0)];
 #endif
 }
@@ -1322,22 +1365,29 @@ static void fast_planes(attrs *A, const soft_vertex *const *v, const double *px,
 #undef GRAD
 #undef FLAT
     A->affine[0] = A->affine[1] = 0;
-    if (S.stage[0].tex || S.stage[1].tex) {
 #define PLANE(P_, V0_, V1_, V2_) \
     do { \
         double d1_ = (V1_) - (V0_), d2_ = (V2_) - (V0_); \
         (P_).a0 = (V0_), (P_).dx = (d1_ * y2 - d2_ * y1) * idet, (P_).dy = (d2_ * x1 - d1_ * x2) * idet; \
     } while (0)
+    if (S.stage[0].tex || S.stage[1].tex || S.fog)
         PLANE(A->q, v[0]->oow, v[1]->oow, v[2]->oow);
+    if (S.fog) {                                /* (the coordinate, or per vertex the factor, over w) */
+        double f0 = v[0]->fog, f1 = v[1]->fog, f2 = v[2]->fog;
+        if (S.fog_per_vertex)
+            f0 = fog_factor(f0), f1 = fog_factor(f1), f2 = fog_factor(f2);
+        PLANE(A->f, f0 * v[0]->oow, f1 * v[1]->oow, f2 * v[2]->oow);
+    }
+    if (S.stage[0].tex || S.stage[1].tex) {
         for (k = 0; k < 2; k++)
             if (S.stage[k].tex) {
                 int c = S.stage[k].coord;
                 PLANE(A->s[k], v[0]->tex[c][0] * v[0]->oow, v[1]->tex[c][0] * v[1]->oow, v[2]->tex[c][0] * v[2]->oow);
                 PLANE(A->t[k], v[0]->tex[c][1] * v[0]->oow, v[1]->tex[c][1] * v[1]->oow, v[2]->tex[c][1] * v[2]->oow);
             }
-#undef PLANE
         fix_tex(A, fx, fy);
     }
+#undef PLANE
 }
 
 /* Drawing now, or kept for the tiles (below). */
@@ -1665,7 +1715,7 @@ static size_t attrs_size(void)
 {
     if (!fast_fn)
         return sizeof(attrs);
-    return S.stage[0].tex || S.stage[1].tex ? offsetof(attrs, r) : offsetof(attrs, affine);
+    return S.stage[0].tex || S.stage[1].tex || S.fog ? offsetof(attrs, r) : offsetof(attrs, affine);
 }
 
 typedef struct { uint32_t *at; int n, cap; } bin;
