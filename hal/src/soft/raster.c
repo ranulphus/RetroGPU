@@ -1176,7 +1176,8 @@ static int64_t floor_div(int64_t n, int64_t d)  /* d > 0 */
  * the fill rule: at or below it, or below it. */
 static int first_row(int64_t y)
 {
-    return S.fill_rule == SOFT_FILL_BOTTOM_LEFT ? (int)floor_div(y - 8, 16) + 1 : (int)ceil_div(y - 8, 16);
+    /* (floor and ceiling of (y - 8) / 16 by arithmetic shifts: exact, no division) */
+    return S.fill_rule == SOFT_FILL_BOTTOM_LEFT ? (int)((y - 8) >> 4) + 1 : (int)((y - 8 + 15) >> 4);
 }
 
 /* An edge Va->Vb (1/16 pixels; Yb > Ya) a row at a time: on the row whose
@@ -1885,9 +1886,8 @@ static void emit_cover(const int64_t *X, const int64_t *Y, const attrs *A, const
             }
             c->A = *kept;
             /* (a pixel drawn has its centre within the bounds: its index from floor(min / 16) to floor(max / 16)) */
-            if (bin_cmd(c, clampi(floor_div(xmin, 16), -1, T.width + 1), clampi(floor_div(ymin, 16), -1, T.height + 1),
-                        clampi(floor_div(xmax, 16) + 1, -1, T.width + 1),
-                        clampi(floor_div(ymax, 16) + 1, -1, T.height + 1)))
+            if (bin_cmd(c, clampi(xmin >> 4, -1, T.width + 1), clampi(ymin >> 4, -1, T.height + 1),
+                        clampi((xmax >> 4) + 1, -1, T.width + 1), clampi((ymax >> 4) + 1, -1, T.height + 1)))
                 return;
         }
         soft_count.overflows++;                 /* (no room: draw what is kept, then try again) */
