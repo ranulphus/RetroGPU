@@ -133,8 +133,8 @@ void soft_triangle(const soft_vertex *a, const soft_vertex *b, const soft_vertex
     const soft_vertex *v[3] = { a, b, c }, *t;
     int64_t X[3], Y[3], area2;
     double px[3], py[3], det;
-    plane pr, pg, pb, pa, pz;
-    int i, j, j0, j1, long_left;
+    plane pr, pg, pb, pa, pz, pq, ps[2] = { { 0, 0, 0 }, { 0, 0, 0 } }, pt[2] = { { 0, 0, 0 }, { 0, 0, 0 } };
+    int i, j, j0, j1, long_left, k, texturing = 0;
     uint32_t zmax = depth_max();
 
     /* Snapped to 1/16 of a pixel, sorted top (smallest y) first. */
@@ -173,6 +173,15 @@ void soft_triangle(const soft_vertex *a, const soft_vertex *b, const soft_vertex
         pr.dx = pr.dy = pg.dx = pg.dy = pb.dx = pb.dy = pa.dx = pa.dy = 0;
     }
     pz = plane_of(v[0]->z * (double)zmax, v[1]->z * (double)zmax, v[2]->z * (double)zmax, px, py, det);
+    /* Texture coordinates over w, and 1/w: planes on the screen (perspective-correct per pixel). */
+    pq = plane_of(v[0]->oow, v[1]->oow, v[2]->oow, px, py, det);
+    for (k = 0; k < 2; k++)
+        if (S.stage[k].tex) {
+            int c = S.stage[k].coord;
+            ps[k] = plane_of(v[0]->tex[c][0] * v[0]->oow, v[1]->tex[c][0] * v[1]->oow, v[2]->tex[c][0] * v[2]->oow, px, py, det);
+            pt[k] = plane_of(v[0]->tex[c][1] * v[0]->oow, v[1]->tex[c][1] * v[1]->oow, v[2]->tex[c][1] * v[2]->oow, px, py, det);
+            texturing = 1;
+        }
 
     /* The rows whose centres are in [Y0, Y2), within the scissor. */
     j0 = (int)ceil_div(Y[0] - 8, 16);
@@ -182,7 +191,7 @@ void soft_triangle(const soft_vertex *a, const soft_vertex *b, const soft_vertex
     for (j = j0; j < j1; j++) {
         int64_t yc = 16 * (int64_t)j + 8;
         int xlong = edge_x(X[0], Y[0], X[2], Y[2], yc), xshort, xl, xr;
-        double fy, r, g, bl, al, z;
+        double fy, r, g, bl, al, z, q = 0, sv[2] = { 0, 0 }, tv[2] = { 0, 0 };
         if (yc < Y[1])
             xshort = edge_x(X[0], Y[0], X[1], Y[1], yc);
         else
@@ -201,8 +210,18 @@ void soft_triangle(const soft_vertex *a, const soft_vertex *b, const soft_vertex
             bl = pb.a0 + pb.dx * fx + pb.dy * fy;
             al = pa.a0 + pa.dx * fx + pa.dy * fy;
             z = pz.a0 + pz.dx * fx + pz.dy * fy;
+            if (texturing) {
+                q = pq.a0 + pq.dx * fx + pq.dy * fy;
+                for (k = 0; k < 2; k++)
+                    if (S.stage[k].tex) {
+                        sv[k] = ps[k].a0 + ps[k].dx * fx + ps[k].dy * fy;
+                        tv[k] = pt[k].a0 + pt[k].dx * fx + pt[k].dy * fy;
+                    }
+            }
         }
-        for (i = xl; i < xr; i++, r += pr.dx, g += pg.dx, bl += pb.dx, al += pa.dx, z += pz.dx) {
+        for (i = xl; i < xr; i++, r += pr.dx, g += pg.dx, bl += pb.dx, al += pa.dx, z += pz.dx, q += pq.dx,
+                              sv[0] += ps[0].dx, tv[0] += pt[0].dx, sv[1] += ps[1].dx, tv[1] += pt[1].dx) {
+            int cr = to8(r), cg = to8(g), cb = to8(bl), ca = to8(al);
             if (T.depth && S.depth_test) {
                 uint32_t zi = (uint32_t)(z <= 0 ? 0 : z >= (double)zmax ? zmax : z), zb = depth_get(i, j);
                 if (!depth_pass(zi, zb))
@@ -210,8 +229,23 @@ void soft_triangle(const soft_vertex *a, const soft_vertex *b, const soft_vertex
                 if (S.depth_write)
                     depth_put(i, j, zi);
             }
+            if (texturing) {
+                float prim[4], prev[4], tex[4], out[4];
+                prim[0] = (float)(r / 255.0), prim[1] = (float)(g / 255.0), prim[2] = (float)(bl / 255.0), prim[3] = (float)(al / 255.0);
+                for (k = 0; k < 4; k++)
+                    prim[k] = prim[k] < 0 ? 0 : prim[k] > 1 ? 1 : prim[k], prev[k] = prim[k];
+                for (k = 0; k < 2; k++)
+                    if (S.stage[k].tex) {
+                        double s0 = sv[k] / q, t0 = tv[k] / q;
+                        soft_sample(S.stage[k].tex, s0, t0, (ps[k].dx - s0 * pq.dx) / q, (ps[k].dy - s0 * pq.dy) / q,
+                                    (pt[k].dx - t0 * pq.dx) / q, (pt[k].dy - t0 * pq.dy) / q, tex);
+                        soft_combine_apply(&S.stage[k], tex, prim, prev, out);
+                        prev[0] = out[0], prev[1] = out[1], prev[2] = out[2], prev[3] = out[3];
+                    }
+                cr = to8(prev[0] * 255.0), cg = to8(prev[1] * 255.0), cb = to8(prev[2] * 255.0), ca = to8(prev[3] * 255.0);
+            }
             soft_count.pixels++;
-            color_put(i, j, to8(r), to8(g), to8(bl), to8(al));
+            color_put(i, j, cr, cg, cb, ca);
         }
     }
 }

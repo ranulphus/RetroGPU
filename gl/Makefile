@@ -47,7 +47,7 @@ HAL_SRCS := $(addprefix $(MGAHAL)/hal/,src/debug/serial.c src/pci.c src/chip.c s
               src/blit.c src/cursor.c \
               src/rg/device.c src/rg/glos.c src/rg/mga.c src/rg/mga_glos.c \
               src/virge/chip.c src/virge/engine2d.c src/virge/cursor.c src/virge/tri.c src/rg/virge.c \
-              src/rg/mem.c src/soft/raster.c port/djgpp.c)
+              src/rg/mem.c src/soft/raster.c src/soft/texture.c port/djgpp.c)
 hal_objs = $(patsubst $(MGAHAL)/%.c,build/$(1)/mgahal/%.o,$(2))
 DGL_SRCS := $(wildcard src/dgl/*.c) $(wildcard src/gl/*.c) $(wildcard src/backend/mga/*.c) $(wildcard src/backend/soft/*.c)
 LIB := build/lib/libGL.a

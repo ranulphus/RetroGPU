@@ -20,6 +20,203 @@ static soft_state st;
 
 static int format_of(int bpp) { return bpp == 32 ? SOFT_XRGB8888 : bpp == 8 ? SOFT_RGB332 : SOFT_RGB565; }
 
+/* ---- Textures ------------------------------------------------------------ */
+
+/* A texture's part here: the core's view of GL's own RGBA8 levels (no copy;
+ * colour-index levels expanded through their palette). */
+typedef struct {
+    soft_texture st;
+    uint8_t *expanded[SOFT_MAX_LEVELS];
+    int expanded_bytes[SOFT_MAX_LEVELS];
+    const dgl_palette *pal;
+    unsigned pal_gen;
+    int complete;
+} stex;
+
+static int is_mip(GLenum f) { return f >= GL_NEAREST_MIPMAP_NEAREST && f <= GL_LINEAR_MIPMAP_LINEAR; }
+
+static int filter_of(GLenum f)
+{
+    switch (f) {
+    case GL_NEAREST: return SOFT_NEAREST;
+    case GL_LINEAR: return SOFT_LINEAR;
+    case GL_NEAREST_MIPMAP_NEAREST: return SOFT_NEAREST_MIPMAP_NEAREST;
+    case GL_LINEAR_MIPMAP_NEAREST: return SOFT_LINEAR_MIPMAP_NEAREST;
+    case GL_NEAREST_MIPMAP_LINEAR: return SOFT_NEAREST_MIPMAP_LINEAR;
+    default: return SOFT_LINEAR_MIPMAP_LINEAR;
+    }
+}
+
+static int wrap_of(GLenum w) { return w == GL_CLAMP ? SOFT_CLAMP : w == GL_CLAMP_TO_EDGE ? SOFT_CLAMP_TO_EDGE : SOFT_REPEAT; }
+
+static int log2_of(int v) { int l = 0; while ((1 << l) < v) l++; return l; }
+
+/* The texture as the core samples it: NULL when it is not complete (GL:
+ * texturing is then as if disabled for its unit). */
+static const soft_texture *prepare(dgl_texture *t)
+{
+    stex *x = (stex *)t->be;
+    const dgl_palette *pal = t->level[0].idx ? dgl_palette_for(t) : NULL;
+    int l, n = 0, maxl;
+    if (!x) {
+        if (!(x = (stex *)calloc(1, sizeof *x)))
+            return NULL;
+        t->be = x;
+        t->dirty = 1;
+    }
+    if (t->dirty || (pal && (pal != x->pal || pal->gen != x->pal_gen))) {
+        maxl = t->max_level < SOFT_MAX_LEVELS - 1 ? t->max_level : SOFT_MAX_LEVELS - 1;
+        for (l = 0; l <= maxl; l++) {
+            const dgl_level *L = &t->level[l];
+            if (!DGL_LEVEL_DEFINED(L))
+                break;
+            if (l && (L->w != (t->level[l - 1].w > 1 ? t->level[l - 1].w / 2 : 1) ||
+                      L->h != (t->level[l - 1].h > 1 ? t->level[l - 1].h / 2 : 1)))
+                break;
+            if (L->idx) {
+                int bytes = L->w * L->h * 4, i;
+                if (!pal)
+                    break;
+                if (x->expanded_bytes[l] < bytes) {
+                    uint8_t *p = (uint8_t *)realloc(x->expanded[l], (size_t)bytes);
+                    if (!p)
+                        break;
+                    x->expanded[l] = p, x->expanded_bytes[l] = bytes;
+                }
+                for (i = 0; i < L->w * L->h; i++)
+                    memcpy(x->expanded[l] + i * 4, dgl_palette_texel(pal, L->idx[i]), 4);
+                x->st.level[l].rgba = x->expanded[l];
+            } else
+                x->st.level[l].rgba = L->rgba;
+            x->st.level[l].w = L->w;
+            x->st.level[l].h = L->h;
+            n++;
+            if (L->w == 1 && L->h == 1)
+                break;
+        }
+        x->st.levels = n;
+        {
+            int want = log2_of(t->level[0].w > t->level[0].h ? t->level[0].w : t->level[0].h);
+            if (want > t->max_level)
+                want = t->max_level;
+            x->complete = n > 0 && (!is_mip(t->min_filter) || n - 1 >= want);
+        }
+        x->pal = pal;
+        x->pal_gen = pal ? pal->gen : 0;
+        t->dirty = 0;
+    }
+    x->st.wrap_s = wrap_of(t->wrap_s);
+    x->st.wrap_t = wrap_of(t->wrap_t);
+    x->st.min_filter = filter_of(t->min_filter);
+    x->st.mag_filter = filter_of(t->mag_filter);
+    if (!is_mip(t->min_filter) && x->st.levels > 1)
+        x->st.levels = 1;                       /* (re-made from the levels when the filter goes back to a mipmap one) */
+    return x->complete ? &x->st : NULL;
+}
+
+/* ---- Environments in combine terms --------------------------------------- */
+
+static void comb(soft_combine *c, int f, int s0, int o0, int s1, int o1, int s2, int o2)
+{
+    c->func = f, c->src[0] = s0, c->op[0] = o0, c->src[1] = s1, c->op[1] = o1, c->src[2] = s2, c->op[2] = o2;
+    c->scale = 1.0f;
+}
+
+static int src_of(GLenum s)
+{
+    return s == GL_TEXTURE ? SOFT_S_TEXTURE : s == GL_CONSTANT_ARB ? SOFT_S_CONSTANT
+         : s == GL_PRIMARY_COLOR_ARB ? SOFT_S_PRIMARY : SOFT_S_PREVIOUS;
+}
+
+static int op_of(GLenum o)
+{
+    return o == GL_SRC_COLOR ? SOFT_O_COLOR : o == GL_ONE_MINUS_SRC_COLOR ? SOFT_O_ONE_MINUS_COLOR
+         : o == GL_SRC_ALPHA ? SOFT_O_ALPHA : SOFT_O_ONE_MINUS_ALPHA;
+}
+
+static int func_of(GLenum f)
+{
+    switch (f) {
+    case GL_REPLACE: return SOFT_C_REPLACE;
+    case GL_MODULATE: return SOFT_C_MODULATE;
+    case GL_ADD: return SOFT_C_ADD;
+    case GL_ADD_SIGNED_ARB: return SOFT_C_ADD_SIGNED;
+    case GL_INTERPOLATE_ARB: return SOFT_C_INTERPOLATE;
+    default: return SOFT_C_SUBTRACT;
+    }
+}
+
+/* GL 1.1's environments (with GL_ADD and GL_ARB_texture_env_combine) by the
+ * texture's base format. GL keeps the levels reduced to their format as
+ * RGBA8 (an ALPHA texture's colour white, a LUMINANCE one's alpha opaque),
+ * so MODULATE and DECAL are RGBA's formulas for every format; REPLACE, BLEND
+ * and ADD take the format's exceptions. */
+static void env_stage(soft_stage *st, const dgl_texenv *e, int ifc)
+{
+    const int T = SOFT_S_TEXTURE, P = SOFT_S_PREVIOUS, K = SOFT_S_CONSTANT;
+    const int C = SOFT_O_COLOR, A = SOFT_O_ALPHA;
+    int i;
+    for (i = 0; i < 4; i++)
+        st->constant[i] = e->color[i];
+    switch (e->mode) {
+    case GL_COMBINE_ARB:
+        comb(&st->rgb, func_of(e->combine_rgb), src_of(e->src_rgb[0]), op_of(e->op_rgb[0]), src_of(e->src_rgb[1]),
+             op_of(e->op_rgb[1]), src_of(e->src_rgb[2]), op_of(e->op_rgb[2]));
+        comb(&st->alpha, func_of(e->combine_alpha), src_of(e->src_alpha[0]), op_of(e->op_alpha[0]),
+             src_of(e->src_alpha[1]), op_of(e->op_alpha[1]), src_of(e->src_alpha[2]), op_of(e->op_alpha[2]));
+        st->rgb.scale = e->rgb_scale;
+        st->alpha.scale = e->alpha_scale;
+        return;
+    case GL_REPLACE:
+        comb(&st->rgb, SOFT_C_REPLACE, ifc == DGL_IF_ALPHA ? P : T, C, P, C, P, C);
+        comb(&st->alpha, SOFT_C_REPLACE, ifc == DGL_IF_LUMINANCE || ifc == DGL_IF_RGB ? P : T, A, P, A, P, A);
+        return;
+    case GL_DECAL:
+        if (ifc == DGL_IF_RGB || ifc == DGL_IF_RGBA || ifc == DGL_IF_RGB5_A1 || ifc == DGL_IF_INDEX)
+            comb(&st->rgb, SOFT_C_INTERPOLATE, T, C, P, C, T, A);
+        else
+            comb(&st->rgb, SOFT_C_REPLACE, P, C, P, C, P, C);   /* (undefined in GL for other formats: unchanged) */
+        comb(&st->alpha, SOFT_C_REPLACE, P, A, P, A, P, A);
+        return;
+    case GL_BLEND:
+        if (ifc == DGL_IF_ALPHA)
+            comb(&st->rgb, SOFT_C_REPLACE, P, C, P, C, P, C);
+        else
+            comb(&st->rgb, SOFT_C_INTERPOLATE, K, C, P, C, T, C);
+        if (ifc == DGL_IF_INTENSITY)
+            comb(&st->alpha, SOFT_C_INTERPOLATE, K, A, P, A, T, A);
+        else
+            comb(&st->alpha, SOFT_C_MODULATE, T, A, P, A, P, A);
+        return;
+    case GL_ADD:
+        if (ifc == DGL_IF_ALPHA)
+            comb(&st->rgb, SOFT_C_REPLACE, P, C, P, C, P, C);
+        else
+            comb(&st->rgb, SOFT_C_ADD, P, C, T, C, P, C);
+        if (ifc == DGL_IF_INTENSITY)
+            comb(&st->alpha, SOFT_C_ADD, P, A, T, A, P, A);
+        else
+            comb(&st->alpha, SOFT_C_MODULATE, T, A, P, A, P, A);
+        return;
+    default:                                    /* GL_MODULATE */
+        comb(&st->rgb, SOFT_C_MODULATE, T, C, P, C, P, C);
+        comb(&st->alpha, SOFT_C_MODULATE, T, A, P, A, P, A);
+        return;
+    }
+}
+
+static void stage_for(soft_stage *st, int unit, int on)
+{
+    dgl_texture *t = on ? dgl_unit_texture(unit) : NULL;
+    const soft_texture *tx = t ? prepare(t) : NULL;
+    memset(st, 0, sizeof *st);
+    if (!tx)
+        return;
+    st->tex = tx;
+    st->coord = unit;
+    env_stage(st, dgl_tex_env(unit), t->level[0].ifc);
+}
+
 /* The buffers drawing goes into now. */
 static void target_now(void)
 {
@@ -57,6 +254,8 @@ static void validate(void)
     st.depth_test = dgl_gl.depth_test && tg.depth;
     st.depth_func = (int)(dgl_gl.depth_func - GL_NEVER);
     st.depth_write = dgl_gl.depth_mask;
+    stage_for(&st.stage[0], 0, dgl_gl.texture_2d);
+    stage_for(&st.stage[1], 1, dgl_gl.texture_2d1);
     soft_state_set(&st);
 }
 
@@ -181,16 +380,22 @@ static void caps(dgl_caps *c)
 
 static void synced(void) { }
 
-/* Textures (B2.3): no copy of the software back end's own yet. */
+/* A rectangle of a level changed: GL's own levels are what the core reads,
+ * so written already; a colour-index level's expansion is made again. */
 static int tex_sub(dgl_texture *t, int level, int x, int y, int w, int h)
 {
-    (void)t, (void)level, (void)x, (void)y, (void)w, (void)h;
-    return 0;
+    (void)level, (void)x, (void)y, (void)w, (void)h;
+    return !t->level[0].idx;
 }
 
 static void tex_free(dgl_texture *t)
 {
-    free(t->be);
+    stex *x = (stex *)t->be;
+    int l;
+    if (x)
+        for (l = 0; l < SOFT_MAX_LEVELS; l++)
+            free(x->expanded[l]);
+    free(x);
     t->be = NULL;
 }
 

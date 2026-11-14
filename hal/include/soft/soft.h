@@ -40,11 +40,48 @@ typedef struct {
 /* Comparison functions, as GL numbers them less 0x200 (GL_NEVER .. GL_ALWAYS). */
 enum { SOFT_NEVER, SOFT_LESS, SOFT_EQUAL, SOFT_LEQUAL, SOFT_GREATER, SOFT_NOTEQUAL, SOFT_GEQUAL, SOFT_ALWAYS };
 
+/* Textures: levels of RGBA8 texels (rows of w; level 0 the largest, each
+ * next half the size), sampled as OpenGL samples. */
+#define SOFT_MAX_LEVELS 12
+enum { SOFT_REPEAT, SOFT_CLAMP, SOFT_CLAMP_TO_EDGE };
+enum { SOFT_NEAREST, SOFT_LINEAR, SOFT_NEAREST_MIPMAP_NEAREST, SOFT_LINEAR_MIPMAP_NEAREST,
+       SOFT_NEAREST_MIPMAP_LINEAR, SOFT_LINEAR_MIPMAP_LINEAR };
+typedef struct {
+    const uint8_t *rgba;
+    int w, h;
+} soft_level;
+typedef struct {
+    soft_level level[SOFT_MAX_LEVELS];
+    int levels;                     /* 1 without mipmaps */
+    int wrap_s, wrap_t;
+    int min_filter, mag_filter;
+    float border[4];
+} soft_texture;
+
+/* A texture stage's colour and alpha: GL_ARB_texture_env_combine's
+ * functions of up to three arguments, each a source through an operand,
+ * times a scale (1, 2 or 4), clamped. GL's other environments are said in
+ * these terms by GL's back end. */
+enum { SOFT_C_REPLACE, SOFT_C_MODULATE, SOFT_C_ADD, SOFT_C_ADD_SIGNED, SOFT_C_INTERPOLATE, SOFT_C_SUBTRACT };
+enum { SOFT_S_TEXTURE, SOFT_S_CONSTANT, SOFT_S_PRIMARY, SOFT_S_PREVIOUS };
+enum { SOFT_O_COLOR, SOFT_O_ONE_MINUS_COLOR, SOFT_O_ALPHA, SOFT_O_ONE_MINUS_ALPHA };
+typedef struct {
+    int func, src[3], op[3];
+    float scale;
+} soft_combine;
+typedef struct {
+    const soft_texture *tex;        /* NULL: the stage is off */
+    int coord;                      /* which of the vertex's coordinates (0 or 1) */
+    soft_combine rgb, alpha;
+    float constant[4];
+} soft_stage;
+
 typedef struct {
     int      scissor[4];            /* x0, y0, x1, y1 (exclusive), within the target */
     unsigned color_mask;            /* bit 0 red, 1 green, 2 blue, 3 alpha */
     int      smooth;                /* 0: flat (the first vertex's colour) */
     int      depth_test, depth_func, depth_write;
+    soft_stage stage[2];
 } soft_state;
 
 void soft_target_set(const soft_target *t);
@@ -58,6 +95,15 @@ void soft_state_set(const soft_state *s);
 void soft_clear(unsigned what, const float rgba[4], double depth, unsigned stencil);
 
 void soft_triangle(const soft_vertex *a, const soft_vertex *b, const soft_vertex *c);
+
+/* texture.c: a texture sampled at (s, t) as OpenGL samples, its level of
+ * detail from the coordinates' derivatives on the screen; RGBA 0..1. And a
+ * stage's combine of its texel, the constant, the primary colour and the
+ * previous stage's (RGBA 0..1 each). */
+void soft_sample(const soft_texture *tx, double s, double t, double dsdx, double dsdy, double dtdx, double dtdy,
+                 float out[4]);
+void soft_combine_apply(const soft_stage *st, const float tex[4], const float prim[4], const float prev[4],
+                        float out[4]);
 
 /* Counters. */
 typedef struct {
