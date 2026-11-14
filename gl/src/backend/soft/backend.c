@@ -373,13 +373,19 @@ static void sb_triangle(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *c,
         for (i = 0; i < 3; i++) {
             in[i].r = prov->r; in[i].g = prov->g; in[i].b = prov->b; in[i].a = prov->a;
         }
-    n = dgl_clip_polygon(in, 3, out, GUARD, GUARD);
-    if (n < 3) {
-        dgl_prims.clipped++;
-        return;
+    if (!(dgl_outcode(&in[0], GUARD, GUARD) | dgl_outcode(&in[1], GUARD, GUARD) | dgl_outcode(&in[2], GUARD, GUARD))) {
+        n = 3;                                  /* (wholly inside the guard band: nothing to clip) */
+        for (i = 0; i < 3; i++)
+            project(&in[i], &v[i]);
+    } else {
+        n = dgl_clip_polygon(in, 3, out, GUARD, GUARD);
+        if (n < 3) {
+            dgl_prims.clipped++;
+            return;
+        }
+        for (i = 0; i < n; i++)
+            project(&out[i], &v[i]);
     }
-    for (i = 0; i < n; i++)
-        project(&out[i], &v[i]);
     /* Cull on the first three window vertices' winding; y runs down on the
      * screen, so GL's counter-clockwise is area < 0. */
     area2 = (double)(v[1].x - v[0].x) * (v[2].y - v[0].y) - (double)(v[2].x - v[0].x) * (v[1].y - v[0].y);

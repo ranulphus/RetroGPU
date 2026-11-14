@@ -1104,9 +1104,16 @@ static void edge_at(edge *e, int64_t Xa, int64_t Ya, int64_t Xb, int64_t Yb, int
 {
     int64_t dy = Yb - Ya, N = (Xa - 8) * dy + (yc - Ya) * (Xb - Xa), S = 16 * (Xb - Xa);
     e->D = 16 * dy;
-    e->q = ceil_div(N, e->D);
+    if (N > -0x3FFFFFFF && N < 0x3FFFFFFF && S > -0x3FFFFFFF && S < 0x3FFFFFFF && e->D < 0x3FFFFFFF) {
+        int32_t n = (int32_t)N, s = (int32_t)S, d = (int32_t)e->D, q, qs;   /* (32-bit division: no library call) */
+        q = n >= 0 ? (n + d - 1) / d : -((-n) / d);
+        qs = s >= 0 ? s / d : -((-s + d - 1) / d);
+        e->q = q, e->qs = qs;
+    } else {
+        e->q = ceil_div(N, e->D);
+        e->qs = floor_div(S, e->D);
+    }
     e->rem = e->q * e->D - N;                   /* (0 <= rem < D) */
-    e->qs = floor_div(S, e->D);
     e->rs = S - e->qs * e->D;                   /* (0 <= rs < D) */
 }
 
@@ -1187,19 +1194,12 @@ static fixplane fixp(double a0, double pdx, double pdy, double fx, double fy, do
     return f;
 }
 
-/* A primitive's integer planes (attrs), under S (the caller's state). */
-static void fix_planes(attrs *A)
+/* The stages whose coordinates are linear on the screen (q constant,
+ * GL_REPEAT): their s and t as integer planes (attrs). fx, fy: the reference
+ * pixel's centre from the origin. */
+static void fix_tex(attrs *A, double fx, double fy)
 {
-    double fx, fy;
     int k;
-    A->xref = A->ox > -1e9 && A->ox < 1e9 ? mga_ifloor(A->ox) : 0;
-    A->yref = A->oy > -1e9 && A->oy < 1e9 ? mga_ifloor(A->oy) : 0;
-    fx = A->xref + 0.5 - A->ox, fy = A->yref + 0.5 - A->oy;
-    A->fr = fixp(A->r.a0, A->r.dx, A->r.dy, fx, fy, 65536.0);
-    A->fg = fixp(A->g.a0, A->g.dx, A->g.dy, fx, fy, 65536.0);
-    A->fb = fixp(A->b.a0, A->b.dx, A->b.dy, fx, fy, 65536.0);
-    A->fa = fixp(A->a.a0, A->a.dx, A->a.dy, fx, fy, 65536.0);
-    A->fz = fixp(A->z.a0, A->z.dx, A->z.dy, fx, fy, 16384.0);
     for (k = 0; k < 2; k++) {
         const soft_texture *tx = S.stage[k].tex;
         A->affine[k] = tx && A->q.dx == 0 && A->q.dy == 0 && A->q.a0 > 0 && tx->wrap_s == SOFT_REPEAT &&
@@ -1209,6 +1209,84 @@ static void fix_planes(attrs *A)
             A->fu[k] = fixp(A->s[k].a0, A->s[k].dx, A->s[k].dy, fx, fy, su);
             A->fv[k] = fixp(A->t[k].a0, A->t[k].dx, A->t[k].dy, fx, fy, sv);
         }
+    }
+}
+
+/* A primitive's integer planes (attrs) from its double ones, under S (the
+ * caller's state): lines and points. */
+static void fix_planes(attrs *A)
+{
+    double fx, fy;
+    A->xref = A->ox > -1e9 && A->ox < 1e9 ? mga_ifloor(A->ox) : 0;
+    A->yref = A->oy > -1e9 && A->oy < 1e9 ? mga_ifloor(A->oy) : 0;
+    fx = A->xref + 0.5 - A->ox, fy = A->yref + 0.5 - A->oy;
+    A->fr = fixp(A->r.a0, A->r.dx, A->r.dy, fx, fy, 65536.0);
+    A->fg = fixp(A->g.a0, A->g.dx, A->g.dy, fx, fy, 65536.0);
+    A->fb = fixp(A->b.a0, A->b.dx, A->b.dy, fx, fy, 65536.0);
+    A->fa = fixp(A->a.a0, A->a.dx, A->a.dy, fx, fy, 65536.0);
+    A->fz = fixp(A->z.a0, A->z.dx, A->z.dy, fx, fy, 16384.0);
+    fix_tex(A, fx, fy);
+}
+
+static int32_t clamp28r(double d)       /* rounded in the current mode (nearest), held to +-2^28 */
+{
+    return d < -268435456.0 ? -268435456 : d > 268435456.0 ? 268435456 : mga_irint(d);
+}
+
+/* A triangle's planes for the integer spans, straight from its vertices (the
+ * origin v[0], snapped): one reciprocal of the area and gradients by
+ * multiplying, each integer plane rounded once; colour as smooth or flat
+ * says, depth only where it is tested; the texture coordinates' double planes
+ * (perspective needs them) only for the stages in use. Nothing else of attrs
+ * is set: the integer spans read no more. */
+static void fast_planes(attrs *A, const soft_vertex *const *v, const double *px, const double *py, double det,
+                        double zmax)
+{
+    double idet = 1.0 / det, x1 = px[1] - px[0], y1 = py[1] - py[0], x2 = px[2] - px[0], y2 = py[2] - py[0], fx, fy;
+    int k;
+    A->ox = px[0], A->oy = py[0];
+    A->xref = mga_ifloor(px[0]), A->yref = mga_ifloor(py[0]);
+    fx = A->xref + 0.5 - px[0], fy = A->yref + 0.5 - py[0];
+#define GRAD(F, a0, a1, a2, sc) \
+    do { \
+        double d1_ = ((a1) - (a0)) * (sc), d2_ = ((a2) - (a0)) * (sc); \
+        double gx_ = (d1_ * y2 - d2_ * y1) * idet, gy_ = (d2_ * x1 - d1_ * x2) * idet; \
+        double v_ = (a0) * (sc) + gx_ * fx + gy_ * fy; \
+        (F).v = v_ > -4e18 && v_ < 4e18 ? mga_irint64(v_) : 0; \
+        (F).dx = clamp28r(gx_), (F).dy = clamp28r(gy_); \
+    } while (0)
+#define FLAT(F, a0, sc) ((F).v = mga_irint64((a0) * (sc)), (F).dx = (F).dy = 0)
+    if (S.smooth) {
+        GRAD(A->fr, v[0]->r, v[1]->r, v[2]->r, 255.0 * 65536.0);
+        GRAD(A->fg, v[0]->g, v[1]->g, v[2]->g, 255.0 * 65536.0);
+        GRAD(A->fb, v[0]->b, v[1]->b, v[2]->b, 255.0 * 65536.0);
+        GRAD(A->fa, v[0]->a, v[1]->a, v[2]->a, 255.0 * 65536.0);
+    } else {
+        FLAT(A->fr, v[0]->r, 255.0 * 65536.0), FLAT(A->fg, v[0]->g, 255.0 * 65536.0);
+        FLAT(A->fb, v[0]->b, 255.0 * 65536.0), FLAT(A->fa, v[0]->a, 255.0 * 65536.0);
+    }
+    if (T.depth && S.depth_test)
+        GRAD(A->fz, v[0]->z, v[1]->z, v[2]->z, zmax * 16384.0);
+    else
+        A->fz.v = 0, A->fz.dx = A->fz.dy = 0;
+#undef GRAD
+#undef FLAT
+    A->affine[0] = A->affine[1] = 0;
+    if (S.stage[0].tex || S.stage[1].tex) {
+#define PLANE(P_, V0_, V1_, V2_) \
+    do { \
+        double d1_ = (V1_) - (V0_), d2_ = (V2_) - (V0_); \
+        (P_).a0 = (V0_), (P_).dx = (d1_ * y2 - d2_ * y1) * idet, (P_).dy = (d2_ * x1 - d1_ * x2) * idet; \
+    } while (0)
+        PLANE(A->q, v[0]->oow, v[1]->oow, v[2]->oow);
+        for (k = 0; k < 2; k++)
+            if (S.stage[k].tex) {
+                int c = S.stage[k].coord;
+                PLANE(A->s[k], v[0]->tex[c][0] * v[0]->oow, v[1]->tex[c][0] * v[1]->oow, v[2]->tex[c][0] * v[2]->oow);
+                PLANE(A->t[k], v[0]->tex[c][1] * v[0]->oow, v[1]->tex[c][1] * v[1]->oow, v[2]->tex[c][1] * v[2]->oow);
+            }
+#undef PLANE
+        fix_tex(A, fx, fy);
     }
 }
 
@@ -1260,9 +1338,17 @@ static void triangle_now(const soft_vertex *a, const soft_vertex *b, const soft_
     if (area2 == 0 || Y[2] == Y[0])
         return;
     soft_count.tris++;
+    det = (px[1] - px[0]) * (py[2] - py[0]) - (px[2] - px[0]) * (py[1] - py[0]);
+    if (fast_fn) {                              /* (the integer spans: their planes alone) */
+        fast_planes(&A, v, px, py, det, zmax);
+        {
+            const attrs *kept = NULL;
+            emit_cover(X, Y, &A, &kept);
+        }
+        return;
+    }
     memset(&A, 0, sizeof A);
     A.ox = px[0], A.oy = py[0];
-    det = (px[1] - px[0]) * (py[2] - py[0]) - (px[2] - px[0]) * (py[1] - py[0]);
     if (S.smooth) {
         A.r = plane_of(v[0]->r * 255.0, v[1]->r * 255.0, v[2]->r * 255.0, px, py, det);
         A.g = plane_of(v[0]->g * 255.0, v[1]->g * 255.0, v[2]->g * 255.0, px, py, det);
@@ -1288,7 +1374,6 @@ static void triangle_now(const soft_vertex *a, const soft_vertex *b, const soft_
             f0 = fog_factor(f0), f1 = fog_factor(f1), f2 = fog_factor(f2);
         A.f = plane_of(f0 * v[0]->oow, f1 * v[1]->oow, f2 * v[2]->oow, px, py, det);
     }
-    fix_planes(&A);
     {
         const attrs *kept = NULL;
         emit_cover(X, Y, &A, &kept);
