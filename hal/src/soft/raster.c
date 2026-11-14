@@ -410,9 +410,9 @@ static void span(int j, int xl, int xr, const attrs *A)
  * position alone; texture coordinates divided
  * exactly at every 16th column (x a multiple of 16) and stepped in 16.16
  * level-0 texels between, the level of detail per 16-pixel piece (from the
- * derivatives at its first column); colour arithmetic in 8 bits. Stencil,
- * fog, 32-bit depth and GL_CLAMP's border take the reference span, and so
- * does everything with soft_exact(1). */
+ * derivatives at its first column); colour arithmetic in 8 bits. Stencil and
+ * 32-bit depth take the reference span, and so does everything with
+ * soft_exact(1). */
 
 static int exact_mode;                  /* soft_exact: 0 every fast path, 1 the reference span, 2 the generic
                                            integer spans only (the specialised runs checked against them) */
@@ -1128,8 +1128,7 @@ static void select_span(void)
         if (S.stage[k].tex) {
             const soft_texture *tx = S.stage[k].tex;
             int c, w = tx->level[0].w, h = tx->level[0].h;
-            if (tx->wrap_s == SOFT_CLAMP || tx->wrap_t == SOFT_CLAMP || w > 1024 || h > 1024 || (w & (w - 1)) ||
-                (h & (h - 1)) || tx->levels < 1)
+            if (w > 1024 || h > 1024 || (w & (w - 1)) || (h & (h - 1)) || tx->levels < 1)
                 return;
             for (c = 0; c < 4; c++)
                 const8[k][c] = to8(S.stage[k].constant[c] * 255.0);

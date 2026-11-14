@@ -10,13 +10,15 @@
  * level 0's (coordinates in level-0 texels shift down to the level's). */
 typedef struct {
     int n, lv[2], f8, linear, sh_s[2], sh_t[2];
+    int border8[4];                     /* GL_CLAMP's border colour, 0..255 */
 } soft_pick;
 
 void soft_pick_lod(const soft_texture *tx, double dsdx, double dsdy, double dtdx, double dtdy, soft_pick *p);
 
 /* The texel at (U, V), level-0 texels in 16.16 (texel centres at halves),
- * as p picked; RGBA 0..255. GL_REPEAT (power-of-two sizes) and
- * GL_CLAMP_TO_EDGE only: GL_CLAMP's border is the reference span's. */
+ * as p picked; RGBA 0..255. GL_REPEAT (power-of-two sizes), GL_CLAMP_TO_EDGE,
+ * and GL_CLAMP: the coordinate held to the level's edges (s to [0, 1]), the
+ * border colour where bilinear filtering reaches past them. */
 void soft_fetch8(const soft_texture *tx, const soft_pick *p, int32_t U, int32_t V, int out[4]);
 
 /* a and b (0..255) mixed by f (0..256 for b), rounded: the filters' step. */

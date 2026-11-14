@@ -202,43 +202,66 @@ void soft_pick_lod(const soft_texture *tx, double dsdx, double dsdy, double dtdx
         p->sh_s[k] = ilog2(tx->level[0].w) - ilog2(tx->level[p->lv[k]].w);
         p->sh_t[k] = ilog2(tx->level[0].h) - ilog2(tx->level[p->lv[k]].h);
     }
+    if (tx->wrap_s == SOFT_CLAMP || tx->wrap_t == SOFT_CLAMP)
+        for (k = 0; k < 4; k++) {
+            double b = tx->border[k] * 255.0;
+            p->border8[k] = b <= 0 ? 0 : b >= 255 ? 255 : (int)(b + 0.5);
+        }
 }
 
-static int wrap8(int i, int n, int mode)
+/* A texel index by the wrap mode: GL_REPEAT's mask, GL_CLAMP_TO_EDGE's
+ * clamp; GL_CLAMP's -1 past either edge (the border) for LINEAR, the edge
+ * texel for NEAREST. */
+static int wrap8(int i, int n, int mode, int linear)
 {
-    return mode == SOFT_REPEAT ? (i & (n - 1)) : i < 0 ? 0 : i >= n ? n - 1 : i;
+    if (mode == SOFT_REPEAT)
+        return i & (n - 1);
+    if (mode == SOFT_CLAMP && linear)
+        return i < 0 || i >= n ? -1 : i;
+    return i < 0 ? 0 : i >= n ? n - 1 : i;
 }
 
-static void texel8(const soft_level *L, int i, int j, int out[4])
+static void texel8(const soft_level *L, int i, int j, const int *border, int out[4])
 {
-    const uint8_t *p = L->rgba + ((size_t)j * (size_t)L->w + (size_t)i) * 4;
+    const uint8_t *p;
+    if (i < 0 || j < 0) {                       /* (GL_CLAMP's border) */
+        out[0] = border[0], out[1] = border[1], out[2] = border[2], out[3] = border[3];
+        return;
+    }
+    p = L->rgba + ((size_t)j * (size_t)L->w + (size_t)i) * 4;
     out[0] = p[0], out[1] = p[1], out[2] = p[2], out[3] = p[3];
 }
 
-static void level8(const soft_texture *tx, int lv, int sh_s, int sh_t, int linear, int32_t U, int32_t V, int out[4])
+static void level8(const soft_texture *tx, const soft_pick *p, int lv, int sh_s, int sh_t, int linear, int32_t U,
+                   int32_t V, int out[4])
 {
     const soft_level *L = &tx->level[lv];
     int32_t u = U >> sh_s, v = V >> sh_t;
     int i0, j0, fu, fv, k, t00[4], t10[4], t01[4], t11[4], ia, ib, ja, jb;
+    if (tx->wrap_s == SOFT_CLAMP)               /* (s held to [0, 1]: the level's edges) */
+        u = u < 0 ? 0 : u > (L->w << 16) ? (L->w << 16) : u;
+    if (tx->wrap_t == SOFT_CLAMP)
+        v = v < 0 ? 0 : v > (L->h << 16) ? (L->h << 16) : v;
     if (!linear) {
-        texel8(L, wrap8(u >> 16, L->w, tx->wrap_s), wrap8(v >> 16, L->h, tx->wrap_t), out);
+        texel8(L, wrap8(u >> 16, L->w, tx->wrap_s, 0), wrap8(v >> 16, L->h, tx->wrap_t, 0), p->border8, out);
         return;
     }
     u -= 0x8000, v -= 0x8000;                   /* (the four texels about the point: centres at halves) */
     i0 = u >> 16, j0 = v >> 16, fu = (u >> 8) & 255, fv = (v >> 8) & 255;
-    ia = wrap8(i0, L->w, tx->wrap_s), ib = wrap8(i0 + 1, L->w, tx->wrap_s);
-    ja = wrap8(j0, L->h, tx->wrap_t), jb = wrap8(j0 + 1, L->h, tx->wrap_t);
-    texel8(L, ia, ja, t00), texel8(L, ib, ja, t10), texel8(L, ia, jb, t01), texel8(L, ib, jb, t11);
+    ia = wrap8(i0, L->w, tx->wrap_s, 1), ib = wrap8(i0 + 1, L->w, tx->wrap_s, 1);
+    ja = wrap8(j0, L->h, tx->wrap_t, 1), jb = wrap8(j0 + 1, L->h, tx->wrap_t, 1);
+    texel8(L, ia, ja, p->border8, t00), texel8(L, ib, ja, p->border8, t10);
+    texel8(L, ia, jb, p->border8, t01), texel8(L, ib, jb, p->border8, t11);
     for (k = 0; k < 4; k++)
         out[k] = soft_lerp8(soft_lerp8(t00[k], t10[k], fu), soft_lerp8(t01[k], t11[k], fu), fv);
 }
 
 void soft_fetch8(const soft_texture *tx, const soft_pick *p, int32_t U, int32_t V, int out[4])
 {
-    level8(tx, p->lv[0], p->sh_s[0], p->sh_t[0], p->linear, U, V, out);
+    level8(tx, p, p->lv[0], p->sh_s[0], p->sh_t[0], p->linear, U, V, out);
     if (p->n == 2) {
         int b[4], k;
-        level8(tx, p->lv[1], p->sh_s[1], p->sh_t[1], p->linear, U, V, b);
+        level8(tx, p, p->lv[1], p->sh_s[1], p->sh_t[1], p->linear, U, V, b);
         for (k = 0; k < 4; k++)
             out[k] = soft_lerp8(out[k], b[k], p->f8);
     }
