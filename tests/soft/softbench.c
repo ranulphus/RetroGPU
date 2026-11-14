@@ -7,12 +7,23 @@
  * Pentium II runs; the host's numbers say which routines matter and by how
  * much one path beats another, not what a PII does (B2.9 measures that).
  *
- * softbench [SECONDS-A-CASE]   (default 0.5) */
+ * softbench [SECONDS-A-CASE]   (default 0.5)
+ *
+ * SOFTBNCH.EXE (make build/djgpp/SOFTBNCH.EXE, B2.9) is the same for DOS:
+ * timed by the HAL's sys_time_us, its lines on COM1 too (the hx shim), for a
+ * bench PC (tools/bench/run.py --file SOFTBNCH.EXE --cmd "SOFTBNCH.EXE 1"). */
 #include "soft/soft.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
+#ifdef SOFTBENCH_HX
+#  include "hx.h"
+#  include "mga/sys.h"
+#  define say hx_log
+#else
+#  include <time.h>
+#  define say printf
+#endif
 
 #define W 320
 #define H 240
@@ -27,9 +38,18 @@ static int levels0;
 
 static double now(void)
 {
+#ifdef SOFTBENCH_HX
+    static uint32_t last, hi;                   /* (microseconds, its 32-bit wrap carried) */
+    uint32_t t = sys_time_us();
+    if (t < last)
+        hi++;
+    last = t;
+    return hi * 4294.967296 + t * 1e-6;
+#else
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
     return t.tv_sec + t.tv_nsec * 1e-9;
+#endif
 }
 
 static void make_texture(int k)
@@ -153,17 +173,24 @@ int main(int argc, char **argv)
     double secs = argc > 1 ? atof(argv[1]) : 0.5;
     soft_target tg;
     int c;
+#ifdef SOFTBENCH_HX
+    hx_init(argc, argv, "SOFTBNCH");
+    secs = argc > 1 && atof(argv[1]) > 0 ? atof(argv[1]) : 1.0;
+#endif
     make_texture(0), make_texture(1), make_mesh();
     memset(&tg, 0, sizeof tg);
     tg.color = (uint8_t *)color, tg.color_pitch = W * 2, tg.format = SOFT_RGB565, tg.width = W, tg.height = H;
     tg.depth = (uint8_t *)depth, tg.depth_pitch = W * 2, tg.depth_bits = 16;
     soft_target_set(&tg);
     soft_tiles(64);
-    printf("softbench: %dx%d RGB565, %d triangles a frame, tiles of 64\n", W, H, 2 * GX * GY);
-    printf("  %-38s %12s %12s %12s %8s\n", "state", "reference", "integer C", "MMX", "MMX/ref");
+    say("softbench: %dx%d RGB565, %d triangles a frame, tiles of 64\n", W, H, 2 * GX * GY);
+    say("  %-38s %12s %12s %12s %8s\n", "state", "reference", "integer C", "MMX", "MMX/ref");
     for (c = 0; c < C_COUNT; c++) {
         double ref = run(c, 1, 0, secs), fast = run(c, 0, 0, secs), mmx = run(c, 0, 1, secs);
-        printf("  %-38s %8.1f Mp/s %8.1f Mp/s %8.1f Mp/s %7.2fx\n", names[c], ref, fast, mmx, mmx / ref);
+        say("  %-38s %8.2f Mp/s %8.2f Mp/s %8.2f Mp/s %7.2fx\n", names[c], ref, fast, mmx, mmx / ref);
     }
+#ifdef SOFTBENCH_HX
+    hx_done(0);
+#endif
     return 0;
 }

@@ -65,6 +65,9 @@ build/djgpp/%.EXE: build/djgpp/libmgahal.a tests/shim/hx.c tests/shim/hx.h
 	$(Q)echo "  DJLD    $@"
 	$(Q)$(DJCC) $(DJ_CFLAGS) $(DJ_SHIM) -o $@ $(DJ_SRC_$*) tests/shim/hx.c build/djgpp/libmgahal.a -lm
 DJ_SRC_HELLO := tests/shim/hello.c
+DJ_SRC_SOFTBNCH := tests/soft/softbench.c hal/src/soft/raster.c hal/src/soft/texture.c
+build/djgpp/SOFTBNCH.EXE: tests/soft/softbench.c hal/src/soft/raster.c hal/src/soft/texture.c hal/src/soft/internal.h
+build/djgpp/SOFTBNCH.EXE: DJ_CFLAGS += -DSOFTBENCH_HX -mtune=pentium2 -Itests/shim
 DJ_SRC_PROBE := tests/hal/probe.c
 DJ_SRC_HOOKS := tests/hal/hooks.c
 DJ_SRC_SCALE := tests/hal/scale.c
