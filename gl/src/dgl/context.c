@@ -104,6 +104,17 @@ int dgl_present_front(void)
 
 static void after_init(const DGLConfig *c);
 
+/* GL's drawing back end for a device: the Matrox one on the Matrox device,
+ * the software one on buffers in memory (docs/b2.md). */
+static const dgl_backend *backend_for(const rg_device *d)
+{
+    if (d == dgl_mga_backend.dev)
+        return &dgl_mga_backend;
+    if (d == dgl_soft_backend.dev)
+        return &dgl_soft_backend;
+    return NULL;
+}
+
 /* The device's open, from the program's configuration (the defaults filled
  * in) and the test and user overrides. */
 static void open_args(rg_open *o, const DGLConfig *c)
@@ -145,7 +156,7 @@ static int opened(const DGLConfig *c, const rg_opened *op)
     retrace0_us = rs.retrace_us;
     after_init(c);
     dgl_textures_reset(op->mem_start, op->mem_end);
-    dgl_emit_install();
+    dgl_be->install();
     if (op->window) {
         DGL_GPU_QUIET();
         DGL_INFO("DGL-INIT %dx%d pitch=%d double=%d depth=%d heap=%lu..%lu window (GLOS)", c->width, c->height,
@@ -198,6 +209,7 @@ int dglInit(const DGLConfig *cfg)
         }
         if (r == 0) {
             dgl_dev = wd;
+            dgl_be = backend_for(wd);
             dgl_crash_install();
             memset(&stats, 0, sizeof stats);
             return opened(&c, &op);
@@ -208,10 +220,11 @@ int dglInit(const DGLConfig *cfg)
         dgl_set_error("%s", rg_error());
         return -1;
     }
-    if (dgl_dev != dgl_be->dev) {               /* (GL draws on the Matrox device only until V4 and B2) */
+    if (!backend_for(dgl_dev)) {                /* (the ViRGE/DX's waits for V4) */
         dgl_set_error("DOS-GL has no drawing back end for the %s device yet", dgl_dev->name);
         return -1;
     }
+    dgl_be = backend_for(dgl_dev);
     memset(&dgl_ctx, 0, sizeof dgl_ctx);
     memset(&stats, 0, sizeof stats);
     open_args(&o, &c);

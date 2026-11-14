@@ -7,7 +7,7 @@
 #include <string.h>
 
 
-static const rg_device *const devices[] = { &rg_mga_device, &rg_virge_device };   /* (DGL_DEVICE unset: in this order) */
+static const rg_device *const devices[] = { &rg_mga_device, &rg_virge_device, &rg_mem_device };   /* (DGL_DEVICE unset: in this order) */
 #define NDEV ((int)(sizeof devices / sizeof devices[0]))
 
 
@@ -57,6 +57,8 @@ const rg_device *rg_choose_from(const rg_device *const *list, int n, const char 
     {
         char why[sizeof error] = "";
         for (i = 0; i < n; i++) {
+            if (list[i]->flags & RG_DEV_BY_NAME)
+                continue;
             error[0] = 0;
             if (list[i]->probe() == 0)
                 return list[i];

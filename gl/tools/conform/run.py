@@ -9,6 +9,11 @@ Runs inside the dev container (make conform CARD=g450 [TESTS="t01 t02"]
 Results: out/conform/<card>/<test>/ (serial.log, frames, diffs, result.json)
 and out/conform/summary-<card>.json. Exit status 0 when every test passes.
 
+The software renderer (make soft-conform; docs/b2.md): --soft runs each
+test's 32-bit Linux build (make rig, ct_rig.c) on the memory device
+(DGL_DEVICE=mem) natively, no emulator, and compares its frames the same way.
+Results: out/conform/soft/<test>/ and out/conform/summary-soft.json.
+
 On a bench PC (make conform-bench PC=bench-g400): --refs makes the Mesa
 references in the dev container, then --bench PC runs each test on the PC
 through RetroGPU's tools/bench/run.py (this tree's parent) on the host, one job per test, and compares as above. Results:
@@ -51,6 +56,29 @@ def run_dos(test, card, out):
     return json.load(open(os.path.join(out, "result.json")))
 
 
+def run_soft(test, out):
+    """The test's Linux build drawing in memory (the software renderer); its frames as PNGs in `out`."""
+    exe = os.path.join(ROOT, "build", "rig", "conform", test)
+    shutil.rmtree(out, ignore_errors=True)
+    os.makedirs(out)
+    env = dict(os.environ, CT_OUT=out, DGL_DEVICE="mem")
+    for line in MANIFEST.get(test, {}).get("pre", []):      # (SET DGL_... lines: the same as environment here)
+        if line.upper().startswith("SET ") and "=" in line:
+            k, v = line[4:].split("=", 1)
+            env[k.strip()] = v.strip()
+    try:
+        p = subprocess.run([exe], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=120)
+        log, rc = p.stdout, p.returncode
+    except subprocess.TimeoutExpired:
+        log, rc = "timeout\n", -1
+    open(os.path.join(out, "serial.log"), "w").write(log)
+    for f in glob.glob(os.path.join(out, "*.ppm")):
+        w, h, rgb = png.read_ppm(f)
+        png.write_png(f[:-4] + ".png", w, h, rgb)
+    status = "PASS" if rc == 0 and "HX-TEST" in log and " FAIL " not in log else "FAIL"
+    return {"status": status}
+
+
 def run_bench(test, pc, out):
     """The test as one job on bench PC `pc`; its directory's frames and logs copied to `out`."""
     exe = os.path.join(ROOT, "build", "exe", "conform", test.upper() + ".EXE")
@@ -83,7 +111,10 @@ def run_ref(test, out):
 def check(test, card, pc=None):
     out = os.path.join(ROOT, "out", "conform", pc or card, test)
     ref = os.path.join(ROOT, "out", "conform", "ref", test)
-    if pc:
+    if card == "soft" and not pc:
+        run_ref(test, ref)
+        res = run_soft(test, out)
+    elif pc:
         if not glob.glob(os.path.join(ref, "*.png")):
             sys.exit("conform: no references in %s (make them first: --refs, in the dev container)" % ref)
         res = run_bench(test, pc, out)
@@ -117,7 +148,10 @@ def main():
     ap.add_argument("--pre", action="append", default=[], help="RUN.BAT line before every test (SET DGL_...)")
     ap.add_argument("--bench", metavar="PC", help="run on this bench PC (on the host; references from --refs)")
     ap.add_argument("--refs", action="store_true", help="only make the Mesa references (in the dev container)")
+    ap.add_argument("--soft", action="store_true", help="the software renderer natively (the Linux builds, in memory)")
     a = ap.parse_args()
+    if a.soft:
+        a.card = "soft"
     PRE.extend(a.pre)
     tests = a.tests or tests_available()
     if a.refs:

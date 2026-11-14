@@ -11,6 +11,8 @@ static int probe_virge(void) { probes++; return virge_ok ? 0 : -1; }
 
 const rg_device rg_mga_device = { .name = "mga", .probe = probe_mga };
 const rg_device rg_virge_device = { .name = "virge", .probe = probe_virge };
+static int probe_mem(void) { probes++; return 0; }
+const rg_device rg_mem_device = { .name = "mem", .flags = RG_DEV_BY_NAME, .probe = probe_mem };
 static const rg_device soft = { .name = "soft", .probe = probe_soft };
 
 static char logged[256];
@@ -35,7 +37,11 @@ int unit_main(void)
     CHECK(rg_choose("virge") == &rg_virge_device);
     mga_ok = 1;
     CHECK(rg_choose(NULL) == &rg_mga_device);    /* (both: the Matrox one first) */
-    CHECK(rg_window_device() == NULL);           /* (neither fake has window_ok) */
+    CHECK(rg_window_device() == NULL);           /* (no fake has window_ok) */
+    mga_ok = 0, virge_ok = 0;
+    CHECK(rg_choose(NULL) == NULL);              /* (the memory device only by name, though it would probe) */
+    CHECK(rg_choose("mem") == &rg_mem_device);
+    mga_ok = 1;
     virge_ok = 0;
 
     /* A longer list: by name, or the first that probes, in order. */

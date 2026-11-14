@@ -7,9 +7,11 @@
  * backend), which knows its own device's private side.
  *
  * Devices: "mga" (the Matrox HAL behind the table: hal/src/rg/mga.c) and
- * "virge" (the S3 ViRGE/DX: hal/src/rg/virge.c, docs/virge.md V3); later
- * "soft" (B2/B3). rg_choose picks one by DGL_DEVICE, or the first whose probe
- * succeeds, in that order. */
+ * "virge" (the S3 ViRGE/DX: hal/src/rg/virge.c, docs/virge.md V3), and "mem"
+ * (buffers in system memory, shown nowhere: the software renderer's tests,
+ * hal/src/rg/mem.c); later "soft" (B3). rg_choose picks one by DGL_DEVICE,
+ * or the first whose probe succeeds, in that order, of those not chosen
+ * only by name. */
 #ifndef RG_DEVICE_H
 #define RG_DEVICE_H
 #include "mga/types.h"
@@ -29,7 +31,7 @@ typedef struct {
 /* What a program asks for. */
 typedef struct {
     int width, height;
-    int color_bits, depth_bits;
+    int color_bits, depth_bits, stencil_bits;
     int double_buffer, vsync;
     int scale_filter;               /* scaled modes: 0 nearest, 1 bilinear */
     uint32_t heap_kb;               /* the memory left after the buffers capped (DGL_TEXHEAP_KB), 0 none */
@@ -113,8 +115,11 @@ enum { RG_SURF_FRONT, RG_SURF_BACK };   /* the open context's colour buffers: sh
 #define RG_SWAP_TARGET 1
 #define RG_SWAP_ENGINE 2
 
+#define RG_DEV_BY_NAME 1u           /* chosen only when named (DGL_DEVICE): the memory device */
+
 typedef struct rg_device {
-    const char *name;               /* DGL_DEVICE's: "mga" */
+    const char *name;               /* DGL_DEVICE's: "mga", "virge", "mem" */
+    unsigned flags;                 /* RG_DEV_* */
 
     /* Finding and capabilities */
     int  (*probe)(void);                            /* 0: it can run on this PC (once; later calls repeat the answer) */
@@ -192,6 +197,6 @@ void rg_log_line(const char *line);                 /* one line, as it is */
 #define RG_WARN(...) do { if (RG_LOG_LEVEL >= 1) rg_logf(__VA_ARGS__); } while (0)
 #define RG_INFO(...) do { if (RG_LOG_LEVEL >= 2) rg_logf(__VA_ARGS__); } while (0)
 #define RG_DBG(...)  do { if (RG_LOG_LEVEL >= 3) rg_logf(__VA_ARGS__); } while (0)
-extern const rg_device rg_mga_device, rg_virge_device;
+extern const rg_device rg_mga_device, rg_virge_device, rg_mem_device;
 
 #endif

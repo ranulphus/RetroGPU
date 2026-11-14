@@ -46,9 +46,10 @@ HAL_SRCS := $(addprefix $(MGAHAL)/hal/,src/debug/serial.c src/pci.c src/chip.c s
               src/engine.c src/dac.c src/texhw.c src/present.c src/debug/regtrace.c src/setup/trap.c src/warp.c \
               src/blit.c src/cursor.c \
               src/rg/device.c src/rg/glos.c src/rg/mga.c src/rg/mga_glos.c \
-              src/virge/chip.c src/virge/engine2d.c src/virge/cursor.c src/virge/tri.c src/rg/virge.c port/djgpp.c)
+              src/virge/chip.c src/virge/engine2d.c src/virge/cursor.c src/virge/tri.c src/rg/virge.c \
+              src/rg/mem.c src/soft/raster.c port/djgpp.c)
 hal_objs = $(patsubst $(MGAHAL)/%.c,build/$(1)/mgahal/%.o,$(2))
-DGL_SRCS := $(wildcard src/dgl/*.c) $(wildcard src/gl/*.c) $(wildcard src/backend/mga/*.c)
+DGL_SRCS := $(wildcard src/dgl/*.c) $(wildcard src/gl/*.c) $(wildcard src/backend/mga/*.c) $(wildcard src/backend/soft/*.c)
 LIB := build/lib/libGL.a
 
 .PHONY: all lib examples sdl sdl-host sdl-examples loopa-sdl tests-host loopa conform conform-dos conform-host classicube loopa-classicube quake loopa-quake halflife loopa-halflife doom loopa-doom setup-djgpp setup-ow dostools 86box clean help
@@ -147,6 +148,11 @@ build/host/conform/%: $$(wildcard tests/conform/$$*_*.c) tests/conform/ct_host.c
 	  -lOSMesa -lm
 conform-dos: $(foreach t,$(CONFORM),build/exe/conform/$(shell echo $(t) | tr a-z A-Z).EXE)
 conform-host: $(foreach t,$(CONFORM),build/host/conform/$(t))
+# The software renderer's conformance (docs/b2.md): each test's Linux build
+# drawing in memory, compared with OSMesa natively, in the dev container.
+soft-conform:
+	MGA_EXTRA_DIR=$(GLOS) $(MGAHAL)/tools/dev sh -c '$(MAKE) -s rig-build conform-host && \
+	  python3 tools/conform/run.py --soft $(TESTS)'
 conform: conform-dos dostools
 	$(MGAHAL)/tools/dev sh -c '$(MAKE) conform-host && python3 tools/conform/run.py --card $(CARD) \
 	  $(if $(PRE),--pre "$(PRE)") $(TESTS)'

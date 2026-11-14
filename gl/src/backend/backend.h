@@ -51,7 +51,7 @@ typedef struct dgl_backend {
     void (*prof_micro)(void);       /* DGL_STATS=3 in PROF=1 builds: single operations' costs (or NULL) */
 } dgl_backend;
 
-extern const dgl_backend dgl_mga_backend;
-extern const dgl_backend *dgl_be;   /* the one in use (the Matrox one, the only one until B2) */
+extern const dgl_backend dgl_mga_backend, dgl_soft_backend;
+extern const dgl_backend *dgl_be;   /* the one in use (the Matrox one until a context opens on another device) */
 
 #endif
