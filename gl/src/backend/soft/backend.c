@@ -366,18 +366,20 @@ static void sb_triangle(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *c,
     dgl_cvtx in[3], out[9];
     soft_vertex v[9];
     double area2;
-    int n, i;
+    int n, i, flat = dgl_gl.shade_model == GL_FLAT;
     dgl_prims.tris_in++;
-    in[0] = *a; in[1] = *b; in[2] = *c;
-    if (dgl_gl.shade_model == GL_FLAT)
-        for (i = 0; i < 3; i++) {
-            in[i].r = prov->r; in[i].g = prov->g; in[i].b = prov->b; in[i].a = prov->a;
-        }
-    if (!(dgl_outcode(&in[0], GUARD, GUARD) | dgl_outcode(&in[1], GUARD, GUARD) | dgl_outcode(&in[2], GUARD, GUARD))) {
-        n = 3;                                  /* (wholly inside the guard band: nothing to clip) */
-        for (i = 0; i < 3; i++)
-            project(&in[i], &v[i]);
+    if (!(dgl_outcode(a, GUARD, GUARD) | dgl_outcode(b, GUARD, GUARD) | dgl_outcode(c, GUARD, GUARD))) {
+        n = 3;                                  /* (wholly inside the guard band: nothing to clip, nothing copied) */
+        project(a, &v[0]), project(b, &v[1]), project(c, &v[2]);
+        if (flat)
+            for (i = 0; i < 3; i++)
+                v[i].r = prov->r, v[i].g = prov->g, v[i].b = prov->b, v[i].a = prov->a;
     } else {
+        in[0] = *a; in[1] = *b; in[2] = *c;
+        if (flat)
+            for (i = 0; i < 3; i++) {
+                in[i].r = prov->r; in[i].g = prov->g; in[i].b = prov->b; in[i].a = prov->a;
+            }
         n = dgl_clip_polygon(in, 3, out, GUARD, GUARD);
         if (n < 3) {
             dgl_prims.clipped++;

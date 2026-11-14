@@ -1141,27 +1141,32 @@ static int first_row(int64_t y)
  * q = ceil(N / D), N = (Xa - 8) dy + (yc - Ya)(Xb - Xa), D = 16 dy. N grows
  * by S = 16 (Xb - Xa) a row; q and the remainder q D - N step exactly, with
  * no division after the first row. */
-typedef struct { int64_t q, rem, D, qs, rs; } edge;
+typedef struct { int64_t q, rem, D, S, qs, rs; int stepping; } edge;  /* (qs, rs from the first step on) */
 
 static void edge_at(edge *e, int64_t Xa, int64_t Ya, int64_t Xb, int64_t Yb, int64_t yc)
 {
     int64_t dy = Yb - Ya, N = (Xa - 8) * dy + (yc - Ya) * (Xb - Xa), S = 16 * (Xb - Xa);
-    e->D = 16 * dy;
-    if (N > -0x3FFFFFFF && N < 0x3FFFFFFF && S > -0x3FFFFFFF && S < 0x3FFFFFFF && e->D < 0x3FFFFFFF) {
-        int32_t n = (int32_t)N, s = (int32_t)S, d = (int32_t)e->D, q, qs;   /* (32-bit division: no library call) */
-        q = n >= 0 ? (n + d - 1) / d : -((-n) / d);
-        qs = s >= 0 ? s / d : -((-s + d - 1) / d);
-        e->q = q, e->qs = qs;
-    } else {
+    e->D = 16 * dy, e->S = S, e->stepping = 0;
+    if (N > -0x3FFFFFFF && N < 0x3FFFFFFF && e->D < 0x3FFFFFFF) {
+        int32_t n = (int32_t)N, d = (int32_t)e->D;  /* (32-bit division: no library call) */
+        e->q = n >= 0 ? (n + d - 1) / d : -((-n) / d);
+    } else
         e->q = ceil_div(N, e->D);
-        e->qs = floor_div(S, e->D);
-    }
     e->rem = e->q * e->D - N;                   /* (0 <= rem < D) */
-    e->rs = S - e->qs * e->D;                   /* (0 <= rs < D) */
 }
 
 static void edge_next(edge *e)
 {
+    if (!e->stepping) {                         /* (an edge used on one row never needs these) */
+        int64_t S = e->S;
+        if (S > -0x3FFFFFFF && S < 0x3FFFFFFF && e->D < 0x3FFFFFFF) {
+            int32_t s = (int32_t)S, d = (int32_t)e->D;
+            e->qs = s >= 0 ? s / d : -((-s + d - 1) / d);
+        } else
+            e->qs = floor_div(S, e->D);
+        e->rs = S - e->qs * e->D;               /* (0 <= rs < D) */
+        e->stepping = 1;
+    }
     e->q += e->qs;
     e->rem -= e->rs;
     if (e->rem < 0)
@@ -1195,7 +1200,7 @@ static void cover(const int64_t *Xin, const int64_t *Yin, const attrs *A)
     if (j0 >= j1)
         return;
     edge_at(&el, X[0], Y[0], X[2], Y[2], 16 * (int64_t)j0 + 8);
-    for (j = j0; j < j1; j++, edge_next(&el)) {
+    for (j = j0; j < j1; j++) {
         int64_t yc = 16 * (int64_t)j + 8;
         int xlong = (int)el.q, xshort, xl, xr;
         if (bottom ? yc <= Y[1] : yc < Y[1]) {  /* (the upper short edge: rows from the top, one after another) */
@@ -1217,6 +1222,8 @@ static void cover(const int64_t *Xin, const int64_t *Yin, const attrs *A)
         if (xr > S.scissor[2]) xr = S.scissor[2];
         if (xl < xr)
             span(j, xl, xr, A);
+        if (j + 1 < j1)
+            edge_next(&el);
     }
 }
 
