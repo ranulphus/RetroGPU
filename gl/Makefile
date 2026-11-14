@@ -33,8 +33,13 @@ DJ_TESTFLAGS := -I$(MGAHAL)/tests/shim -DHX_BUILD_ID='"$(BUILD_ID)"'
 # DGL_STATS=2 adds a DGL-PROF line a second, 3 also DGL-MICRO at start
 # (tools/perf/profsum.py in the HAL sums them). Needs a Pentium. Building
 # without PROF=1 again returns to the normal library (build/prof_mode).
+# PROF=2: also the stages inside the vertex path and validation (docs/fe.md
+# F0), with a switch or more a vertex: their cost is printed and taken out.
 ifeq ($(PROF),1)
 DJ_CFLAGS += -DMGA_PROF=1
+endif
+ifeq ($(PROF),2)
+DJ_CFLAGS += -DMGA_PROF=1 -DDGL_PROF_FINE=1
 endif
 # REGCRC=1: the HAL's register trace with a running CRC of every register
 # write and WARP vertex, printed at each swap and at exit (DGL-REGCRC lines):

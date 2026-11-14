@@ -72,6 +72,18 @@ static uint32_t be_tris(void)
     dgl_be->stats(&bs);
     return bs.tris;
 }
+
+#ifdef MGA_PROF
+/* ... and by the card's own setup too (the G400's WARP): the profile's
+ * triangles. */
+static uint32_t stats_all0;
+static uint32_t be_tris_all(void)
+{
+    dgl_be_stats bs;
+    dgl_be->stats(&bs);
+    return bs.tris + bs.tris_offloaded;
+}
+#endif
 static void dev_lost(void) { dgl_gl.dirty |= DGL_DIRTY_TARGET | DGL_DIRTY_RASTER | DGL_DIRTY_TEXTURE | DGL_DIRTY_FOG; }
 static void dev_log(const char *line) { DGL_ERR("%s", line); }
 
@@ -258,6 +270,9 @@ static void after_init(const DGLConfig *cp)
         stats_t0 = sys_time_us();
         stats_tris0 = be_tris();
 #ifdef MGA_PROF
+        stats_all0 = be_tris_all();
+#endif
+#ifdef MGA_PROF
         prof_start(stats_on);
 #endif
     }
@@ -343,7 +358,24 @@ static void prof_report(uint32_t tris)
             K(PROF_D_VALID), K(PROF_D_CLIP), K(PROF_D_PROJ), K(PROF_D_SETUP), K(PROF_D_TEX), K(PROF_D_CLEAR),
             K(PROF_D_DRAIN), K(PROF_D_VSYNC), K(PROF_D_SWAP), (unsigned long)tris, (unsigned long)prof_wr,
             (unsigned long)prof_fifo_rd, (unsigned long)sw, (unsigned long)prof_ovh);
+#ifdef DGL_PROF_FINE
+    /* (log lines stop at 255 characters: the rest on lines of their own, for the DGL-PROF line before them) */
+    DGL_ERR("DGL-PFINE fxf=%lu fprj=%lu ftri=%lu ring=%lu vidle=%lu batch=%lu", K(PROF_D_FXF), K(PROF_D_FPRJ),
+            K(PROF_D_FTRI), K(PROF_D_RING), K(PROF_D_VIDLE), K(PROF_D_BATCH));
+#endif
 #undef K
+    /* Entries into each stage (each costs about one switch: profsum.py
+     * takes that out), and calls counted. */
+#define N(s) ((unsigned long)prof_n[s])
+    DGL_ERR("DGL-PCNT app=%lu fifo=%lu splane=%lu sinc=%lu strap=%lu xform=%lu valid=%lu clip=%lu proj=%lu "
+            "setup=%lu tex=%lu clear=%lu drain=%lu vsync=%lu swap=%lu", N(PROF_APP), N(PROF_FIFO), N(PROF_SPLANE),
+            N(PROF_SINC), N(PROF_STRAP), N(PROF_D_XFORM), N(PROF_D_VALID), N(PROF_D_CLIP), N(PROF_D_PROJ),
+            N(PROF_D_SETUP), N(PROF_D_TEX), N(PROF_D_CLEAR), N(PROF_D_DRAIN), N(PROF_D_VSYNC), N(PROF_D_SWAP));
+    DGL_ERR("DGL-PCNT fxf=%lu fprj=%lu ftri=%lu ring=%lu vidle=%lu batch=%lu c_verts=%lu c_binds=%lu c_xverts=%lu "
+            "c_fverts=%lu", N(PROF_D_FXF), N(PROF_D_FPRJ), N(PROF_D_FTRI), N(PROF_D_RING), N(PROF_D_VIDLE),
+            N(PROF_D_BATCH), dgl_pcount.verts, dgl_pcount.binds, dgl_pcount.xverts, dgl_pcount.fverts);
+#undef N
+    memset(&dgl_pcount, 0, sizeof dgl_pcount);
     prof_reset(prof_cur);
 }
 #endif
@@ -435,7 +467,7 @@ static void swap_buffers(void)
             present0_us = stats.present_us;
 #ifdef MGA_PROF
             if (stats_on >= 2)
-                prof_report(be_tris() - stats_tris0);
+                prof_report(be_tris_all() - stats_all0);
 #endif
             if (stats_on >= 2) {
                 DGL_ERR("DGL-PRIMS begins=%lu skipped=%lu tris=%lu clipped=%lu zero=%lu culled=%lu seqs=%lu",
@@ -451,6 +483,9 @@ static void swap_buffers(void)
             }
             stats_t0 = now;
             stats_tris0 = be_tris();
+#ifdef MGA_PROF
+            stats_all0 = be_tris_all();
+#endif
             stats_swaps0 = stats.swaps;
         }
     }

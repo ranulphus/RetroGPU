@@ -179,6 +179,7 @@ void APIENTRY glBindTexture(GLenum target, GLuint name)
 {
     if (target != GL_TEXTURE_2D) { dgl_gl_error(GL_INVALID_ENUM); return; }
     if (name && !get(name, 1)) { dgl_gl_error(GL_OUT_OF_MEMORY); return; }
+    DGL_PCOUNT(binds);
     bound = name;
     dgl_gl.dirty |= DGL_DIRTY_TEXTURE;
 }

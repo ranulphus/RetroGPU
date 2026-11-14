@@ -17,9 +17,43 @@ enum {
     PROF_D_TEX,                     /* glTexImage2D, glTexSubImage2D */
     PROF_D_CLEAR,                   /* glClear */
     PROF_D_DRAIN,                   /* SwapBuffers waiting for the engine */
-    PROF_D_SWAP                     /* the rest of SwapBuffers (flip, statistics) */
+    PROF_D_SWAP,                    /* the rest of SwapBuffers (flip, statistics) */
+    /* PROF=2 only (DGL_PROF_FINE): inside xform and valid (docs/fe.md F0) */
+    PROF_D_FXF,                     /* the fast path's vertex: fetch, transform, outcode, colour */
+    PROF_D_FPRJ,                    /* ... its projection, texture coordinates and floors */
+    PROF_D_FTRI,                    /* the fast path's triangle or sequence: area, cull, periods */
+    PROF_D_RING,                    /* the fast path's writes into the DMA ring and its kicks */
+    PROF_D_VIDLE,                   /* the sink's begin with no register group dirty */
+    PROF_D_BATCH                    /* the fast path's draw: its set-up and loops */
 };
 #define PROF_D_VSYNC PROF_VSYNC     /* SwapBuffers waiting for retrace: the device's stage (mga/prof.h) */
+
+/* PROF=2's stages, timed only in those builds: each switch costs about 40
+ * cycles on a Pentium II, too much to leave in PROF=1's numbers. */
+#if defined(MGA_PROF) && defined(DGL_PROF_FINE)
+#  define DGL_FINE_SWITCH(c) PROF_SWITCH(c)
+#  define DGL_FINE_BACK(o)   PROF_BACK(o)
+#  define DGL_FINE_SCOPE(c)  PROF_SCOPE(c)
+#else
+static inline int dgl_fine_off(int c) { (void)c; return 0; }
+#  define DGL_FINE_SWITCH(c) dgl_fine_off(c)
+#  define DGL_FINE_BACK(o)   ((void)(o))
+#  define DGL_FINE_SCOPE(c)  ((void)0)
+#endif
+
+/* Calls counted in profiling builds (DGL-PCNT lines). */
+#ifdef MGA_PROF
+typedef struct {
+    unsigned long verts;            /* immediate-mode vertices (glVertex*, glArrayElement) */
+    unsigned long binds;            /* glBindTexture */
+    unsigned long xverts;           /* vertices transformed by the general path (vertex.c's cache misses) */
+    unsigned long fverts;           /* ... and by the fast path (emit.c's) */
+} dgl_pcount_t;
+extern dgl_pcount_t dgl_pcount;
+#  define DGL_PCOUNT(f) (dgl_pcount.f++)
+#else
+#  define DGL_PCOUNT(f) ((void)0)
+#endif
 
 /* Column-major 4x4, as GL stores matrices. */
 typedef struct { GLfloat m[16]; } dgl_mat4;

@@ -387,8 +387,12 @@ static void validate(void)
 
 static int emit_begin(void)
 {
+    const int idle = !(dgl_gl.dirty & DGL_DIRTY_REGS);    /* (PROF=2: no register group to write) */
+    int prof_o = idle ? DGL_FINE_SWITCH(PROF_D_VIDLE) : 0;
     DGL_GPU_ENTER();
     validate();
+    if (idle)
+        DGL_FINE_BACK(prof_o);
     return !skip_all;
 }
 
@@ -811,8 +815,11 @@ static const fast_vtx *fast_get(GLint i)
     volatile float x, y, z, w;          /* stored as floats, as dgl_transform's: the general path's values exactly */
     float p3;
     double iw, xw, yw, zw;
+    int prof_o;
     if (f->gen == fgen && f->key == i)
         return f;
+    prof_o = DGL_FINE_SWITCH(PROF_D_FXF);
+    DGL_PCOUNT(fverts);
     f->key = i;
     f->gen = fgen;
     p = (const float *)(dgl_pl_v.p + (size_t)i * dgl_pl_v.stride);
@@ -835,8 +842,11 @@ static const fast_vtx *fast_get(GLint i)
                     ((uint32_t)(dgl_pl_c.size > 3 ? c[3] : 255) << 24);
     } else
         f->w.bgra = fbgra;
-    if (f->oc)
+    if (f->oc) {
+        DGL_FINE_BACK(prof_o);
         return f;
+    }
+    DGL_FINE_SWITCH(PROF_D_FPRJ);
     iw = 1.0 / w;
     xw = dgl_gl.viewport[0] + (x * iw + 1.0) * 0.5 * dgl_gl.viewport[2];
     yw = dgl_ctx.height - (dgl_gl.viewport[1] + (y * iw + 1.0) * 0.5 * dgl_gl.viewport[3]);
@@ -880,6 +890,7 @@ static const fast_vtx *fast_get(GLint i)
         f->fv1 = f->w.v1 > -1e9f && f->w.v1 < 1e9f ? mga_ifloor(f->w.v1) : NO_FLOOR;
     } else
         f->w.u1 = f->w.v1 = 0;
+    DGL_FINE_BACK(prof_o);
     return f;
 }
 
@@ -943,6 +954,7 @@ static void fast_tri(GLint ia, GLint ib, GLint ic, GLint ip)
     const fast_vtx *a = fast_get(ia), *b = fast_get(ib), *c = fast_get(ic);
     mga_wvtx w[3];
     int64_t area2;
+    DGL_FINE_SCOPE(PROF_D_FTRI);
     if ((a->oc | b->oc | c->oc) || !warp_now) {
         dgl_tri_general(ia, ib, ic, ip);        /* (counts itself) */
         return;
@@ -976,7 +988,9 @@ static void fast_tri(GLint ia, GLint ib, GLint ic, GLint ip)
     }
     {
         int dw;
-        uint32_t *d = warp_reserve(3, &dw);
+        uint32_t *d;
+        DGL_FINE_SWITCH(PROF_D_RING);           /* (the scope's end puts the caller's stage back) */
+        d = warp_reserve(3, &dw);
         if (d) {                                /* straight into the DMA stream */
             int32_t su = 0, sv = 0, su1 = 0, sv1 = 0;
             int whole = dw == (dual ? 10 : 8);
@@ -1086,6 +1100,8 @@ static int fast_seq(GLenum mode, GLsizei count, const GLint *idx, GLint first)
         sfu[i] = f->fu; sfv[i] = f->fv;
         sfu1[i] = f->fu1; sfv1[i] = f->fv1;
     }
+    {
+    DGL_FINE_SCOPE(PROF_D_FTRI);
     for (i = 0; i + 2 < count; i++) {   /* fast_tri's triangles: none zero in area, none culled */
         const int a = fan ? 0 : (i & 1) ? i + 1 : i, b = fan ? i + 1 : (i & 1) ? i : i + 1, c = i + 2;
         const int64_t area2 = (int64_t)(sx[b] - sx[a]) * (sy[c] - sy[a]) - (int64_t)(sx[c] - sx[a]) * (sy[b] - sy[a]);
@@ -1125,6 +1141,7 @@ static int fast_seq(GLenum mode, GLsizei count, const GLint *idx, GLint first)
                 if (sfv1[i] < sv1) sv1 = sfv1[i];
             }
     }
+    DGL_FINE_SWITCH(PROF_D_RING);
     d = warp_reserve_seq(fan, (int)count, &dw);
     if (!d)
         return 0;
@@ -1139,6 +1156,7 @@ static int fast_seq(GLenum mode, GLsizei count, const GLint *idx, GLint first)
     dgl_prims.tris_in += (unsigned)(count - 2);
     dgl_prims.seqs++;
     return 1;
+    }
 }
 
 static int emit_fast(GLenum mode, GLsizei count, const GLint *idx, GLint first)
@@ -1160,6 +1178,7 @@ static int emit_fast(GLenum mode, GLsizei count, const GLint *idx, GLint first)
     default:
         return 0;
     }
+    DGL_FINE_SCOPE(PROF_D_BATCH);
     if (++fgen == 0) {                          /* (a wrapped generation: every slot stale) */
         memset(fv, 0, sizeof fv);
         fgen = 1;

@@ -9,6 +9,9 @@
 #include <string.h>
 
 dgl_sinks dgl_sink;
+#ifdef MGA_PROF
+dgl_pcount_t dgl_pcount;
+#endif
 
 /* ---- Array pointers ------------------------------------------------------ */
 static int set_array(dgl_array *a, GLint size, GLenum type, GLsizei stride, const GLvoid *p, int min_size,
@@ -258,6 +261,7 @@ static const dgl_cvtx *get(GLint idx, const dgl_vin *imm)
     dgl_vin in;
     if (vc.gen[slot] == vc.cur && vc.key[slot] == idx)
         return &dgl_vslot[slot];
+    DGL_PCOUNT(xverts);
     if (imm)
         dgl_transform(&imm[idx], &dgl_vslot[slot]);    /* the same values as through a copy */
     else {
@@ -458,6 +462,7 @@ static void imm_vertex(float x, float y, float z, float w)
         if (!nv) { dgl_gl_error(GL_OUT_OF_MEMORY); return; }
         imm.v = nv; imm.cap = nc;
     }
+    DGL_PCOUNT(verts);
     v = &imm.v[imm.n++];
     v->pos[0] = x; v->pos[1] = y; v->pos[2] = z; v->pos[3] = w;
     memcpy(v->col, dgl_gl.cur_color, sizeof v->col);
