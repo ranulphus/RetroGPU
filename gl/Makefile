@@ -10,6 +10,7 @@
 #   make conform-bench PC=bench-g400 [TESTS=...]   the conformance suite on a bench PC
 #   make soft-conform [BPP=8|16|32] [TESTS=...]   the software renderer's, natively (docs/b2.md)
 #   make soft-tilecheck   its tiles against drawing at once, every frame byte for byte (docs/b2.md B2.7)
+#   make soft-meshbench [PROF=1]   its per-triangle cost through GL, a 65k-triangle mesh (docs/b2.md B2.9)
 # The Matrox HAL, harness and 86Box patches are RetroGPU's: this directory's
 # parent, the repository root (PRD D15), so a HAL change and its effect on GL
 # are one commit. MGAHAL is always the parent, whatever the environment says.
@@ -56,7 +57,7 @@ ct_flags = $(if $(filter t33,$(1)),-DCT_STENCIL=8)
 DGL_SRCS := $(wildcard src/dgl/*.c) $(wildcard src/gl/*.c) $(wildcard src/backend/mga/*.c) $(wildcard src/backend/soft/*.c)
 LIB := build/lib/libGL.a
 
-.PHONY: all lib examples sdl sdl-host sdl-examples loopa-sdl tests-host loopa conform conform-dos conform-host soft-conform soft-tilecheck classicube loopa-classicube quake loopa-quake halflife loopa-halflife doom loopa-doom setup-djgpp setup-ow dostools 86box clean help
+.PHONY: all lib examples sdl sdl-host sdl-examples loopa-sdl tests-host loopa conform conform-dos conform-host soft-conform soft-tilecheck soft-meshbench classicube loopa-classicube quake loopa-quake halflife loopa-halflife doom loopa-doom setup-djgpp setup-ow dostools 86box clean help
 all: lib examples
 
 build/djgpp/%.o: %.c build/prof_mode
@@ -251,6 +252,14 @@ build/rig/conform/%: build/rig/libGL.a tests/conform/ct_rig.c tests/conform/ct.h
 	@mkdir -p $(dir $@)
 	$(Q)$(HOST_CC) $(RIG_CFLAGS) -static -DCT_NAME='"$*"' $(call ct_flags,$*) -o $@ $(wildcard tests/conform/$*_*.c) \
 	  tests/conform/ct_rig.c build/rig/libGL.a -lm
+build/rig/softmesh: build/rig/libGL.a tests/rig/softmesh.c tests/conform/ct_rig.c tests/conform/ct.h
+	$(Q)$(HOST_CC) $(RIG_CFLAGS) -static -DCT_NAME='"softmesh"' -Itests/conform -o $@ tests/rig/softmesh.c \
+	  tests/conform/ct_rig.c build/rig/libGL.a -lm
+# The software renderer's per-triangle cost (docs/b2.md B2.9): FRAMES=, PROF=1 (then tools/soft/attr.py).
+soft-meshbench:
+	MGA_EXTRA_DIR=$(GLOS) $(MGAHAL)/tools/dev sh -c '$(MAKE) -s rig-build build/rig/softmesh && \
+	  cd build/rig && CT_OUT=/tmp DGL_DEVICE=mem FRAMES=$(or $(FRAMES),40) $(if $(PROF),PROF=1) ./softmesh | grep softmesh: && \
+	  $(if $(PROF),python3 ../../tools/soft/attr.py ./softmesh samples.txt | head -24,true)'
 build/rig/rigbench: build/rig/libGL.a tests/rig/rigbench.c
 	$(Q)$(HOST_CC) $(RIG_CFLAGS) -static -o $@ tests/rig/rigbench.c build/rig/libGL.a -lm
 rig-build: $(foreach t,$(CONFORM),build/rig/conform/$(t)) build/rig/rigbench
