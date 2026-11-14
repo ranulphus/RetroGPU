@@ -68,7 +68,7 @@ build/djgpp/mgahal/%.o: $(MGAHAL)/%.c build/prof_mode
 	@mkdir -p $(dir $@)
 	$(Q)echo "  DJCC    $<"
 	$(Q)$(DJCC) $(DJ_CFLAGS) -MMD -MP -c -o $@ $<
--include $(shell find build/djgpp -name '*.d' 2>/dev/null)
+-include $(shell find build/djgpp build/rig -name '*.d' 2>/dev/null)
 
 # The version string carries the build ID: rebuild it whenever the ID changes
 # (a new commit, or the tree turning dirty or clean), not only when the source does.
