@@ -215,13 +215,31 @@ static uint32_t fogcol_for(void)
            (uint32_t)lrintf(dgl_gl.fog_color[2] * 255.0f);
 }
 
+/* The last full validation's textures (after its residency checks), for a
+ * draw that changes nothing (fe.md F2): every change to what it depends on
+ * marks a register group or the clip dirty (binds, deletes, images and
+ * sub-images, palettes, glEnable, the viewport). ok only when that
+ * validation drew (a texture that could not be made resident tries again). */
+#define DGL_DIRTY_REGS (DGL_DIRTY_RASTER | DGL_DIRTY_FOG | DGL_DIRTY_TARGET | DGL_DIRTY_TEXTURE)
+static struct { int ok; dgl_texture *tex, *tex1; } idle;
+static float guard_vp[4] = { -1, -1, -1, -1 };     /* the viewport the guard band is for */
+
 static void validate_state(void)
 {
-    int depth = dgl_gl.depth_test && rg_mga.z_off;
-    uint32_t alphactrl, zmode = depth ? zmode_for(dgl_gl.depth_func) : DWG_ZMODE_NOZCMP, asel;
-    dgl_texture *tex = dgl_gl.texture_2d ? dgl_unit_texture(0) : NULL;
-    dgl_texture *tex1 = dgl_gl.texture_2d1 && dgl_texture_units() > 1 ? dgl_unit_texture(1) : NULL;
-    int unit0 = 0;
+    int depth, unit0 = 0;
+    uint32_t alphactrl, zmode, asel;
+    dgl_texture *tex, *tex1;
+    if (idle.ok && dgl_ctx.active && !(dgl_gl.dirty & (DGL_DIRTY_REGS | DGL_DIRTY_CLIP))) {
+        if (idle.tex)
+            dgl_texture_drawn(idle.tex);    /* (busy until the next completed sync) */
+        if (idle.tex1)
+            dgl_texture_drawn(idle.tex1);
+        return;
+    }
+    depth = dgl_gl.depth_test && rg_mga.z_off;
+    zmode = depth ? zmode_for(dgl_gl.depth_func) : DWG_ZMODE_NOZCMP;
+    tex = dgl_gl.texture_2d ? dgl_unit_texture(0) : NULL;
+    tex1 = dgl_gl.texture_2d1 && dgl_texture_units() > 1 ? dgl_unit_texture(1) : NULL;
     if (!tex && tex1) {
         tex = tex1;                     /* GL unit 1 alone drives map 0 */
         tex1 = NULL;
@@ -437,17 +455,23 @@ static void validate_state(void)
         regs.ok = 1;
     }
     dgl_gl.dirty &= ~(DGL_DIRTY_RASTER | DGL_DIRTY_FOG | DGL_DIRTY_TARGET | DGL_DIRTY_TEXTURE | DGL_DIRTY_CLIP);
-    /* Guard band: keep screen coordinates inside +-2048 (the setup's range). */
-    {
+    /* Guard band: keep screen coordinates inside +-2048 (the setup's range);
+     * the same viewport, the same band. */
+    if (guard_vp[0] != dgl_gl.viewport[0] || guard_vp[1] != dgl_gl.viewport[1] ||
+        guard_vp[2] != dgl_gl.viewport[2] || guard_vp[3] != dgl_gl.viewport[3]) {
         float hw = dgl_gl.viewport[2] * 0.5f, hh = dgl_gl.viewport[3] * 0.5f;
         guard_x = hw > 0 ? (guard_px - fabsf(dgl_gl.viewport[0] + hw)) / hw : 1.0f;
         guard_y = hh > 0 ? (guard_px - fabsf(dgl_gl.viewport[1] + hh)) / hh : 1.0f;
         if (guard_x < 1.0f) guard_x = 1.0f;
         if (guard_y < 1.0f) guard_y = 1.0f;
+        guard_vp[0] = dgl_gl.viewport[0], guard_vp[1] = dgl_gl.viewport[1];
+        guard_vp[2] = dgl_gl.viewport[2], guard_vp[3] = dgl_gl.viewport[3];
     }
+    idle.ok = !skip_all;
+    idle.tex = tex;
+    idle.tex1 = tex1;
 }
 
-#define DGL_DIRTY_REGS (DGL_DIRTY_RASTER | DGL_DIRTY_FOG | DGL_DIRTY_TARGET | DGL_DIRTY_TEXTURE)
 
 /* A soft reset while validating (the WARP's microcode loads take one, and
  * so does a WARP that fails) clears the drawing registers: everything is
@@ -1158,8 +1182,11 @@ static void fast_tri(GLint ia, GLint ib, GLint ic, GLint ip)
 static int seq_kinds = 7;               /* DGL_SEQ: 1 fans and polygons, 2 strips, 4 flat polygons (0: none) */
 static int fast_seq(GLenum mode, GLsizei count, const GLint *idx, GLint first)
 {
-    static mga_wvtx sw[SEQ_MAX];        /* (copies: a slot may be refilled within the sequence) */
-    static int32_t sx[SEQ_MAX], sy[SEQ_MAX], sfu[SEQ_MAX], sfv[SEQ_MAX], sfu1[SEQ_MAX], sfv1[SEQ_MAX];
+    /* The vertices' slots; with indices, copies (a slot may be refilled
+     * within the sequence). Consecutive vertices (count <= FAST_SLOTS) never
+     * share a slot. */
+    static const fast_vtx *V[SEQ_MAX];
+    static fast_vtx cp[SEQ_MAX];
     const int fan = mode != GL_TRIANGLE_STRIP, flat = dgl_gl.shade_model == GL_FLAT;
     int32_t su = 0, sv = 0, su1 = 0, sv1 = 0;
     uint32_t *d;
@@ -1173,16 +1200,17 @@ static int fast_seq(GLenum mode, GLsizei count, const GLint *idx, GLint first)
         const fast_vtx *f = fast_get(idx ? idx[i] : first + i);
         if (f->oc)
             return 0;
-        sw[i] = f->w;
-        sx[i] = f->X16; sy[i] = f->Y16;
-        sfu[i] = f->fu; sfv[i] = f->fv;
-        sfu1[i] = f->fu1; sfv1[i] = f->fv1;
+        if (idx) {
+            cp[i] = *f;
+            f = &cp[i];
+        }
+        V[i] = f;
     }
     {
     DGL_FINE_SCOPE(PROF_D_FTRI);
     for (i = 0; i + 2 < count; i++) {   /* fast_tri's triangles: none zero in area, none culled */
         const int a = fan ? 0 : (i & 1) ? i + 1 : i, b = fan ? i + 1 : (i & 1) ? i : i + 1, c = i + 2;
-        const int64_t area2 = (int64_t)(sx[b] - sx[a]) * (sy[c] - sy[a]) - (int64_t)(sx[c] - sx[a]) * (sy[b] - sy[a]);
+        const int64_t area2 = (int64_t)(V[b]->X16 - V[a]->X16) * (V[c]->Y16 - V[a]->Y16) - (int64_t)(V[c]->X16 - V[a]->X16) * (V[b]->Y16 - V[a]->Y16);
         if (area2 == 0)
             return 0;
         if (dgl_gl.cull_face) {
@@ -1193,30 +1221,30 @@ static int fast_seq(GLenum mode, GLsizei count, const GLint *idx, GLint first)
     }
     if (textured == 1) {
         if (!tstate.clamp_u)
-            for (su = sfu[0], i = 0; i < count; i++) {
-                if (sfu[i] == NO_FLOOR)
+            for (su = V[0]->fu, i = 0; i < count; i++) {
+                if (V[i]->fu == NO_FLOOR)
                     return 0;
-                if (sfu[i] < su) su = sfu[i];
+                if (V[i]->fu < su) su = V[i]->fu;
             }
         if (!tstate.clamp_v)
-            for (sv = sfv[0], i = 0; i < count; i++) {
-                if (sfv[i] == NO_FLOOR)
+            for (sv = V[0]->fv, i = 0; i < count; i++) {
+                if (V[i]->fv == NO_FLOOR)
                     return 0;
-                if (sfv[i] < sv) sv = sfv[i];
+                if (V[i]->fv < sv) sv = V[i]->fv;
             }
     }
     if (dual) {
         if (!tstate1.clamp_u)
-            for (su1 = sfu1[0], i = 0; i < count; i++) {
-                if (sfu1[i] == NO_FLOOR)
+            for (su1 = V[0]->fu1, i = 0; i < count; i++) {
+                if (V[i]->fu1 == NO_FLOOR)
                     return 0;
-                if (sfu1[i] < su1) su1 = sfu1[i];
+                if (V[i]->fu1 < su1) su1 = V[i]->fu1;
             }
         if (!tstate1.clamp_v)
-            for (sv1 = sfv1[0], i = 0; i < count; i++) {
-                if (sfv1[i] == NO_FLOOR)
+            for (sv1 = V[0]->fv1, i = 0; i < count; i++) {
+                if (V[i]->fv1 == NO_FLOOR)
                     return 0;
-                if (sfv1[i] < sv1) sv1 = sfv1[i];
+                if (V[i]->fv1 < sv1) sv1 = V[i]->fv1;
             }
     }
     DGL_FINE_SWITCH(PROF_D_RING);
@@ -1225,10 +1253,10 @@ static int fast_seq(GLenum mode, GLsizei count, const GLint *idx, GLint first)
         return 0;
     if (dw == 10)
         for (i = 0; i < count; i++)
-            put10(d + 10 * i, &sw[i], flat ? sw[0].bgra : sw[i].bgra, su, sv, su1, sv1);
+            put10(d + 10 * i, &V[i]->w, flat ? V[0]->w.bgra : V[i]->w.bgra, su, sv, su1, sv1);
     else
         for (i = 0; i < count; i++)
-            put8(d + 8 * i, &sw[i], flat ? sw[0].bgra : sw[i].bgra, su, sv);
+            put8(d + 8 * i, &V[i]->w, flat ? V[0]->w.bgra : V[i]->w.bgra, su, sv);
     warp_commit_seq((int)count);
     warp_since_cpu = 1;
     dgl_prims.tris_in += (unsigned)(count - 2);
@@ -1263,12 +1291,19 @@ static int emit_fast(GLenum mode, GLsizei count, const GLint *idx, GLint first)
     }
     fm = dgl_mvp()->m;
     fmv = dgl_gl.mv.stack[dgl_gl.mv.depth - 1].m;
-    fbgra = byte_of(dgl_gl.cur_color[2] * 255.0f) | (byte_of(dgl_gl.cur_color[1] * 255.0f) << 8) |
-            (byte_of(dgl_gl.cur_color[0] * 255.0f) << 16) | (byte_of(dgl_gl.cur_color[3] * 255.0f) << 24);
-    fs0 = dgl_gl.cur_tex[0] * tex_scale_s;
-    ft0 = dgl_gl.cur_tex[1] * tex_scale_t;
-    fs1 = dgl_gl.cur_tex1[0] * tex_scale_s1;
-    ft1 = dgl_gl.cur_tex1[1] * tex_scale_t1;
+    /* The current colour and coordinates stand in for an array that is off
+     * (fast_get); immediate mode's vertices carry their own (plan_imm). */
+    if (!dgl_pl_c.on)
+        fbgra = byte_of(dgl_gl.cur_color[2] * 255.0f) | (byte_of(dgl_gl.cur_color[1] * 255.0f) << 8) |
+                (byte_of(dgl_gl.cur_color[0] * 255.0f) << 16) | (byte_of(dgl_gl.cur_color[3] * 255.0f) << 24);
+    if (!dgl_pl_t.on) {
+        fs0 = dgl_gl.cur_tex[0] * tex_scale_s;
+        ft0 = dgl_gl.cur_tex[1] * tex_scale_t;
+    }
+    if (!dgl_pl_t1.on) {
+        fs1 = dgl_gl.cur_tex1[0] * tex_scale_s1;
+        ft1 = dgl_gl.cur_tex1[1] * tex_scale_t1;
+    }
 #define I(k) (idx ? idx[k] : first + (k))
     switch (mode) {
     case GL_TRIANGLES:
