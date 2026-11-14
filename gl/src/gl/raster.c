@@ -139,7 +139,10 @@ void APIENTRY glColorMask(GLboolean r, GLboolean g, GLboolean b, GLboolean a)
 void APIENTRY glViewport(GLint x, GLint y, GLsizei w, GLsizei h)
 {
     if (w < 0 || h < 0) { dgl_gl_error(GL_INVALID_VALUE); return; }
+    if (x == dgl_gl.viewport[0] && y == dgl_gl.viewport[1] && w == dgl_gl.viewport[2] && h == dgl_gl.viewport[3])
+        return;
     dgl_gl.viewport[0] = x; dgl_gl.viewport[1] = y; dgl_gl.viewport[2] = w; dgl_gl.viewport[3] = h;
+    dgl_gl.dirty |= DGL_DIRTY_CLIP;
 }
 
 void APIENTRY glScissor(GLint x, GLint y, GLsizei w, GLsizei h)

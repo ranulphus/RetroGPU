@@ -1,9 +1,9 @@
 /* backend.c - GL's software drawing back end (backend.h; docs/b2.md): GL's
  * state turned into the software core's (hal/src/soft), clip-space vertices
  * clipped (the shared clipper, a guard band of 8: the core clips its spans
- * to the scissor), projected to window space, culled, offset; drawn into the
- * buffers in system memory a device gives (rg/softbuf.h: the memory device
- * now, B3's software device next). */
+ * to the scissor cut to the viewport), projected to window space, culled,
+ * offset; drawn into the buffers in system memory a device gives
+ * (rg/softbuf.h: the memory device now, B3's software device next). */
 #include "../backend.h"
 #include "../../dgl/dgl.h"
 #include "../../gl/gl_draw.h"
@@ -276,20 +276,32 @@ static void target_now(void)
     soft_target_set(&tg);
 }
 
-/* GL's raster state as the core's. */
-static void validate(void)
+static void cut(int x0, int y0, int x1, int y1)
+{
+    if (x0 > st.scissor[0]) st.scissor[0] = x0;
+    if (y0 > st.scissor[1]) st.scissor[1] = y0;
+    if (x1 < st.scissor[2]) st.scissor[2] = x1;
+    if (y1 < st.scissor[3]) st.scissor[3] = y1;
+}
+
+/* GL's raster state as the core's. For drawing (draw set) the core's scissor
+ * is GL's cut to the viewport's rectangle: GL clips primitives to the view
+ * volume, the clipper here keeps a guard band, so the cut is the core's (a
+ * wide point or line straddling the viewport's edge is cut there, as on the
+ * Matrox path). Clears take GL's scissor alone. */
+static void validate(int draw)
 {
     int h = dgl_ctx.height;
     memset(&st, 0, sizeof st);
     st.scissor[0] = 0, st.scissor[1] = 0, st.scissor[2] = tg.width, st.scissor[3] = tg.height;
-    if (dgl_gl.scissor_test) {
-        int x0 = dgl_gl.scissor[0], x1 = dgl_gl.scissor[0] + dgl_gl.scissor[2];
-        int y0 = h - (dgl_gl.scissor[1] + dgl_gl.scissor[3]), y1 = h - dgl_gl.scissor[1];   /* (GL's rows go up) */
-        if (x0 > st.scissor[0]) st.scissor[0] = x0;
-        if (y0 > st.scissor[1]) st.scissor[1] = y0;
-        if (x1 < st.scissor[2]) st.scissor[2] = x1;
-        if (y1 < st.scissor[3]) st.scissor[3] = y1;
-    }
+    if (dgl_gl.scissor_test)                    /* (GL's rows go up) */
+        cut(dgl_gl.scissor[0], h - (dgl_gl.scissor[1] + dgl_gl.scissor[3]), dgl_gl.scissor[0] + dgl_gl.scissor[2],
+            h - dgl_gl.scissor[1]);
+    if (draw)
+        cut(dgl_gl.viewport[0], h - (dgl_gl.viewport[1] + dgl_gl.viewport[3]), dgl_gl.viewport[0] + dgl_gl.viewport[2],
+            h - dgl_gl.viewport[1]);
+    if (st.scissor[2] < st.scissor[0]) st.scissor[2] = st.scissor[0];
+    if (st.scissor[3] < st.scissor[1]) st.scissor[3] = st.scissor[1];
     st.color_mask = (dgl_gl.color_mask[0] ? 1u : 0) | (dgl_gl.color_mask[1] ? 2u : 0) | (dgl_gl.color_mask[2] ? 4u : 0) |
                     (dgl_gl.color_mask[3] ? 8u : 0);
     st.smooth = dgl_gl.shade_model != GL_FLAT;
@@ -325,7 +337,7 @@ static int sb_begin(void)
     if (!dgl_ctx.active)
         return 0;
     target_now();
-    validate();
+    validate(1);
     return 1;
 }
 
@@ -468,7 +480,7 @@ static void clear(GLbitfield mask)
 {
     unsigned what = 0;
     target_now();
-    validate();
+    validate(0);
     if (mask & GL_COLOR_BUFFER_BIT)
         what |= SOFT_CLEAR_COLOR;
     if ((mask & GL_DEPTH_BUFFER_BIT) && dgl_gl.depth_mask)

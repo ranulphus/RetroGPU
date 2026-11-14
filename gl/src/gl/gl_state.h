@@ -37,7 +37,8 @@ enum {
     DGL_DIRTY_RASTER  = 1u << 1,     /* depth, blend, alpha test, fog, masks */
     DGL_DIRTY_TARGET  = 1u << 2,     /* scissor */
     DGL_DIRTY_TEXTURE = 1u << 3,
-    DGL_DIRTY_FOG     = 1u << 4
+    DGL_DIRTY_FOG     = 1u << 4,
+    DGL_DIRTY_CLIP    = 1u << 5      /* the viewport: what a primitive may draw (a clear ignores it) */
 };
 
 /* A buffer object (GL_ARB_vertex_buffer_object, buffer.c): system memory. */

@@ -125,6 +125,26 @@ static void scissor_rows(int *x0, int *y0, int *x1, int *y1)
     }
 }
 
+/* What a primitive may draw: the scissor's rectangle cut to the viewport's.
+ * GL clips primitives to the view volume, which the viewport maps onto its
+ * rectangle; the clipper here keeps a guard band instead, so the cut is the
+ * engine's. Clears take the scissor alone (GL: the viewport doesn't apply).
+ * A wide point or line straddling the viewport's edge is cut there too, as
+ * on most hardware drivers. */
+static void draw_rows(int *x0, int *y0, int *x1, int *y1)
+{
+    int vx0 = dgl_gl.viewport[0], vx1 = dgl_gl.viewport[0] + dgl_gl.viewport[2];
+    int vy0 = dgl_ctx.height - (dgl_gl.viewport[1] + dgl_gl.viewport[3]);    /* GL y is bottom-up */
+    int vy1 = dgl_ctx.height - dgl_gl.viewport[1];
+    scissor_rows(x0, y0, x1, y1);
+    if (vx0 > *x0) *x0 = vx0;
+    if (vy0 > *y0) *y0 = vy0;
+    if (vx1 < *x1) *x1 = vx1;
+    if (vy1 < *y1) *y1 = vy1;
+    if (*x1 < *x0) *x1 = *x0;
+    if (*y1 < *y0) *y1 = *y0;
+}
+
 /* A map's sampler from a texture object. */
 static void sampler(mga_texstate *ts, const dgl_texture *tex, float *scale_s, float *scale_t)
 {
@@ -181,10 +201,17 @@ static void validate_state(void)
     }
     skip_all = !dgl_ctx.active || (depth && dgl_gl.depth_func == GL_NEVER) ||
                (dgl_gl.alpha_test && dgl_gl.alpha_func == GL_NEVER);
-    if (dgl_gl.dirty & DGL_DIRTY_TARGET) {
+    if (dgl_gl.dirty & (DGL_DIRTY_TARGET | DGL_DIRTY_CLIP)) {
+        /* Anything else that sets the engine's clip (a clear, a swap, a reset)
+         * marks the target dirty; a new viewport alone that leaves the
+         * rectangle as it was writes nothing. */
+        static int last[4];
         int x0, y0, x1, y1;
-        scissor_rows(&x0, &y0, &x1, &y1);
-        engine_set_clip(x0, y0, x1, y1);
+        draw_rows(&x0, &y0, &x1, &y1);
+        if ((dgl_gl.dirty & DGL_DIRTY_TARGET) || x0 != last[0] || y0 != last[1] || x1 != last[2] || y1 != last[3]) {
+            engine_set_clip(x0, y0, x1, y1);
+            last[0] = x0, last[1] = y0, last[2] = x1, last[3] = y1;
+        }
         tctx.clip_y0 = y0;
         tctx.clip_y1 = y1;
     }
@@ -332,7 +359,7 @@ static void validate_state(void)
                                 ((uint32_t)lrintf(dgl_gl.fog_color[1] * 255.0f) << 8) |
                                 (uint32_t)lrintf(dgl_gl.fog_color[2] * 255.0f));
     }
-    dgl_gl.dirty &= ~(DGL_DIRTY_RASTER | DGL_DIRTY_FOG | DGL_DIRTY_TARGET | DGL_DIRTY_TEXTURE);
+    dgl_gl.dirty &= ~(DGL_DIRTY_RASTER | DGL_DIRTY_FOG | DGL_DIRTY_TARGET | DGL_DIRTY_TEXTURE | DGL_DIRTY_CLIP);
     /* Guard band: keep screen coordinates inside +-2048 (the setup's range). */
     {
         float hw = dgl_gl.viewport[2] * 0.5f, hh = dgl_gl.viewport[3] * 0.5f;
