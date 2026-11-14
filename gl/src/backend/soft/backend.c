@@ -280,6 +280,7 @@ static void validate(void)
     st.color_mask = (dgl_gl.color_mask[0] ? 1u : 0) | (dgl_gl.color_mask[1] ? 2u : 0) | (dgl_gl.color_mask[2] ? 4u : 0) |
                     (dgl_gl.color_mask[3] ? 8u : 0);
     st.smooth = dgl_gl.shade_model != GL_FLAT;
+    st.fill_rule = SOFT_FILL_BOTTOM_LEFT;       /* (OpenGL's with y down, as the references draw) */
     st.depth_test = dgl_gl.depth_test && tg.depth;
     st.depth_func = (int)(dgl_gl.depth_func - GL_NEVER);
     st.depth_write = dgl_gl.depth_mask;
@@ -391,13 +392,39 @@ static void sb_triangle(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *c,
         soft_triangle(&v[0], &v[i], &v[i + 1]);
 }
 
+/* A line: clipped as a degenerate triangle (its first two outputs are the
+ * segment, in a's direction), flat shading with b's colour. */
+static void sb_line(const dgl_cvtx *a, const dgl_cvtx *b)
+{
+    dgl_cvtx in[3], out[9];
+    soft_vertex v[2];
+    in[0] = *a; in[1] = *b; in[2] = *b;
+    if (dgl_gl.shade_model == GL_FLAT) {
+        in[0].r = b->r; in[0].g = b->g; in[0].b = b->b; in[0].a = b->a;
+    }
+    if (dgl_clip_polygon(in, 3, out, GUARD, GUARD) < 2)
+        return;
+    project(&out[0], &v[0]);
+    project(&out[1], &v[1]);
+    soft_line(&v[0], &v[1], dgl_gl.line_width);
+}
+/* A point: none when its centre is outside the view volume (OpenGL's rule). */
+static void sb_point(const dgl_cvtx *a)
+{
+    soft_vertex v;
+    if (dgl_outcode(a, 1.0f, 1.0f))
+        return;
+    project(a, &v);
+    soft_point(&v, dgl_gl.point_size);
+}
+
 static void install(void)
 {
     dgl_sink.begin = sb_begin;
     dgl_sink.triangle = sb_triangle;
     dgl_sink.fast = NULL;                       /* (the general path only) */
-    dgl_sink.line = NULL;                       /* (B2.5) */
-    dgl_sink.point = NULL;
+    dgl_sink.line = sb_line;
+    dgl_sink.point = sb_point;
     dgl_sink.end = sb_end;
 }
 

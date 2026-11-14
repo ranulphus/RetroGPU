@@ -5,9 +5,19 @@
  *
  * Coordinates: x and y in pixels, y down, pixel (i, j)'s centre at
  * (i + 0.5, j + 0.5); positions snapped to 1/16 of a pixel. A pixel is drawn
- * when its centre is inside, an edge's centres by the top-left rule.
+ * when its centre is inside; a centre on an edge by the state's fill rule:
+ * on a left edge always, on a top edge (SOFT_FILL_TOP_LEFT) or a bottom one
+ * (SOFT_FILL_BOTTOM_LEFT, OpenGL's as llvmpipe draws it with y down).
  * Attributes are planes through the vertices, taken at pixel centres;
- * texture coordinates divided by w per pixel (perspective-correct). */
+ * texture coordinates divided by w per pixel (perspective-correct).
+ *
+ * Lines and points (B2.5) follow OpenGL's rules as Mesa's llvmpipe applies
+ * them, the references the conformance tests compare with: a line is a
+ * parallelogram, its ends moved by the diamond-exit test, its integer width
+ * across the minor axis, its attributes varying along the major axis only;
+ * a point is a square of its integer size (odd sizes about the pixel the
+ * point is in, even ones about the nearest pixel corner), its attributes
+ * the vertex's. */
 #ifndef SOFT_SOFT_H
 #define SOFT_SOFT_H
 #include <stdint.h>
@@ -83,9 +93,11 @@ enum { SOFT_B_ZERO, SOFT_B_ONE, SOFT_B_SRC_COLOR, SOFT_B_ONE_MINUS_SRC_COLOR, SO
        SOFT_B_ONE_MINUS_DST_ALPHA, SOFT_B_SRC_ALPHA_SATURATE };
 enum { SOFT_FOG_LINEAR, SOFT_FOG_EXP, SOFT_FOG_EXP2 };
 enum { SOFT_SO_KEEP, SOFT_SO_ZERO, SOFT_SO_REPLACE, SOFT_SO_INCR, SOFT_SO_DECR, SOFT_SO_INVERT };
+enum { SOFT_FILL_TOP_LEFT, SOFT_FILL_BOTTOM_LEFT };
 
 typedef struct {
     int      scissor[4];            /* x0, y0, x1, y1 (exclusive), within the target */
+    int      fill_rule;             /* SOFT_FILL_*: a centre on a horizontal edge */
     unsigned color_mask;            /* bit 0 red, 1 green, 2 blue, 3 alpha */
     int      smooth;                /* 0: flat (the first vertex's colour) */
     int      depth_test, depth_func, depth_write;
@@ -112,6 +124,12 @@ void soft_clear(unsigned what, const float rgba[4], double depth, unsigned stenc
 
 void soft_triangle(const soft_vertex *a, const soft_vertex *b, const soft_vertex *c);
 
+/* A line from a to b, width pixels wide (rounded to a whole number, at
+ * least 1); flat shading takes b's colour (OpenGL's provoking vertex). A
+ * point of size pixels (rounded, at least 1). */
+void soft_line(const soft_vertex *a, const soft_vertex *b, float width);
+void soft_point(const soft_vertex *v, float size);
+
 /* texture.c: a texture sampled at (s, t) as OpenGL samples, its level of
  * detail from the coordinates' derivatives on the screen; RGBA 0..1. And a
  * stage's combine of its texel, the constant, the primary colour and the
@@ -123,7 +141,7 @@ void soft_combine_apply(const soft_stage *st, const float tex[4], const float pr
 
 /* Counters. */
 typedef struct {
-    uint32_t tris, pixels;
+    uint32_t tris, lines, points, pixels;
 } soft_stats;
 extern soft_stats soft_count;
 

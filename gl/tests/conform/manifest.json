@@ -24,5 +24,29 @@
    "soft"
   ],
   "_why": "Stencil: the software renderer's (8 bits). Matrox cards report none, so their frames would differ from Mesa's by design."
+ },
+ "t34": {
+  "only": [
+   "soft"
+  ],
+  "_why": "Lines and points by OpenGL's rules as llvmpipe applies them (diamond-exit ends, integer widths, the legacy point square). The Matrox back end draws lines as plain quads, so its ends would differ by design."
+ },
+ "t34_0": {
+  "edge": false,
+  "tol": 24,
+  "frac": 0,
+  "_why": "Every pixel compared, edges too: lines and points are all edge; positions on a 1/16 grid both renderers share."
+ },
+ "t34_1": {
+  "edge": false,
+  "tol": 24,
+  "frac": 0,
+  "_why": "Every pixel compared, edges too: lines and points are all edge; positions on a 1/16 grid both renderers share."
+ },
+ "t34_2": {
+  "edge": false,
+  "tol": 24,
+  "frac": 0,
+  "_why": "Every pixel compared, edges too: lines and points are all edge; positions on a 1/16 grid both renderers share."
  }
 }
