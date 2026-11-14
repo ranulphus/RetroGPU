@@ -517,19 +517,39 @@ static int32_t step_at(int32_t U0, int n, int32_t dU)  /* U0 + n dU, modulo 2^32
     return (int32_t)((uint32_t)U0 + (uint32_t)n * (uint32_t)dU);
 }
 
-static void piece_at(const soft_texture *tx, const rowtex *R, int x, texpiece *P)
+/* s/q and t/q at column x's centre, and 1/q: a function of x alone (a
+ * piece's far end is the next one's near end, the same values either way). */
+typedef struct { int x; double s, t, iq, q; } texpt;
+
+static void pt_at(const rowtex *R, int x, texpt *p)
 {
-    int w = tx->level[0].w, h = tx->level[0].h;
-    double x0 = x & ~15, q0 = R->qb + R->qdx * x0, q1 = q0 + R->qdx * 16;
-    P->piece = x >> 4, P->x0 = (int)x0;
-    P->per_pixel = !(q0 > 0 && q1 > 0 && q1 < 8 * q0 && q0 < 8 * q1);
+    p->x = x;
+    p->q = R->qb + R->qdx * x;
+    p->iq = p->q != 0 ? 1.0 / p->q : 0.0;
+    p->s = (R->sb + R->sdx * x) * p->iq, p->t = (R->tb + R->tdx * x) * p->iq;
+}
+
+/* The piece holding column x; *near: the near end's point when the last
+ * piece computed it (its far end), else computed. */
+static void piece_at(const soft_texture *tx, const rowtex *R, int x, texpiece *P, texpt *far)
+{
+    int w = tx->level[0].w, h = tx->level[0].h, x0 = x & ~15;
+    texpt p0;
+    if (far->x == x0)
+        p0 = *far;
+    else
+        pt_at(R, x0, &p0);
+    pt_at(R, x0 + 16, far);
+    P->piece = x >> 4, P->x0 = x0;
+    P->per_pixel = !(p0.q > 0 && far->q > 0 && far->q < 8 * p0.q && p0.q < 8 * far->q);
     if (!P->per_pixel) {
-        double sv0 = R->sb + R->sdx * x0, tv0 = R->tb + R->tdx * x0;
-        double s0 = sv0 / q0, t0 = tv0 / q0, s1 = (sv0 + R->sdx * 16) / q1, t1 = (tv0 + R->tdx * 16) / q1;
-        soft_pick_lod(tx, (R->sdx - s0 * R->qdx) / q0, (R->sdy - s0 * R->qdy) / q0, (R->tdx - t0 * R->qdx) / q0,
-                      (R->tdy - t0 * R->qdy) / q0, &P->pick);
-        P->U0 = texfix(s0 * w, tx->wrap_s), P->V0 = texfix(t0 * h, tx->wrap_t);
-        P->dU = stepfix((s1 - s0) * w / 16), P->dV = stepfix((t1 - t0) * h / 16);
+        if (tx->min_filter != tx->mag_filter || tx->levels > 1)
+            soft_pick_lod(tx, (R->sdx - p0.s * R->qdx) * p0.iq, (R->sdy - p0.s * R->qdy) * p0.iq,
+                          (R->tdx - p0.t * R->qdx) * p0.iq, (R->tdy - p0.t * R->qdy) * p0.iq, &P->pick);
+        else
+            soft_pick_lod(tx, 0, 0, 0, 0, &P->pick);   /* (one level, one filter: nothing to choose) */
+        P->U0 = texfix(p0.s * w, tx->wrap_s), P->V0 = texfix(p0.t * h, tx->wrap_t);
+        P->dU = stepfix((far->s - p0.s) * w / 16), P->dV = stepfix((far->t - p0.t) * h / 16);
     }
 }
 
@@ -540,6 +560,7 @@ typedef struct {
     int affine;
     rowtex R;
     texpiece P;
+    texpt far;                          /* the last piece's far end */
     int32_t U0, V0, dU, dV;
     soft_pick pick;
 } stagecur;
@@ -561,29 +582,42 @@ static void stage_row(int k, const attrs *A, int j, stagecur *C)
         C->R.tb = A->t[k].a0 + A->t[k].dx * fx0 + A->t[k].dy * fy, C->R.tdx = A->t[k].dx, C->R.tdy = A->t[k].dy;
         C->R.qb = A->q.a0 + A->q.dx * fx0 + A->q.dy * fy, C->R.qdx = A->q.dx, C->R.qdy = A->q.dy;
         C->P.piece = INT32_MIN;
+        C->far.x = INT32_MIN;
     }
 }
 
-/* Stage k's coordinates and level at column x: the pick for it. */
-static const soft_pick *stage_at(int k, stagecur *C, int x, int32_t *U, int32_t *V)
+/* Stage k at the start of a chunk (from column x to the next multiple of
+ * 16): U, V at x and their steps, and the pick; or *pp set, each pixel's
+ * coordinates divided (pp_at). The same values a pixel as its piece gives it. */
+static const soft_pick *chunk_start(int k, stagecur *C, int x, int32_t *U, int32_t *V, int32_t *dU, int32_t *dV,
+                                    int *pp)
 {
-    const soft_texture *tx = S.stage[k].tex;
+    *pp = 0;
     if (C->affine) {
-        *U = step_at(C->U0, x, C->dU), *V = step_at(C->V0, x, C->dV);
+        *U = step_at(C->U0, x, C->dU), *V = step_at(C->V0, x, C->dV), *dU = C->dU, *dV = C->dV;
         return &C->pick;
     }
-    if ((x >> 4) != C->P.piece)
-        piece_at(tx, &C->R, x, &C->P);
+    piece_at(S.stage[k].tex, &C->R, x, &C->P, &C->far);
     if (C->P.per_pixel) {
-        double q = C->R.qb + C->R.qdx * x, sv = C->R.sb + C->R.sdx * x, tv = C->R.tb + C->R.tdx * x, s0, t0;
-        if (q == 0)
-            q = 1e-30;
-        s0 = sv / q, t0 = tv / q;
-        soft_pick_lod(tx, (C->R.sdx - s0 * C->R.qdx) / q, (C->R.sdy - s0 * C->R.qdy) / q,
-                      (C->R.tdx - t0 * C->R.qdx) / q, (C->R.tdy - t0 * C->R.qdy) / q, &C->P.pick);
-        *U = texfix(s0 * tx->level[0].w, tx->wrap_s), *V = texfix(t0 * tx->level[0].h, tx->wrap_t);
-    } else
-        *U = step_at(C->P.U0, x - C->P.x0, C->P.dU), *V = step_at(C->P.V0, x - C->P.x0, C->P.dV);
+        *pp = 1, *U = *V = *dU = *dV = 0;
+        return &C->P.pick;
+    }
+    *U = step_at(C->P.U0, x - C->P.x0, C->P.dU), *V = step_at(C->P.V0, x - C->P.x0, C->P.dV);
+    *dU = C->P.dU, *dV = C->P.dV;
+    return &C->P.pick;
+}
+
+/* A per-pixel piece's coordinates and level at column x (into C's pick). */
+static const soft_pick *pp_at(int k, stagecur *C, int x, int32_t *U, int32_t *V)
+{
+    const soft_texture *tx = S.stage[k].tex;
+    double q = C->R.qb + C->R.qdx * x, sv = C->R.sb + C->R.sdx * x, tv = C->R.tb + C->R.tdx * x, s0, t0;
+    if (q == 0)
+        q = 1e-30;
+    s0 = sv / q, t0 = tv / q;
+    soft_pick_lod(tx, (C->R.sdx - s0 * C->R.qdx) / q, (C->R.sdy - s0 * C->R.qdy) / q, (C->R.tdx - t0 * C->R.qdx) / q,
+                  (C->R.tdy - t0 * C->R.qdy) / q, &C->P.pick);
+    *U = texfix(s0 * tx->level[0].w, tx->wrap_s), *V = texfix(t0 * tx->level[0].h, tx->wrap_t);
     return &C->P.pick;
 }
 
@@ -626,8 +660,8 @@ static __attribute__((always_inline)) inline void fast_span(int j, int xl, int x
     int i, k, atest = S.alpha_test;
     int32_t r, g, b, a, z = 0, dr = A->fr.dx, dg = A->fg.dx, db = A->fb.dx, da = A->fa.dx, dz = A->fz.dx;
     stagecur C[2];
-    inlevel IL;                                 /* (TEX 2: the level fetched here, for the piece ilkey) */
-    int inl = 0, ilkey = INT32_MIN, ilset = 0;
+    inlevel IL = { NULL, 0, 0, 0, 0, 0, 0 };    /* (TEX 2: the chunk's level, fetched here) */
+    int inl = 0;
 #define AT(F) ((int32_t)(uint32_t)(uint64_t)((F).v + ox * (F).dx + oy * (F).dy))
     r = AT(A->fr), g = AT(A->fg), b = AT(A->fb), a = AT(A->fa);
     if (DEPTH)
@@ -637,65 +671,79 @@ static __attribute__((always_inline)) inline void fast_span(int j, int xl, int x
         for (k = 0; k < 2; k++)
             if (S.stage[k].tex)
                 stage_row(k, A, j, &C[k]);
-    for (i = xl; i < xr; i++) {
-        int c[4], prim[4];
-        uint32_t zi = 0;
-        if (DEPTH) {
-            int32_t zz = z >> 14;
-            zi = zz < 0 ? 0 : zz > 65535 ? 65535 : (uint32_t)zz;
-            if (!atest && !depth_pass(zi, depth_get(i, j)))
-                goto next;
-        }
-        prim[0] = c[0] = clamp255((r + 0x8000) >> 16), prim[1] = c[1] = clamp255((g + 0x8000) >> 16);
-        prim[2] = c[2] = clamp255((b + 0x8000) >> 16), prim[3] = c[3] = clamp255((a + 0x8000) >> 16);
-        if (TEX == 1)
+    for (i = xl; i < xr;) {
+        /* A chunk: to the next multiple of 16 (the pieces' columns) with a texture, else the span. */
+        int end = TEX ? ((i | 15) + 1 < xr ? (i | 15) + 1 : xr) : xr;
+        int32_t U[2] = { 0, 0 }, V[2] = { 0, 0 }, dU[2] = { 0, 0 }, dV[2] = { 0, 0 };
+        int pp[2] = { 0, 0 };
+        const soft_pick *pk[2] = { NULL, NULL };
+        if (TEX)
             for (k = 0; k < 2; k++)
-                if (S.stage[k].tex) {
-                    int t[4];
-                    int32_t U, V;
-                    const soft_pick *pk = stage_at(k, &C[k], i, &U, &V);
-                    soft_fetch8(S.stage[k].tex, pk, U, V, t);
-                    comb8(k, t, prim, c);
-                }
-        if (TEX == 2) {                         /* one GL_REPEAT texture, a simple combine (select_span) */
-            int t[4];
-            int32_t U, V;
-            const soft_pick *pk = stage_at(0, &C[0], i, &U, &V);
-            int key = C[0].affine ? INT32_MAX : C[0].P.piece;
-            if (!ilset || key != ilkey || (!C[0].affine && C[0].P.per_pixel)) {  /* (a new piece, or a pick a pixel) */
-                ilset = 1, ilkey = key;
-                inl = pk->n == 1;
-                if (inl)
-                    inlevel_of(S.stage[0].tex, pk, &IL);
+                if (S.stage[k].tex)
+                    pk[k] = chunk_start(k, &C[k], i, &U[k], &V[k], &dU[k], &dV[k], &pp[k]);
+        if (TEX == 2 && (inl = !pp[0] && pk[0]->n == 1))
+            inlevel_of(S.stage[0].tex, pk[0], &IL);
+        for (; i < end; i++) {
+            int c[4], prim[4];
+            uint32_t zi = 0;
+            if (DEPTH) {
+                int32_t zz = z >> 14;
+                zi = zz < 0 ? 0 : zz > 65535 ? 65535 : (uint32_t)zz;
+                if (!atest && !depth_pass(zi, depth_get(i, j)))
+                    goto next;
             }
-            if (inl)
-                inl_fetch(&IL, U, V, t);
-            else
-                soft_fetch8(S.stage[0].tex, pk, U, V, t);
-            if (simple_rgb == SM_MOD)
-                c[0] = mul255(t[0], prim[0]), c[1] = mul255(t[1], prim[1]), c[2] = mul255(t[2], prim[2]);
-            else if (simple_rgb == SM_TEX)
-                c[0] = t[0], c[1] = t[1], c[2] = t[2];
-            c[3] = simple_alpha == SM_MOD ? mul255(t[3], prim[3]) : simple_alpha == SM_TEX ? t[3] : prim[3];
-        }
-        if (atest && !alpha_pass(c[3]))
-            goto next;
-        if (DEPTH) {
-            if (atest && !depth_pass(zi, depth_get(i, j)))
+            prim[0] = c[0] = clamp255((r + 0x8000) >> 16), prim[1] = c[1] = clamp255((g + 0x8000) >> 16);
+            prim[2] = c[2] = clamp255((b + 0x8000) >> 16), prim[3] = c[3] = clamp255((a + 0x8000) >> 16);
+            if (TEX == 1)
+                for (k = 0; k < 2; k++)
+                    if (S.stage[k].tex) {
+                        int t[4];
+                        if (pp[k]) {
+                            int32_t u, v;
+                            const soft_pick *p1 = pp_at(k, &C[k], i, &u, &v);
+                            soft_fetch8(S.stage[k].tex, p1, u, v, t);
+                        } else
+                            soft_fetch8(S.stage[k].tex, pk[k], U[k], V[k], t);
+                        comb8(k, t, prim, c);
+                    }
+            if (TEX == 2) {                     /* one GL_REPEAT texture, a simple combine (select_span) */
+                int t[4];
+                if (inl)
+                    inl_fetch(&IL, U[0], V[0], t);
+                else if (pp[0]) {
+                    int32_t u, v;
+                    const soft_pick *p1 = pp_at(0, &C[0], i, &u, &v);
+                    soft_fetch8(S.stage[0].tex, p1, u, v, t);
+                } else
+                    soft_fetch8(S.stage[0].tex, pk[0], U[0], V[0], t);
+                if (simple_rgb == SM_MOD)
+                    c[0] = mul255(t[0], prim[0]), c[1] = mul255(t[1], prim[1]), c[2] = mul255(t[2], prim[2]);
+                else if (simple_rgb == SM_TEX)
+                    c[0] = t[0], c[1] = t[1], c[2] = t[2];
+                c[3] = simple_alpha == SM_MOD ? mul255(t[3], prim[3]) : simple_alpha == SM_TEX ? t[3] : prim[3];
+            }
+            if (atest && !alpha_pass(c[3]))
                 goto next;
-            if (S.depth_write)
-                depth_put(i, j, zi);
+            if (DEPTH) {
+                if (atest && !depth_pass(zi, depth_get(i, j)))
+                    goto next;
+                if (S.depth_write)
+                    depth_put(i, j, zi);
+            }
+            if (BLEND)
+                blend8(i, j, c);
+            soft_count.pixels++;
+            color_put(i, j, c[0], c[1], c[2], c[3]);
+        next:
+            if (SMOOTH)                         /* (modulo 2^32, as the planes) */
+                r = (int32_t)((uint32_t)r + (uint32_t)dr), g = (int32_t)((uint32_t)g + (uint32_t)dg),
+                b = (int32_t)((uint32_t)b + (uint32_t)db), a = (int32_t)((uint32_t)a + (uint32_t)da);
+            if (DEPTH)
+                z = (int32_t)((uint32_t)z + (uint32_t)dz);
+            if (TEX)
+                for (k = 0; k < 2; k++)
+                    U[k] = (int32_t)((uint32_t)U[k] + (uint32_t)dU[k]), V[k] = (int32_t)((uint32_t)V[k] + (uint32_t)dV[k]);
         }
-        if (BLEND)
-            blend8(i, j, c);
-        soft_count.pixels++;
-        color_put(i, j, c[0], c[1], c[2], c[3]);
-    next:
-        if (SMOOTH)                             /* (modulo 2^32, as the planes) */
-            r = (int32_t)((uint32_t)r + (uint32_t)dr), g = (int32_t)((uint32_t)g + (uint32_t)dg),
-            b = (int32_t)((uint32_t)b + (uint32_t)db), a = (int32_t)((uint32_t)a + (uint32_t)da);
-        if (DEPTH)
-            z = (int32_t)((uint32_t)z + (uint32_t)dz);
     }
 }
 
