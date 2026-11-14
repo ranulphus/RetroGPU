@@ -440,15 +440,16 @@ static void sb_point(const dgl_cvtx *a)
     soft_point(&v, dgl_gl.point_size);
 }
 
-/* DGL_SOFT_TILE: the tiles' side in pixels (gl/docs/b2.md B2.7; default 64);
- * 0 draws each primitive at once. DGL_SOFT_EXACT: the core's spans (B2.8):
+/* DGL_SOFT_TILE: the tiles' side in pixels (gl/docs/b2.md B2.7); 0, the
+ * default (the owner's answer after bench-g400 showed tiles slower there,
+ * 2026-11-14), draws each primitive at once. DGL_SOFT_EXACT: the core's spans (B2.8):
  * 1 the reference ones (double precision), 2 the general integer ones without
  * the specialised runs; 0 (the default) all of them. DGL_SOFT_MMX=0: no MMX
  * spans (else used where the CPU has MMX). */
 static void install(void)
 {
     const char *e = getenv("DGL_SOFT_TILE");
-    soft_tiles(e && *e ? atoi(e) : 64);
+    soft_tiles(e && *e ? atoi(e) : 0);
     e = getenv("DGL_SOFT_EXACT");
     soft_exact(e && *e ? atoi(e) : 0);
     e = getenv("DGL_SOFT_MMX");

@@ -182,8 +182,8 @@ int main(int argc, char **argv)
     tg.color = (uint8_t *)color, tg.color_pitch = W * 2, tg.format = SOFT_RGB565, tg.width = W, tg.height = H;
     tg.depth = (uint8_t *)depth, tg.depth_pitch = W * 2, tg.depth_bits = 16;
     soft_target_set(&tg);
-    soft_tiles(64);
-    say("softbench: %dx%d RGB565, %d triangles a frame, tiles of 64\n", W, H, 2 * GX * GY);
+    soft_tiles(0);                              /* (GL's default: drawn at once) */
+    say("softbench: %dx%d RGB565, %d triangles a frame, drawn at once\n", W, H, 2 * GX * GY);
     say("  %-38s %12s %12s %12s %8s\n", "state", "reference", "integer C", "MMX", "MMX/ref");
     for (c = 0; c < C_COUNT; c++) {
         double ref = run(c, 1, 0, secs), fast = run(c, 0, 0, secs), mmx = run(c, 0, 1, secs);
