@@ -26,6 +26,11 @@ typedef struct {
  * counting them in dgl_sync_epoch. A texture drawn since the last completed
  * sync is busy: queued draws may still read its VRAM copy. */
 extern uint32_t dgl_sync_epoch;
+/* Moves whenever texels or the LUT are written (an upload, a sub-image, a LUT
+ * load). The G400 caches texels: the emitter writes the samplers again after
+ * a change, as it always had (a skipped TEXORG of the same value left stale
+ * texels in 86Box's G400: t18, t31, t32), not only when their values differ. */
+extern uint32_t dgl_tex_wgen;
 #define dgl_texture_busy(t) (MT(t)->drawn == dgl_sync_epoch + 1)
 #define dgl_texture_drawn(t) (MT(t)->drawn = dgl_sync_epoch + 1)
 void dgl_mga_synced(void);

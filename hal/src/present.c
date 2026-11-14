@@ -68,6 +68,7 @@ void engine_present(const mga_surface *src, const mga_surface *dst, int dx, int 
         return;
     if (th < 3)
         th = 3;
+    engine_regs_epoch++;                    /* (PLNWT, ALPHACTRL, the sampler) */
     engine_save(&saved);
     memset(&t, 0, sizeof t);
     t.color_off = dst->off;

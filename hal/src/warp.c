@@ -731,6 +731,7 @@ static int started(uint32_t busy)
 {
     long spin;
     uint32_t st = 0, t0;
+    engine_regs_epoch++;                /* (the WARPs' registers, their sizes among them) */
     engine_sync(200000);
     for (spin = 0, t0 = sys_time_us();
          !((st = MGA_RD32(MGAREG_STATUS)) & busy) && ((++spin & 1023) || (uint32_t)(sys_time_us() - t0) < 200000u);)

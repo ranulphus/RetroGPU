@@ -8,6 +8,7 @@
 
 static mga_target cur;
 uint32_t engine_resets, engine_timeouts;
+uint32_t engine_regs_epoch;            /* (hal.h) */
 unsigned setup_valid;                   /* (setup.h) */
 int setup_stale, setup_wrote_texsize;   /* (setup.h) */
 
@@ -80,6 +81,7 @@ static uint32_t maccess_for(int bpp, int zbits)
 
 void engine_init(int pitch_px, int bpp)
 {
+    engine_regs_epoch++;
     setup_invalidate();                     /* after a reset or a mode set nothing is known */
     engine_sync(200000);
     fifo_reset();
@@ -271,6 +273,7 @@ int engine_take(uint32_t timeout_us)
  * target, clip and MACCESS written now. */
 void engine_resync(void)
 {
+    engine_regs_epoch++;
     fifo_reset();
     setup_invalidate();
     mga_opmode = MGA_OPMODE_UNKNOWN;
@@ -678,6 +681,7 @@ int engine_vram_copy(uint32_t dst, uint32_t src, int pitch_px, int bpp, int w, i
     if (w <= 0 || h <= 0)
         return 1;
     if (!vcopy_open) {
+        engine_regs_epoch++;                    /* (PLNWT) */
         engine_warp_order();                    /* (DSTORG, PITCH, MACCESS and DWGCTL change) */
         fifo_reserve(4);
         MGA_WR32(MGAREG_PLNWT, 0xFFFFFFFFu);

@@ -18,6 +18,11 @@ void tex_emit_dual(const mga_texstate *t0, const mga_texstate *t1)
     emit_sampler(t1, TEXCTL2_DUALTEX, 1);               /* then map 1 alone */
 }
 
+void tex_emit_map1(const mga_texstate *t1)
+{
+    emit_sampler(t1, TEXCTL2_DUALTEX, 1);               /* tex_emit_dual's second half */
+}
+
 void tex_emit_combiner(uint32_t stage0, uint32_t stage1)
 {
     fifo_reserve(2);

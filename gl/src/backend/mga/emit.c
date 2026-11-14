@@ -187,6 +187,34 @@ static uint32_t stage_word(int stage, int unit, const dgl_texture *t)
     return w;
 }
 
+/* What validation last wrote, so that a change writes only what differs
+ * (fe.md F1): a texture or blend change used to rewrite every register of
+ * the block, about 40 writes and 3,000-4,800 cycles on a Pentium II. Valid
+ * while ok is set and the HAL's register epoch hasn't moved (resets, resyncs,
+ * VRAM copies, presents and WARP starts write some of these registers
+ * themselves); anything that marks the target dirty (swaps, clears,
+ * read-backs, the scissor), and any texel written (dgl_tex_wgen: the G400's
+ * texel cache), has every group written again too. */
+static struct {
+    int ok;
+    uint32_t epoch, wgen;
+    int textured, dual;                 /* the samplers' last emission */
+    mga_texstate t0, t1;
+    uint32_t w0, w1;                    /* the combiner's words */
+    int wt_set, wt_textured, wt_dual;   /* the WARPs' sizes, last warp_tex */
+    int wt_w0, wt_h0, wt_w1, wt_h1;
+    uint32_t wt_ctl2;
+    uint32_t alphactrl, plnwt, fogcol;
+} regs;
+
+static void regs_forget(void) { regs.ok = 0; }
+
+static uint32_t fogcol_for(void)
+{
+    return ((uint32_t)lrintf(dgl_gl.fog_color[0] * 255.0f) << 16) | ((uint32_t)lrintf(dgl_gl.fog_color[1] * 255.0f) << 8) |
+           (uint32_t)lrintf(dgl_gl.fog_color[2] * 255.0f);
+}
+
 static void validate_state(void)
 {
     int depth = dgl_gl.depth_test && rg_mga.z_off;
@@ -244,7 +272,9 @@ static void validate_state(void)
         unit0 != map0_unit)
         dgl_gl.dirty |= DGL_DIRTY_RASTER | DGL_DIRTY_TEXTURE;
     if (dgl_gl.dirty & (DGL_DIRTY_RASTER | DGL_DIRTY_FOG | DGL_DIRTY_TARGET | DGL_DIRTY_TEXTURE)) {
-        uint32_t white, w0 = 0, w1 = 0;
+        uint32_t white, w0 = 0, w1 = 0, plnwt, fogcol;
+        const int known = regs.ok && regs.epoch == engine_regs_epoch && regs.wgen == dgl_tex_wgen &&
+                          !(dgl_gl.dirty & DGL_DIRTY_TARGET);
         memset(&tstate, 0, sizeof tstate);
         textured = 0;
         dual = map1_copy = 0;
@@ -304,13 +334,34 @@ static void validate_state(void)
         tstate1.texctl2 |= tc2_extra;
         tctx.texctl2_1 = tstate1.texctl2 | TEXCTL2_DUALTEX;
         if (textured) {
-            if (dual)
-                tex_emit_dual(&tstate, &tstate1);
-            else
-                tex_emit(&tstate);
-            if (mga.has_dual_tex)
-                tex_emit_combiner(w0, w1);  /* zero words pass the legacy result through */
+            if (!known || regs.textured != textured || regs.dual != dual) {
+                if (dual)
+                    tex_emit_dual(&tstate, &tstate1);
+                else
+                    tex_emit(&tstate);
+                if (mga.has_dual_tex)
+                    tex_emit_combiner(w0, w1);  /* zero words pass the legacy result through */
+            } else {
+                /* The maps hold regs.t0 and regs.t1: only what differs.
+                 * In dual mode map 0's sequence reaches both maps, so a
+                 * change there writes both again. */
+                if (dual) {
+                    if (memcmp(&regs.t0, &tstate, sizeof tstate))
+                        tex_emit_dual(&tstate, &tstate1);
+                    else if (memcmp(&regs.t1, &tstate1, sizeof tstate1))
+                        tex_emit_map1(&tstate1);
+                } else if (memcmp(&regs.t0, &tstate, sizeof tstate))
+                    tex_emit_change(&tstate, &regs.t0);
+                if (mga.has_dual_tex && (w0 != regs.w0 || w1 != regs.w1))
+                    tex_emit_combiner(w0, w1);
+            }
+            regs.t0 = tstate;
+            regs.t1 = tstate1;
+            regs.w0 = w0;
+            regs.w1 = w1;
         }
+        regs.textured = textured;
+        regs.dual = dual;
         /* The WARP: Mesa's two pipes (everything iterated; DWGCTL, ALPHACTRL,
          * MACCESS and TEXCTL2 decide what is used), DWGCTL written here (the
          * setup writes it otherwise) through setup_dwgctl, so that the HAL's
@@ -318,15 +369,32 @@ static void validate_state(void)
          * them. */
         warp_now = 0;
         if (warp_on) {
+            const uint32_t e0 = engine_regs_epoch;
             if (warp_select(WARP_S | WARP_A | WARP_F | (dual ? WARP_T2 : 0)) == 0) {
+                /* (a start moves the epoch: the sizes go again) */
+                const int same = known && e0 == engine_regs_epoch && regs.wt_set && regs.wt_textured == !!textured &&
+                                 regs.wt_dual == dual &&
+                                 (!textured || (regs.wt_w0 == tstate.w_log2 && regs.wt_h0 == tstate.h_log2)) &&
+                                 (!dual || (regs.wt_w1 == tstate1.w_log2 && regs.wt_h1 == tstate1.h_log2 &&
+                                            regs.wt_ctl2 == tctx.texctl2_1));
                 warp_now = 1;
                 setup_dwgctl(tctx.dwgctl);
-                if (textured) {
-                    warp_tex(0, tstate.w_log2, tstate.h_log2, 0);
-                    if (dual)
-                        warp_tex(1, tstate1.w_log2, tstate1.h_log2, tctx.texctl2_1);
-                } else
-                    warp_tex_sizes(0, 0, 0, 0);
+                if (!same) {
+                    if (textured) {
+                        warp_tex(0, tstate.w_log2, tstate.h_log2, 0);
+                        if (dual)
+                            warp_tex(1, tstate1.w_log2, tstate1.h_log2, tctx.texctl2_1);
+                    } else
+                        warp_tex_sizes(0, 0, 0, 0);
+                    regs.wt_set = 1;
+                    regs.wt_textured = !!textured;
+                    regs.wt_dual = dual;
+                    regs.wt_w0 = tstate.w_log2;
+                    regs.wt_h0 = tstate.h_log2;
+                    regs.wt_w1 = tstate1.w_log2;
+                    regs.wt_h1 = tstate1.h_log2;
+                    regs.wt_ctl2 = tctx.texctl2_1;
+                }
             } else {
                 warp_on = 0;
                 DGL_WARN("DGL-WARN the WARP did not start: triangles are set up by the CPU");
@@ -352,12 +420,21 @@ static void validate_state(void)
             tctx.flags |= MGA_S_FOG;
         engine_set_maccess_flags(((tctx.flags & MGA_S_FOG) ? MACCESS_FOGEN : 0) |
                                  (dgl_gl.dither ? 0 : MACCESS_NODITHER));
+        plnwt = plnwt_for();
+        fogcol = (!known || (dgl_gl.dirty & DGL_DIRTY_FOG)) ? fogcol_for() : regs.fogcol;
         fifo_reserve(3);
-        MGA_WR32(MGAREG_ALPHACTRL, alphactrl);
-        MGA_WR32(MGAREG_PLNWT, plnwt_for());
-        MGA_WR32(MGAREG_FOGCOL, ((uint32_t)lrintf(dgl_gl.fog_color[0] * 255.0f) << 16) |
-                                ((uint32_t)lrintf(dgl_gl.fog_color[1] * 255.0f) << 8) |
-                                (uint32_t)lrintf(dgl_gl.fog_color[2] * 255.0f));
+        if (!known || alphactrl != regs.alphactrl)
+            MGA_WR32(MGAREG_ALPHACTRL, alphactrl);
+        if (!known || plnwt != regs.plnwt)
+            MGA_WR32(MGAREG_PLNWT, plnwt);
+        if (!known || fogcol != regs.fogcol)
+            MGA_WR32(MGAREG_FOGCOL, fogcol);
+        regs.alphactrl = alphactrl;
+        regs.plnwt = plnwt;
+        regs.fogcol = fogcol;
+        regs.epoch = engine_regs_epoch;
+        regs.wgen = dgl_tex_wgen;
+        regs.ok = 1;
     }
     dgl_gl.dirty &= ~(DGL_DIRTY_RASTER | DGL_DIRTY_FOG | DGL_DIRTY_TARGET | DGL_DIRTY_TEXTURE | DGL_DIRTY_CLIP);
     /* Guard band: keep screen coordinates inside +-2048 (the setup's range). */
@@ -381,6 +458,7 @@ static void validate(void)
     validate_state();
     if (engine_resets != resets) {
         dgl_gl.dirty |= DGL_DIRTY_REGS;
+        regs_forget();
         validate_state();
     }
 }
@@ -1347,6 +1425,7 @@ void dgl_mga_clear(GLbitfield mask)
     scissor_rows(&x0, &y0, &x1, &y1);
     engine_set_clip(x0, y0, x1, y1);
     /* Clears are engine fills: no blending or fog; the colour mask applies. */
+    regs_forget();                      /* (ALPHACTRL and PLNWT below) */
     engine_set_maccess_flags(0);
     fifo_reserve(2);
     MGA_WR32(MGAREG_ALPHACTRL, mga.has_alpha_blend ? ALPHACTRL_SRC(BLEND_ONE) | ALPHACTRL_DST(BLEND_ZERO)

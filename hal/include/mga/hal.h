@@ -215,6 +215,12 @@ int      engine_in_vblank(void);
 uint32_t engine_vcount(void);
 extern const mga_target *engine_target;
 extern uint32_t engine_resets, engine_timeouts;
+/* Moves whenever the HAL itself writes registers a client's drawing state
+ * owns (PLNWT, ALPHACTRL, the samplers, the WARPs' sizes): engine_init (a
+ * reset), engine_resync, a VRAM copy, a present, a WARP start. A client that
+ * skips writing registers it believes unchanged writes them all again when
+ * this has moved. */
+extern uint32_t engine_regs_epoch;
 extern uint32_t engine_timeout_diag[8];  /* the first engine_sync timeout's registers (engine.c) */
 extern uint32_t engine_fence_stuck;      /* WARP fences DWGSYNC never took, let go (engine.c) */
 /* The engine state the HAL owns (target, clip, MACCESS flags), saved and

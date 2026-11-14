@@ -38,6 +38,9 @@ void tex_emit_change(const mga_texstate *t, const mga_texstate *prev);
  * MGA_S_TEX2. tex_emit() with dualtex clear returns both maps to single
  * texturing. */
 void tex_emit_dual(const mga_texstate *t0, const mga_texstate *t1);
+/* Map 1's sampler alone, when the maps hold a tex_emit_dual's state and only
+ * map 1's changes (tex_emit_dual's second half). */
+void tex_emit_map1(const mga_texstate *t1);
 /* The G400 combiner: TDUALSTAGE0 and TDUALSTAGE1 (single texturing uses
  * stage 0 and wants stage 1 equal to it; zero passes the texel through). */
 void tex_emit_combiner(uint32_t stage0, uint32_t stage1);

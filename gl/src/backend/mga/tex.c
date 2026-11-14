@@ -37,6 +37,7 @@ static const dgl_palette *lut_pal;
 static unsigned lut_gen;
 
 uint32_t dgl_sync_epoch;
+uint32_t dgl_tex_wgen;              /* (mga_be.h) */
 
 void dgl_mga_synced(void)
 {
@@ -298,6 +299,7 @@ static void write_level(const dgl_texture *t, int l, int hwfmt, uint32_t off, in
 {
     static uint32_t row[1024];
     const dgl_level *L = &t->level[l];
+    dgl_tex_wgen++;
     volatile uint32_t *dst = (volatile uint32_t *)(mga_fb + off);
     int n = hw_w * (hwfmt == DGL_TW8 ? 1 : 2) / 4, span = hw_w < L->w ? hw_w : L->w, x, y, i;
     for (y = 0; y < hw_h; y++, dst += n) {
@@ -335,6 +337,7 @@ void dgl_texture_lut(const dgl_texture *t)
         dst[i] = dgl_pack_texel(DGL_TW16, p[0], p[1], p[2], 255);
     }
     engine_tlut_load(lut_off, 0, 256);
+    dgl_tex_wgen++;
     lut_pal = pal;
     lut_gen = pal->gen;
     dgl_texc.lut_loads++;
@@ -433,6 +436,7 @@ int dgl_white_texture(uint32_t *off)
 /* glTexSubImage2D's rectangle into the copy (sub_in_place): 1 when written. */
 int dgl_mga_tex_sub(dgl_texture *t, int level, int x, int y, int w, int h)
 {
+    dgl_tex_wgen++;                     /* (written now, or loaded again before the next draw) */
     return sub_in_place(t, level, x, y, w, h);
 }
 
