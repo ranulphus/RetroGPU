@@ -8,6 +8,7 @@
  * NEAREST_MIPMAP_* minification, else 0), mipmap levels chosen and blended
  * as the four MIPMAP filters say. In floating point: exactness first. */
 #include "soft/soft.h"
+#include "internal.h"
 #include <math.h>
 #include <stddef.h>
 
@@ -116,6 +117,108 @@ void soft_sample(const soft_texture *tx, double s, double t, double dsdx, double
             out[k] = (float)((1 - f) * a[k] + f * b[k]);
         return;
     }
+    }
+}
+
+/* ---- Integer sampling (B2.8's fast spans) -------------------------------- */
+
+static int ilog2(int v)
+{
+    int l = 0;
+    while ((1 << l) < v)
+        l++;
+    return l;
+}
+
+void soft_pick_lod(const soft_texture *tx, double dsdx, double dsdy, double dtdx, double dtdy, soft_pick *p)
+{
+    double lambda = -1e30, c = 0;
+    int min = tx->min_filter, last = tx->levels - 1, k;
+    p->n = 1, p->f8 = 0, p->lv[0] = p->lv[1] = 0;
+    if (min != tx->mag_filter || tx->levels > 1) {     /* (as soft_sample) */
+        double w = tx->level[0].w, h = tx->level[0].h, rho;
+        double ux = fabs(dsdx * w), uy = fabs(dsdy * w), vx = fabs(dtdx * h), vy = fabs(dtdy * h);
+        rho = ux > uy ? ux : uy;
+        if (vx > rho) rho = vx;
+        if (vy > rho) rho = vy;
+        lambda = rho > 0 ? log(rho) / log(2.0) : -1e30;
+        if (tx->mag_filter == SOFT_LINEAR && (min == SOFT_NEAREST_MIPMAP_NEAREST || min == SOFT_NEAREST_MIPMAP_LINEAR))
+            c = 0.5;
+    }
+    if (lambda <= c)
+        p->linear = tx->mag_filter == SOFT_LINEAR;
+    else
+        switch (min) {
+        case SOFT_NEAREST:
+        case SOFT_LINEAR:
+            p->linear = min == SOFT_LINEAR;
+            break;
+        case SOFT_NEAREST_MIPMAP_NEAREST:
+        case SOFT_LINEAR_MIPMAP_NEAREST: {
+            int d = lambda <= 0.5 ? 0 : (int)ceil(lambda + 0.5) - 1;
+            p->lv[0] = d > last ? last : d;
+            p->linear = min == SOFT_LINEAR_MIPMAP_NEAREST;
+            break;
+        }
+        default: {
+            int d = (int)floor(lambda);
+            double f = lambda - d;
+            p->linear = min == SOFT_LINEAR_MIPMAP_LINEAR;
+            if (d >= last)
+                p->lv[0] = last;
+            else {
+                if (d < 0)
+                    d = 0, f = 0;
+                p->lv[0] = d, p->lv[1] = d + 1, p->f8 = (int)(f * 256 + 0.5);
+                p->n = p->f8 ? 2 : 1;
+            }
+            break;
+        }
+        }
+    for (k = 0; k < 2; k++) {
+        p->sh_s[k] = ilog2(tx->level[0].w) - ilog2(tx->level[p->lv[k]].w);
+        p->sh_t[k] = ilog2(tx->level[0].h) - ilog2(tx->level[p->lv[k]].h);
+    }
+}
+
+static int wrap8(int i, int n, int mode)
+{
+    return mode == SOFT_REPEAT ? (i & (n - 1)) : i < 0 ? 0 : i >= n ? n - 1 : i;
+}
+
+static void texel8(const soft_level *L, int i, int j, int out[4])
+{
+    const uint8_t *p = L->rgba + ((size_t)j * (size_t)L->w + (size_t)i) * 4;
+    out[0] = p[0], out[1] = p[1], out[2] = p[2], out[3] = p[3];
+}
+
+static void level8(const soft_texture *tx, int lv, int sh_s, int sh_t, int linear, int32_t U, int32_t V, int out[4])
+{
+    const soft_level *L = &tx->level[lv];
+    int32_t u = U >> sh_s, v = V >> sh_t;
+    int i0, j0, fu, fv, k, t00[4], t10[4], t01[4], t11[4], ia, ib, ja, jb;
+    if (!linear) {
+        texel8(L, wrap8(u >> 16, L->w, tx->wrap_s), wrap8(v >> 16, L->h, tx->wrap_t), out);
+        return;
+    }
+    u -= 0x8000, v -= 0x8000;                   /* (the four texels about the point: centres at halves) */
+    i0 = u >> 16, j0 = v >> 16, fu = (u >> 8) & 255, fv = (v >> 8) & 255;
+    ia = wrap8(i0, L->w, tx->wrap_s), ib = wrap8(i0 + 1, L->w, tx->wrap_s);
+    ja = wrap8(j0, L->h, tx->wrap_t), jb = wrap8(j0 + 1, L->h, tx->wrap_t);
+    texel8(L, ia, ja, t00), texel8(L, ib, ja, t10), texel8(L, ia, jb, t01), texel8(L, ib, jb, t11);
+    for (k = 0; k < 4; k++)
+        out[k] = (t00[k] * (256 - fu) * (256 - fv) + t10[k] * fu * (256 - fv) + t01[k] * (256 - fu) * fv +
+                  t11[k] * fu * fv + 32768) >> 16;
+}
+
+void soft_fetch8(const soft_texture *tx, const soft_pick *p, int32_t U, int32_t V, int out[4])
+{
+    level8(tx, p->lv[0], p->sh_s[0], p->sh_t[0], p->linear, U, V, out);
+    if (p->n == 2) {
+        int b[4], k;
+        level8(tx, p->lv[1], p->sh_s[1], p->sh_t[1], p->linear, U, V, b);
+        for (k = 0; k < 4; k++)
+            out[k] = (out[k] * (256 - p->f8) + b[k] * p->f8 + 128) >> 8;
     }
 }
 

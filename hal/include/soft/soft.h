@@ -157,6 +157,10 @@ void soft_drop(void);               /* forget everything kept (its buffers are g
 int  soft_pending(void);            /* 1: something is kept */
 unsigned soft_epoch(void);
 
+/* The spans (B2.8): integer routines where the state allows (the default),
+ * or the reference span (double precision) for everything with on = 1. */
+void soft_exact(int on);
+
 /* Counters. */
 typedef struct {
     uint32_t tris, lines, points, pixels;

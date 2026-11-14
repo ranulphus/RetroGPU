@@ -433,11 +433,14 @@ static void sb_point(const dgl_cvtx *a)
 }
 
 /* DGL_SOFT_TILE: the tiles' side in pixels (gl/docs/b2.md B2.7; default 64);
- * 0 draws each primitive at once. */
+ * 0 draws each primitive at once. DGL_SOFT_EXACT=1: the core's reference
+ * spans (double precision) instead of its integer ones (B2.8). */
 static void install(void)
 {
     const char *e = getenv("DGL_SOFT_TILE");
     soft_tiles(e && *e ? atoi(e) : 64);
+    e = getenv("DGL_SOFT_EXACT");
+    soft_exact(e && *e && *e != '0');
     rg_sb.flush = soft_flush;
     rg_sb.drop = soft_drop;
     dgl_sink.begin = sb_begin;
