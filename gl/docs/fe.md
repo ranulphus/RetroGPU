@@ -138,6 +138,41 @@ Each is its own commit with its own checks; each step is measured with `PROF=2` 
 6. **F6, the rest**, if the numbers still point at them: fog's factor without `expf` per vertex (exactly the same
    values or not at all), immediate mode's copies, array fetches by layout, lightmap uploads, the 320x200 swap.
 
+### F1-F3's results (bench-g400, 2026-11-14 late)
+
+Commits fbf6798 (F1), 8f4ed2e (F2), 3dbe990 and b2a6f97 (F3). In 86Box, against main: every conformance frame on
+the G200, G400 and G450 the same (F2 and F3 also every register write and WARP vertex). On the card, GLQuake's
+`-fixedtime` snapshots are identical to main's byte for byte, two-pass and `-mtex`, with either copy of F3.
+
+**Normal builds, frames a second** (GLQuake demo1, write-combining on):
+
+| | main | F1-F3 | |
+|---|---|---|---|
+| 640x480 | 45.3 | 45.8 | +1.2% |
+| 320x200 | 53.0 | 55.3 | +4.4% |
+| 640x480 `-mtex` | 39.5 | 43.1 | +8.9% |
+| 320x200 `-mtex` | 43.2 | 47.4 | +9.8% |
+| 640x480, F3's Pentium copy (`DGL_P6=0`) | | 45.7 | |
+| 320x200, F3's Pentium copy | | 54.7 | |
+
+**What each step did** (`PROF=2`, cycles a triangle, F0 against now):
+- **F2 worked:** validation with nothing to write, GLQuake 147 to 24; batch 503 to 444; ring 278 to 222.
+- **F1 helped where state changes come without texel writes:** DOSBench S4T1 (a texture change a triangle)
+  validation 3,347 to 2,217, -19% library time. GLQuake `-mtex` validation 1,594 to 1,205 only: it writes a
+  lightmap between surfaces, and after any texel write everything is written again (the texel cache).
+  S4B1 (a blend change a triangle) didn't move: `glEnable`/`glDisable` of any capability marked every group,
+  the target among them, and a dirty target means everything. Fixed after this run (only the scissor marks the
+  target now); not yet measured.
+- **F3 did not pay.** The vertex's two stages together are the same (GLQuake 1,150 against 1,155), the Pentium
+  copy runs within 1% of the Pentium II's on GLQuake, and DOSBench's meshes are 4-5% slower in library time with
+  the Pentium II copy (CMOV in place of well-predicted branches, by the look of the stages). The comparisons
+  were not what a vertex costs.
+
+**So the targets are out of reach by trimming.** GLQuake's library time fell 6% (3,615 to 3,399 at 640x480).
+What remains a triangle at 320x200: the vertex about 1,150 (projection, colour and texture conversions, the
+reciprocal), draws about 750 (assembly, the fast path's set-up and loops), the general path for clipped
+triangles about 360, the ring and triangle work about 520, the swap's upscale about 650.
+
 ### F-last. Docs and numbers
 - Update this file, `gl/docs/porting.md` and DOSBench's records with before and after on bench-g400.
 

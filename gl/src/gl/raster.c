@@ -21,6 +21,22 @@ static int *cap_flag(GLenum cap)
     }
 }
 
+/* The groups a capability feeds (fe.md F1: a dirty target has the Matrox
+ * emitter write every register group again, so only the scissor marks it). */
+static unsigned cap_dirty(GLenum cap)
+{
+    switch (cap) {
+    case GL_SCISSOR_TEST: return DGL_DIRTY_TARGET;
+    case GL_TEXTURE_2D:
+    case GL_SHARED_TEXTURE_PALETTE_EXT: return DGL_DIRTY_TEXTURE | DGL_DIRTY_RASTER;
+    case GL_FOG:          return DGL_DIRTY_FOG | DGL_DIRTY_TEXTURE | DGL_DIRTY_RASTER;   /* (a white texel when untextured) */
+    case GL_DEPTH_TEST: case GL_CULL_FACE: case GL_BLEND: case GL_ALPHA_TEST: case GL_DITHER:
+    case GL_POLYGON_OFFSET_FILL: case GL_STENCIL_TEST:
+        return DGL_DIRTY_RASTER;
+    default:              return DGL_DIRTY_RASTER | DGL_DIRTY_TARGET | DGL_DIRTY_TEXTURE | DGL_DIRTY_FOG;
+    }
+}
+
 static void set_cap(GLenum cap, int on)
 {
     int *f = cap_flag(cap);
@@ -39,7 +55,7 @@ static void set_cap(GLenum cap, int on)
     }
     if (*f != on) {
         *f = on;
-        dgl_gl.dirty |= DGL_DIRTY_RASTER | DGL_DIRTY_TARGET | DGL_DIRTY_TEXTURE | DGL_DIRTY_FOG;
+        dgl_gl.dirty |= cap_dirty(cap);
     }
 }
 
