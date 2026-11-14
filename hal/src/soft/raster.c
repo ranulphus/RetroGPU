@@ -7,9 +7,16 @@
  * later steps against the same pixels. */
 #include "soft/soft.h"
 #include "internal.h"
+#include "mga/fp.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* The x87 at 53 bits, rounding to nearest, inside the core's entry points:
+ * GL's drawing calls already run so, but a flush can come from a swap or a
+ * read under the program's own control word (Quake 2 runs at 24 bits). */
+#define CORE_FPU_ENTER() FPU_ENTER()
+#define CORE_FPU_LEAVE() FPU_LEAVE()
 
 static soft_target T;
 static soft_state S;                    /* the state drawing uses: the caller's, or a kept one's at a flush */
@@ -339,8 +346,9 @@ static void span(int j, int xl, int xr, const attrs *A)
 /* The same fragment pipeline in integers, one routine per class of state
  * (smooth or flat, depth or not, textured or not, blended or not; the alpha
  * test and the colour mask inside), chosen when S or T changes. Colour steps
- * in 16.16 and 16-bit depth in 16.15 from each row's value at column 0, so a
- * pixel's values depend on its position alone; texture coordinates divided
+ * in 16.16 and 16-bit depth in 16.14 from each row's value at a column fixed
+ * for the primitive (its planes' origin), so a pixel's values depend on its
+ * position alone; texture coordinates divided
  * exactly at every 16th column (x a multiple of 16) and stepped in 16.16
  * level-0 texels between, the level of detail per 16-pixel piece (from the
  * derivatives at its first column); colour arithmetic in 8 bits. Stencil,
@@ -457,17 +465,20 @@ typedef struct {
  * steps stay as they were), held within 8192 texels for GL_CLAMP_TO_EDGE. */
 static int32_t texfix(double u, int n, int mode)
 {
-    if (mode == SOFT_REPEAT)
-        u -= floor(u / n) * n;
-    else
+    if (mode == SOFT_REPEAT) {
+        double f = u / n;
+        if (f > -1e9 && f < 1e9)                /* (wildly outside: the clamp below keeps it in range) */
+            u -= (double)mga_ifloor(f) * n;
         u = u < -8192 ? -8192 : u > 8192 ? 8192 : u;
-    return (int32_t)floor(u * 65536.0 + 0.5);
+    } else
+        u = u < -8192 ? -8192 : u > 8192 ? 8192 : u;
+    return mga_ifloor(u * 65536.0 + 0.5);
 }
 
 static int32_t stepfix(double du)       /* a step a pixel, within 1024 texels */
 {
     du = du < -1024 ? -1024 : du > 1024 ? 1024 : du;
-    return (int32_t)floor(du * 65536.0 + 0.5);
+    return mga_ifloor(du * 65536.0 + 0.5);
 }
 
 static void piece_at(const soft_texture *tx, const rowtex *R, int x, texpiece *P)
@@ -507,22 +518,44 @@ static void tex_at(int k, const rowtex *R, texpiece *P, int x, int out[4])
     soft_fetch8(tx, &P->pick, U, V, out);
 }
 
+/* A step a pixel in fixed point, held to +-2^28 (a primitive steeper than
+ * that is under a pixel wide: its spans are single pixels, which take no
+ * step). */
+static int32_t fixstep(double d, double sc)
+{
+    d *= sc;
+    return d < -268435456.0 ? -268435456 : d > 268435456.0 ? 268435456 : mga_ifloor(d + 0.5);
+}
+
+/* The value at column xl from the row's value at column xref (inside the
+ * primitive) and the step: integers from xref on, modulo 2^32 as the steps
+ * after it are, so the same at any xl. (Values in range need no wrap: colour
+ * in 16.16 and depth in 16.14 leave room above their largest.) */
+static int32_t fixat(double vref, double sc, int xref, int xl, int32_t d)
+{
+    double v = vref * sc;
+    int64_t f = (v > -4e18 && v < 4e18 ? mga_ifloor64(v + 0.5) : 0) + (int64_t)(xl - xref) * d;
+    return (int32_t)(uint32_t)(uint64_t)f;
+}
+
 static __attribute__((always_inline)) inline void fast_span(int j, int xl, int xr, const attrs *A, const int SMOOTH,
                                                             const int DEPTH, const int TEX, const int BLEND)
 {
-    double fx0 = 0.5 - A->ox, fy = (j + 0.5) - A->oy;
+    int xref = A->ox > -1e9 && A->ox < 1e9 ? mga_ifloor(A->ox) : 0;    /* (the planes' origin's column) */
+    double fxr = (xref + 0.5) - A->ox, fx0 = 0.5 - A->ox, fy = (j + 0.5) - A->oy;
     int i, k, atest = S.alpha_test;
     int32_t r, g, b, a, z = 0, dr, dg, db, da, dz = 0;
     rowtex R[2];
     texpiece P[2];
 #define ROWV(P_) ((P_).a0 + (P_).dx * fx0 + (P_).dy * fy)
-#define FIX0(P_, sc, d) ((int32_t)((int64_t)floor(ROWV(P_) * (sc) + 0.5) + (int64_t)xl * (d)))
-    dr = (int32_t)floor(A->r.dx * 65536.0 + 0.5), dg = (int32_t)floor(A->g.dx * 65536.0 + 0.5);
-    db = (int32_t)floor(A->b.dx * 65536.0 + 0.5), da = (int32_t)floor(A->a.dx * 65536.0 + 0.5);
-    r = FIX0(A->r, 65536.0, dr), g = FIX0(A->g, 65536.0, dg), b = FIX0(A->b, 65536.0, db), a = FIX0(A->a, 65536.0, da);
+#define REFV(P_) ((P_).a0 + (P_).dx * fxr + (P_).dy * fy)
+    dr = fixstep(A->r.dx, 65536.0), dg = fixstep(A->g.dx, 65536.0), db = fixstep(A->b.dx, 65536.0);
+    da = fixstep(A->a.dx, 65536.0);
+    r = fixat(REFV(A->r), 65536.0, xref, xl, dr), g = fixat(REFV(A->g), 65536.0, xref, xl, dg);
+    b = fixat(REFV(A->b), 65536.0, xref, xl, db), a = fixat(REFV(A->a), 65536.0, xref, xl, da);
     if (DEPTH) {
-        dz = (int32_t)floor(A->z.dx * 32768.0 + 0.5);
-        z = FIX0(A->z, 32768.0, dz);
+        dz = fixstep(A->z.dx, 16384.0);
+        z = fixat(REFV(A->z), 16384.0, xref, xl, dz);
     }
     if (TEX)
         for (k = 0; k < 2; k++)
@@ -533,12 +566,12 @@ static __attribute__((always_inline)) inline void fast_span(int j, int xl, int x
                 P[k].piece = INT32_MIN;
             }
 #undef ROWV
-#undef FIX0
+#undef REFV
     for (i = xl; i < xr; i++) {
         int c[4], prim[4];
         uint32_t zi = 0;
         if (DEPTH) {
-            int32_t zz = z >> 15;
+            int32_t zz = z >> 14;
             zi = zz < 0 ? 0 : zz > 65535 ? 65535 : (uint32_t)zz;
             if (!atest && !depth_pass(zi, depth_get(i, j)))
                 goto next;
@@ -565,10 +598,11 @@ static __attribute__((always_inline)) inline void fast_span(int j, int xl, int x
         soft_count.pixels++;
         color_put(i, j, c[0], c[1], c[2], c[3]);
     next:
-        if (SMOOTH)
-            r += dr, g += dg, b += db, a += da;
+        if (SMOOTH)                             /* (modulo 2^32, as fixat's base) */
+            r = (int32_t)((uint32_t)r + (uint32_t)dr), g = (int32_t)((uint32_t)g + (uint32_t)dg),
+            b = (int32_t)((uint32_t)b + (uint32_t)db), a = (int32_t)((uint32_t)a + (uint32_t)da);
         if (DEPTH)
-            z += dz;
+            z = (int32_t)((uint32_t)z + (uint32_t)dz);
     }
 }
 
@@ -632,12 +666,29 @@ static int first_row(int64_t y)
     return S.fill_rule == SOFT_FILL_BOTTOM_LEFT ? (int)floor_div(y - 8, 16) + 1 : (int)ceil_div(y - 8, 16);
 }
 
-/* The first pixel whose centre is at or right of the edge Va->Vb on the row
- * whose centre is yc (all in 1/16 pixels; Yb > Ya). */
-static int edge_x(int64_t Xa, int64_t Ya, int64_t Xb, int64_t Yb, int64_t yc)
+/* An edge Va->Vb (1/16 pixels; Yb > Ya) a row at a time: on the row whose
+ * centre is yc, the first pixel whose centre is at or right of it is
+ * q = ceil(N / D), N = (Xa - 8) dy + (yc - Ya)(Xb - Xa), D = 16 dy. N grows
+ * by S = 16 (Xb - Xa) a row; q and the remainder q D - N step exactly, with
+ * no division after the first row. */
+typedef struct { int64_t q, rem, D, qs, rs; } edge;
+
+static void edge_at(edge *e, int64_t Xa, int64_t Ya, int64_t Xb, int64_t Yb, int64_t yc)
 {
-    int64_t dy = Yb - Ya;
-    return (int)ceil_div((Xa - 8) * dy + (yc - Ya) * (Xb - Xa), 16 * dy);
+    int64_t dy = Yb - Ya, N = (Xa - 8) * dy + (yc - Ya) * (Xb - Xa), S = 16 * (Xb - Xa);
+    e->D = 16 * dy;
+    e->q = ceil_div(N, e->D);
+    e->rem = e->q * e->D - N;                   /* (0 <= rem < D) */
+    e->qs = floor_div(S, e->D);
+    e->rs = S - e->qs * e->D;                   /* (0 <= rs < D) */
+}
+
+static void edge_next(edge *e)
+{
+    e->q += e->qs;
+    e->rem -= e->rs;
+    if (e->rem < 0)
+        e->q++, e->rem += e->D;
 }
 
 /* A triangle's pixels, its vertices on the 1/16 grid in any order: each
@@ -646,7 +697,8 @@ static int edge_x(int64_t Xa, int64_t Ya, int64_t Xb, int64_t Yb, int64_t yc)
 static void cover(const int64_t *Xin, const int64_t *Yin, const attrs *A)
 {
     int64_t X[3], Y[3], area2, t;
-    int i, j, j0, j1, long_left, bottom = S.fill_rule == SOFT_FILL_BOTTOM_LEFT;
+    int i, j, j0, j1, long_left, bottom = S.fill_rule == SOFT_FILL_BOTTOM_LEFT, upper = 0, lower = 0;
+    edge el, eu, ew;                            /* the long edge, the upper and lower short ones */
     for (i = 0; i < 3; i++)
         X[i] = Xin[i], Y[i] = Yin[i];
     for (i = 0; i < 2; i++)                     /* (sorted by y, stably) */
@@ -663,13 +715,25 @@ static void cover(const int64_t *Xin, const int64_t *Yin, const attrs *A)
     j1 = first_row(Y[2]);
     if (j0 < S.scissor[1]) j0 = S.scissor[1];
     if (j1 > S.scissor[3]) j1 = S.scissor[3];
-    for (j = j0; j < j1; j++) {
+    if (j0 >= j1)
+        return;
+    edge_at(&el, X[0], Y[0], X[2], Y[2], 16 * (int64_t)j0 + 8);
+    for (j = j0; j < j1; j++, edge_next(&el)) {
         int64_t yc = 16 * (int64_t)j + 8;
-        int xlong = edge_x(X[0], Y[0], X[2], Y[2], yc), xshort, xl, xr;
-        if (bottom ? yc <= Y[1] : yc < Y[1])
-            xshort = edge_x(X[0], Y[0], X[1], Y[1], yc);
-        else
-            xshort = edge_x(X[1], Y[1], X[2], Y[2], yc);
+        int xlong = (int)el.q, xshort, xl, xr;
+        if (bottom ? yc <= Y[1] : yc < Y[1]) {  /* (the upper short edge: rows from the top, one after another) */
+            if (upper++)
+                edge_next(&eu);
+            else
+                edge_at(&eu, X[0], Y[0], X[1], Y[1], yc);
+            xshort = (int)eu.q;
+        } else {                                /* (then the lower one) */
+            if (lower++)
+                edge_next(&ew);
+            else
+                edge_at(&ew, X[1], Y[1], X[2], Y[2], yc);
+            xshort = (int)ew.q;
+        }
         xl = long_left ? xlong : xshort;
         xr = long_left ? xshort : xlong;
         if (xl < S.scissor[0]) xl = S.scissor[0];
@@ -694,7 +758,7 @@ static plane plane_of(double a0, double a1, double a2, const double *px, const d
     return p;
 }
 
-void soft_triangle(const soft_vertex *a, const soft_vertex *b, const soft_vertex *c)
+static void triangle_now(const soft_vertex *a, const soft_vertex *b, const soft_vertex *c)
 {
     const soft_vertex *v[3] = { a, b, c }, *t;
     int64_t X[3], Y[3], area2;
@@ -708,8 +772,8 @@ void soft_triangle(const soft_vertex *a, const soft_vertex *b, const soft_vertex
     if (v[2]->y < v[1]->y) t = v[1], v[1] = v[2], v[2] = t;
     if (v[1]->y < v[0]->y) t = v[0], v[0] = v[1], v[1] = t;
     for (i = 0; i < 3; i++) {
-        X[i] = (int64_t)floor((double)v[i]->x * 16.0 + 0.5);
-        Y[i] = (int64_t)floor((double)v[i]->y * 16.0 + 0.5);
+        X[i] = mga_ifloor64((double)v[i]->x * 16.0 + 0.5);
+        Y[i] = mga_ifloor64((double)v[i]->y * 16.0 + 0.5);
         px[i] = (double)X[i] / 16.0;
         py[i] = (double)Y[i] / 16.0;
     }
@@ -822,7 +886,7 @@ static void line_attrs(attrs *A, const soft_vertex *a, const soft_vertex *b, int
  * the diamond-exit test; where the plain parallelogram would decide
  * otherwise, that end moves to the pixel's boundary along the line. The
  * width goes across the minor axis. */
-void soft_line(const soft_vertex *a, const soft_vertex *b, float width)
+static void line_now(const soft_vertex *a, const soft_vertex *b, float width)
 {
     float dx = a->x - b->x, dy = a->y - b->y;
     float x1diff = a->x - ffloor(a->x) - 0.5f, y1diff = a->y - ffloor(a->y) - 0.5f;
@@ -935,7 +999,7 @@ void soft_line(const soft_vertex *a, const soft_vertex *b, float width)
 /* A point: OpenGL's square (llvmpipe's legacy points, lp_setup_point.c),
  * positions on a 1/256 grid there. A centre on a pixel's boundary goes, in y,
  * the way the fill rule's horizontal edges do. */
-void soft_point(const soft_vertex *v, float size)
+static void point_now(const soft_vertex *v, float size)
 {
     int64_t X = round_even(256.0 * v->x), Y = round_even(256.0 * v->y) - (S.fill_rule == SOFT_FILL_BOTTOM_LEFT);
     int64_t w = (round_even(256.0 * size) + 127) >> 8, x0, y0;
@@ -1191,7 +1255,7 @@ static void emit_rect(int x0, int y0, int x1, int y1, const attrs *A)
     draw_rect(x0, y0, x1, y1, A);
 }
 
-void soft_clear(unsigned what, const float rgba[4], double depth, unsigned stencil)
+static void clear_now(unsigned what, const float rgba[4], double depth, unsigned stencil)
 {
     int tries;
     for (tries = 0; tile_size && tries < 2; tries++) {
@@ -1208,7 +1272,7 @@ void soft_clear(unsigned what, const float rgba[4], double depth, unsigned stenc
     draw_clear(what, rgba, depth, stencil);
 }
 
-void soft_flush(void)
+static void flush_now(void)
 {
     int tx, ty, i;
     if (!kept_cmds)
@@ -1258,3 +1322,40 @@ void soft_tiles(int size)
 
 int soft_pending(void) { return kept_cmds != 0; }
 unsigned soft_epoch(void) { return epoch_n; }
+
+/* ---- The entry points, at 53 bits (CORE_FPU_ENTER) -------------------------- */
+
+void soft_triangle(const soft_vertex *a, const soft_vertex *b, const soft_vertex *c)
+{
+    CORE_FPU_ENTER();
+    triangle_now(a, b, c);
+    CORE_FPU_LEAVE();
+}
+
+void soft_line(const soft_vertex *a, const soft_vertex *b, float width)
+{
+    CORE_FPU_ENTER();
+    line_now(a, b, width);
+    CORE_FPU_LEAVE();
+}
+
+void soft_point(const soft_vertex *v, float size)
+{
+    CORE_FPU_ENTER();
+    point_now(v, size);
+    CORE_FPU_LEAVE();
+}
+
+void soft_clear(unsigned what, const float rgba[4], double depth, unsigned stencil)
+{
+    CORE_FPU_ENTER();
+    clear_now(what, rgba, depth, stencil);
+    CORE_FPU_LEAVE();
+}
+
+void soft_flush(void)
+{
+    CORE_FPU_ENTER();
+    flush_now();
+    CORE_FPU_LEAVE();
+}

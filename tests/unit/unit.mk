@@ -20,7 +20,18 @@ UNIT_test_rgdev := hal/src/rg/device.c
 UNIT_test_softcov := hal/src/soft/raster.c hal/src/soft/texture.c
 UNIT_test_softfmt := hal/src/soft/raster.c hal/src/soft/texture.c
 UNIT_test_softtile := hal/src/soft/raster.c hal/src/soft/texture.c
-UNIT32_TESTS := test_trap test_setupgold test_fp test_edges
+UNIT32_TESTS := test_trap test_setupgold test_fp test_edges test_softcov test_softfmt test_softtile
+
+# The software core's speed by class of state (gl/docs/b2.md B2.8): 32-bit, x87, the DOS library's flags.
+SOFTBENCH_CFLAGS := -std=gnu99 -O2 -march=i586 -mtune=pentium2 -m32 -mfpmath=387 -Wall -Wextra -Werror -Ihal/include
+build/host32/softbench: tests/soft/softbench.c hal/src/soft/raster.c hal/src/soft/texture.c hal/src/soft/internal.h \
+                        hal/include/soft/soft.h
+	@mkdir -p $(dir $@)
+	$(Q)echo "  CC32    $@"
+	$(Q)$(HOST_CC) $(SOFTBENCH_CFLAGS) -o $@ tests/soft/softbench.c hal/src/soft/raster.c hal/src/soft/texture.c -lm
+softbench: build/host32/softbench
+	build/host32/softbench $(SECS)
+.PHONY: softbench
 
 tests-host: $(UNIT_TESTS:%=build/host/tests/%) $(UNIT32_TESTS:%=build/host32/tests/%) build/ow/GLIDE2X.OVL
 	@set -e; for t in $(UNIT_TESTS:%=build/host/tests/%) $(UNIT32_TESTS:%=build/host32/tests/%); do \
