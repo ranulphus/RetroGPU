@@ -44,7 +44,7 @@ typedef struct {
 /* What the device gave. */
 typedef struct {
     int width, height, pitch_px;
-    int double_buffer, depth_bits, vsync;
+    int double_buffer, depth_bits, stencil_bits, vsync;
     uint32_t mem_start, mem_end;    /* the video memory left after the buffers (textures) */
     unsigned window;                /* a GLOS window's handle, 0 full screen */
     uint32_t vram_bytes;

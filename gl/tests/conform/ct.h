@@ -10,6 +10,11 @@
 
 #define CT_W 640
 #define CT_H 480
+/* Stencil bits a test asks for: the Makefile sets CT_STENCIL for those that
+   use it (t33); 0 for the rest, whose contexts stay as they were. */
+#ifndef CT_STENCIL
+#define CT_STENCIL 0
+#endif
 
 void ct_run(void);                      /* the test */
 void ct_frame(const char *name);        /* read back the frame being drawn and save <name>.ppm */

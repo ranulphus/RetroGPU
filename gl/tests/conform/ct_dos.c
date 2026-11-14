@@ -38,7 +38,14 @@ int main(int argc, char **argv)
 {
     GLenum e;
     hx_init(argc, argv, CT_NAME);
+#if CT_STENCIL
+    DGLConfig c = { 0 };
+    c.width = CT_W, c.height = CT_H, c.color_bits = 16, c.depth_bits = 16, c.double_buffer = 1, c.vsync = 1;
+    c.stencil_bits = CT_STENCIL;
+    if (dglInit(&c) != 0) {
+#else
     if (dglInit(NULL) != 0) {
+#endif
         hx_test("init", 0, "%s", dglGetErrorString());
         hx_done(HX_INIT_FAILED);
     }

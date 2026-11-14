@@ -18,5 +18,11 @@
  "combine": {
   "tol": 36,
   "_why": "The G400 combiner's multiplies drop bits ((a*b)>>8 in 86Box's model, which truncates; the datasheet's '16:16:16, saturate, rup' is not settled on silicon), and unit 1's x2 and x4 (modbright) scale the loss of two multiplies in a row: those quads come out a few levels darker than Mesa (worst 25 and 33). x1, ADD and unit 0's x2 stay within 17."
+ },
+ "t33": {
+  "only": [
+   "soft"
+  ],
+  "_why": "Stencil: the software renderer's (8 bits). Matrox cards report none, so their frames would differ from Mesa's by design."
  }
 }

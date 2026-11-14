@@ -111,6 +111,9 @@ def run_ref(test, out):
 def check(test, card, pc=None):
     out = os.path.join(ROOT, "out", "conform", pc or card, test)
     ref = os.path.join(ROOT, "out", "conform", "ref", test)
+    only = MANIFEST.get(test, {}).get("only")
+    if only and (pc or card) not in only:       # (a test for some renderers only: t33's stencil)
+        return {"test": test, "card": pc or card, "run": "SKIPPED", "frames": {}, "ok": True}
     if card == "soft" and not pc:
         run_ref(test, ref)
         res = run_soft(test, out)

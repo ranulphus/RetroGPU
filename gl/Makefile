@@ -49,6 +49,8 @@ HAL_SRCS := $(addprefix $(MGAHAL)/hal/,src/debug/serial.c src/pci.c src/chip.c s
               src/virge/chip.c src/virge/engine2d.c src/virge/cursor.c src/virge/tri.c src/rg/virge.c \
               src/rg/mem.c src/soft/raster.c src/soft/texture.c port/djgpp.c)
 hal_objs = $(patsubst $(MGAHAL)/%.c,build/$(1)/mgahal/%.o,$(2))
+# Per-test build flags of the conformance tests: those that ask for stencil bits (t33; ct.h's CT_STENCIL).
+ct_flags = $(if $(filter t33,$(1)),-DCT_STENCIL=8)
 DGL_SRCS := $(wildcard src/dgl/*.c) $(wildcard src/gl/*.c) $(wildcard src/backend/mga/*.c) $(wildcard src/backend/soft/*.c)
 LIB := build/lib/libGL.a
 
@@ -139,12 +141,12 @@ build/exe/conform/%.EXE: $(LIB) tests/conform/ct_dos.c tests/conform/ct.h tests/
                          $(MGAHAL)/tests/shim/hx.c $$(wildcard tests/conform/$$(shell echo $$* | tr A-Z a-z)_*.c)
 	@mkdir -p $(dir $@)
 	$(Q)echo "  DJLD    $@"
-	$(Q)$(DJCC) $(DJ_CFLAGS) $(DJ_TESTFLAGS) -DCT_NAME='"$*"' -o $@ $(wildcard tests/conform/$(shell echo $* | tr A-Z a-z)_*.c) \
+	$(Q)$(DJCC) $(DJ_CFLAGS) $(DJ_TESTFLAGS) -DCT_NAME='"$*"' $(call ct_flags,$(shell echo $* | tr A-Z a-z)) -o $@ $(wildcard tests/conform/$(shell echo $* | tr A-Z a-z)_*.c) \
 	  tests/conform/ct_dos.c $(MGAHAL)/tests/shim/hx.c $(LIB) -lm
 	@if [ -e "$(@:.EXE=.exe)" ] && ! [ "$(@:.EXE=.exe)" -ef "$@" ]; then rm -f "$(@:.EXE=.exe)"; fi
 build/host/conform/%: $$(wildcard tests/conform/$$*_*.c) tests/conform/ct_host.c tests/conform/ct.h tests/conform/ct_tex.h
 	@mkdir -p $(dir $@)
-	$(Q)$(HOST_CC) -std=gnu99 -O1 -Wall -Wextra -Werror -o $@ $(wildcard tests/conform/$*_*.c) tests/conform/ct_host.c \
+	$(Q)$(HOST_CC) -std=gnu99 -O1 -Wall -Wextra -Werror $(call ct_flags,$*) -o $@ $(wildcard tests/conform/$*_*.c) tests/conform/ct_host.c \
 	  -lOSMesa -lm
 conform-dos: $(foreach t,$(CONFORM),build/exe/conform/$(shell echo $(t) | tr a-z A-Z).EXE)
 conform-host: $(foreach t,$(CONFORM),build/host/conform/$(t))
@@ -239,9 +241,9 @@ build/rig/mgahal/%.o: $(MGAHAL)/%.c
 	$(Q)$(HOST_CC) $(RIG_CFLAGS) -MMD -MP -c -o $@ $<
 build/rig/libGL.a: $(DGL_SRCS:%.c=build/rig/%.o) $(GEN_SRCS:%.c=build/rig/%.o) $(call hal_objs,rig,$(RIG_HAL))
 	$(Q)rm -f $@ && ar rcs $@ $^
-build/rig/conform/%: build/rig/libGL.a tests/conform/ct_rig.c
+build/rig/conform/%: build/rig/libGL.a tests/conform/ct_rig.c tests/conform/ct.h $$(wildcard tests/conform/$$*_*.c)
 	@mkdir -p $(dir $@)
-	$(Q)$(HOST_CC) $(RIG_CFLAGS) -static -DCT_NAME='"$*"' -o $@ $(wildcard tests/conform/$*_*.c) \
+	$(Q)$(HOST_CC) $(RIG_CFLAGS) -static -DCT_NAME='"$*"' $(call ct_flags,$*) -o $@ $(wildcard tests/conform/$*_*.c) \
 	  tests/conform/ct_rig.c build/rig/libGL.a -lm
 build/rig/rigbench: build/rig/libGL.a tests/rig/rigbench.c
 	$(Q)$(HOST_CC) $(RIG_CFLAGS) -static -o $@ tests/rig/rigbench.c build/rig/libGL.a -lm

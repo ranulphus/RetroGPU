@@ -39,7 +39,7 @@ void ct_log(const char *fmt, ...)
 int main(void)
 {
     /* RGBA8 with a 16-bit depth buffer, as DOS-GL's context. */
-    OSMesaContext ctx = OSMesaCreateContextExt(OSMESA_RGBA, 16, 0, 0, NULL);
+    OSMesaContext ctx = OSMesaCreateContextExt(OSMESA_RGBA, 16, CT_STENCIL, 0, NULL);
     if (!ctx || !OSMesaMakeCurrent(ctx, buffer, GL_UNSIGNED_BYTE, CT_W, CT_H)) {
         fprintf(stderr, "ct_host: OSMesa context failed\n");
         return 2;

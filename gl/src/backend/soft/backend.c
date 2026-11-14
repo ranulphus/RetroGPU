@@ -205,6 +205,35 @@ static void env_stage(soft_stage *st, const dgl_texenv *e, int ifc)
     }
 }
 
+static int bfactor(GLenum f)
+{
+    switch (f) {
+    case GL_ZERO: return SOFT_B_ZERO;
+    case GL_ONE: return SOFT_B_ONE;
+    case GL_SRC_COLOR: return SOFT_B_SRC_COLOR;
+    case GL_ONE_MINUS_SRC_COLOR: return SOFT_B_ONE_MINUS_SRC_COLOR;
+    case GL_DST_COLOR: return SOFT_B_DST_COLOR;
+    case GL_ONE_MINUS_DST_COLOR: return SOFT_B_ONE_MINUS_DST_COLOR;
+    case GL_SRC_ALPHA: return SOFT_B_SRC_ALPHA;
+    case GL_ONE_MINUS_SRC_ALPHA: return SOFT_B_ONE_MINUS_SRC_ALPHA;
+    case GL_DST_ALPHA: return SOFT_B_DST_ALPHA;
+    case GL_ONE_MINUS_DST_ALPHA: return SOFT_B_ONE_MINUS_DST_ALPHA;
+    default: return SOFT_B_SRC_ALPHA_SATURATE;
+    }
+}
+
+static int sop(GLenum o)
+{
+    switch (o) {
+    case GL_ZERO: return SOFT_SO_ZERO;
+    case GL_REPLACE: return SOFT_SO_REPLACE;
+    case GL_INCR: return SOFT_SO_INCR;
+    case GL_DECR: return SOFT_SO_DECR;
+    case GL_INVERT: return SOFT_SO_INVERT;
+    default: return SOFT_SO_KEEP;
+    }
+}
+
 static void stage_for(soft_stage *st, int unit, int on)
 {
     dgl_texture *t = on ? dgl_unit_texture(unit) : NULL;
@@ -256,6 +285,23 @@ static void validate(void)
     st.depth_write = dgl_gl.depth_mask;
     stage_for(&st.stage[0], 0, dgl_gl.texture_2d);
     stage_for(&st.stage[1], 1, dgl_gl.texture_2d1);
+    st.fog = dgl_gl.fog;
+    st.fog_mode = dgl_gl.fog_mode == GL_LINEAR ? SOFT_FOG_LINEAR : dgl_gl.fog_mode == GL_EXP ? SOFT_FOG_EXP : SOFT_FOG_EXP2;
+    st.fog_per_vertex = 0;                      /* (per pixel: OSMesa's gallium drivers fog each fragment; t10) */
+    st.fog_start = dgl_gl.fog_start, st.fog_end = dgl_gl.fog_end, st.fog_density = dgl_gl.fog_density;
+    st.fog_color[0] = dgl_gl.fog_color[0], st.fog_color[1] = dgl_gl.fog_color[1], st.fog_color[2] = dgl_gl.fog_color[2];
+    st.alpha_test = dgl_gl.alpha_test;
+    st.alpha_func = (int)(dgl_gl.alpha_func - GL_NEVER);
+    st.alpha_ref = dgl_gl.alpha_ref;
+    st.stencil_test = dgl_gl.stencil_test && tg.stencil;
+    st.stencil_func = (int)(dgl_gl.stencil_func - GL_NEVER);
+    st.stencil_ref = (unsigned)dgl_gl.stencil_ref & 255u;
+    st.stencil_mask = dgl_gl.stencil_mask & 255u;
+    st.stencil_writemask = dgl_gl.stencil_writemask & 255u;
+    st.stencil_fail = sop(dgl_gl.stencil_fail), st.stencil_zfail = sop(dgl_gl.stencil_zfail);
+    st.stencil_zpass = sop(dgl_gl.stencil_zpass);
+    st.blend = dgl_gl.blend;
+    st.blend_src = bfactor(dgl_gl.blend_src), st.blend_dst = bfactor(dgl_gl.blend_dst);
     soft_state_set(&st);
 }
 
@@ -280,7 +326,7 @@ static void project(const dgl_cvtx *c, soft_vertex *v)
     v->r = c->r, v->g = c->g, v->b = c->b, v->a = c->a;
     v->tex[0][0] = c->s, v->tex[0][1] = c->t, v->tex[0][2] = 1.0f;
     v->tex[1][0] = c->s1, v->tex[1][1] = c->t1, v->tex[1][2] = 1.0f;
-    v->fog = 1.0f;
+    v->fog = c->eye_d;
 }
 
 /* Polygon offset (GL 1.1): the factor times the triangle's largest depth

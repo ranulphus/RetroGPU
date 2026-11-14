@@ -28,8 +28,9 @@ typedef struct {
 
 /* A vertex in window space. z 0..1; oow = 1/w (the clip w), for
  * perspective; colour 0..1; texture coordinates per unit (s, t, and q:
- * the texture coordinates' own w, 1 for GL 1.1's 2D ones); fog factor 0..1
- * (1: none of the fog colour). */
+ * the texture coordinates' own w, 1 for GL 1.1's 2D ones); fog: its fog
+ * coordinate (GL's eye distance), from which the fog factor is worked out
+ * at each pixel. */
 typedef struct {
     float x, y, z, oow;
     float r, g, b, a;
@@ -76,12 +77,27 @@ typedef struct {
     float constant[4];
 } soft_stage;
 
+/* Blend factors (GL 1.1's), fog modes and stencil operations. */
+enum { SOFT_B_ZERO, SOFT_B_ONE, SOFT_B_SRC_COLOR, SOFT_B_ONE_MINUS_SRC_COLOR, SOFT_B_DST_COLOR,
+       SOFT_B_ONE_MINUS_DST_COLOR, SOFT_B_SRC_ALPHA, SOFT_B_ONE_MINUS_SRC_ALPHA, SOFT_B_DST_ALPHA,
+       SOFT_B_ONE_MINUS_DST_ALPHA, SOFT_B_SRC_ALPHA_SATURATE };
+enum { SOFT_FOG_LINEAR, SOFT_FOG_EXP, SOFT_FOG_EXP2 };
+enum { SOFT_SO_KEEP, SOFT_SO_ZERO, SOFT_SO_REPLACE, SOFT_SO_INCR, SOFT_SO_DECR, SOFT_SO_INVERT };
+
 typedef struct {
     int      scissor[4];            /* x0, y0, x1, y1 (exclusive), within the target */
     unsigned color_mask;            /* bit 0 red, 1 green, 2 blue, 3 alpha */
     int      smooth;                /* 0: flat (the first vertex's colour) */
     int      depth_test, depth_func, depth_write;
     soft_stage stage[2];
+    int      fog, fog_mode;
+    int      fog_per_vertex;        /* the factor at the vertices, interpolated (else per pixel from the coordinate) */
+    float    fog_start, fog_end, fog_density, fog_color[3];
+    int      alpha_test, alpha_func; /* SOFT_NEVER .. SOFT_ALWAYS */
+    float    alpha_ref;
+    int      stencil_test, stencil_func, stencil_fail, stencil_zfail, stencil_zpass;
+    unsigned stencil_ref, stencil_mask, stencil_writemask;
+    int      blend, blend_src, blend_dst;
 } soft_state;
 
 void soft_target_set(const soft_target *t);

@@ -52,6 +52,7 @@ int main(void)
     c.height = CT_H;
     c.double_buffer = 1;
     c.depth_bits = 16;
+    c.stencil_bits = CT_STENCIL;
     c.vsync = 0;                               /* no display: nothing to wait for */
     printf("HX-START %s %s\n", CT_NAME, dglVersion());
     if (dglInit(&c) != 0) {

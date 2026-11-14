@@ -125,6 +125,7 @@ static void open_args(rg_open *o, const DGLConfig *c)
     o->height = c->height;
     o->color_bits = c->color_bits;
     o->depth_bits = c->depth_bits;
+    o->stencil_bits = c->stencil_bits;
     o->double_buffer = c->double_buffer;
     o->vsync = c->vsync != 0;
     if ((e = getenv("DGL_VSYNC")) != NULL && *e)        /* a test or user override */
@@ -148,6 +149,7 @@ static int opened(const DGLConfig *c, const rg_opened *op)
     dgl_ctx.height = op->height;
     dgl_ctx.double_buffer = op->double_buffer;
     dgl_ctx.depth_bits = op->depth_bits;
+    dgl_ctx.stencil_bits = op->stencil_bits;
     dgl_ctx.vsync = op->vsync;
     dgl_ctx.window = op->window;
     dgl_ctx.active = 1;

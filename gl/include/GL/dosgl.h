@@ -18,6 +18,7 @@ typedef struct {
     int double_buffer;      /* nonzero for double buffering */
     int vsync;              /* nonzero to sync swaps to retrace */
     int scale_filter;       /* scaled modes: 0 = default (nearest), 1 nearest, 2 bilinear (v1.2) */
+    int stencil_bits;       /* 0 or 8: where the device has a stencil buffer (the software renderer's); else 0 */
 } DGLConfig;
 
 typedef struct {

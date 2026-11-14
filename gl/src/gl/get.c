@@ -73,7 +73,8 @@ static int query(GLenum p, double *v)
     /* The framebuffer DOS-GL has (16-bit RGB, no stencil, accumulation or aux buffers). */
     case GL_RGBA_MODE: case GL_SUBPIXEL_BITS: v[0] = p == GL_RGBA_MODE ? 1 : 4; return 1;
     case GL_DOUBLEBUFFER: v[0] = dgl_ctx.double_buffer; return 1;
-    case GL_STENCIL_BITS: case GL_INDEX_BITS: case GL_AUX_BUFFERS: case GL_STEREO: case GL_INDEX_MODE:
+    case GL_STENCIL_BITS: v[0] = dgl_ctx.active ? dgl_ctx.stencil_bits : 0; return 1;
+    case GL_INDEX_BITS: case GL_AUX_BUFFERS: case GL_STEREO: case GL_INDEX_MODE:
     case GL_ACCUM_RED_BITS: case GL_ACCUM_GREEN_BITS: case GL_ACCUM_BLUE_BITS: case GL_ACCUM_ALPHA_BITS:
         v[0] = 0; return 1;
     case GL_DRAW_BUFFER: v[0] = dgl_gl.draw_buffer; return 1;
