@@ -327,6 +327,7 @@ static void show_start(uint32_t off, int pitch_bytes)
     (void)off;
     (void)pitch_bytes;
 #else
+    PROF_SCOPE(PROF_FLIP);              /* (about 35 us a frame on bench-g400's G400: fe.md) */
     vbe_set_display_start(off, pitch_bytes, 16);
 #endif
 }
@@ -351,6 +352,7 @@ static void present(int to_front)
 {
     mga_surface rs, ds;
     uint32_t t0 = sys_time_us();
+    PROF_SCOPE(PROF_PRES);
     rs.off = rg_mga.front_off; rs.w = rg_mga.width; rs.h = rg_mga.height; rs.pitch_px = rg_mga.pitch_px;
     ds.off = rg_mga.disp_off[to_front ? rg_mga.disp_front : !rg_mga.disp_front];
     ds.w = rg_mga.plan.disp.width; ds.h = rg_mga.plan.disp.height; ds.pitch_px = rg_mga.disp_pitch_px;

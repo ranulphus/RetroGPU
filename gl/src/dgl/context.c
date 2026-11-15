@@ -353,10 +353,11 @@ static void prof_report(uint32_t tris)
         sw += prof_n[i];
 #define K(s) ((unsigned long)(prof_cyc[s] >> 10))
     DGL_ERR("DGL-PROF app=%lu fifo=%lu splane=%lu sinc=%lu strap=%lu xform=%lu valid=%lu clip=%lu proj=%lu setup=%lu "
-            "tex=%lu clear=%lu drain=%lu vsync=%lu swap=%lu tris=%lu wr=%lu fiford=%lu sw=%lu ovh=%lu",
+            "tex=%lu clear=%lu drain=%lu vsync=%lu swap=%lu flip=%lu pres=%lu tris=%lu wr=%lu fiford=%lu sw=%lu ovh=%lu",
             K(PROF_APP), K(PROF_FIFO), K(PROF_SPLANE), K(PROF_SINC), K(PROF_STRAP), K(PROF_D_XFORM),
             K(PROF_D_VALID), K(PROF_D_CLIP), K(PROF_D_PROJ), K(PROF_D_SETUP), K(PROF_D_TEX), K(PROF_D_CLEAR),
-            K(PROF_D_DRAIN), K(PROF_D_VSYNC), K(PROF_D_SWAP), (unsigned long)tris, (unsigned long)prof_wr,
+            K(PROF_D_DRAIN), K(PROF_D_VSYNC), K(PROF_D_SWAP), K(PROF_FLIP), K(PROF_PRES), (unsigned long)tris,
+            (unsigned long)prof_wr,
             (unsigned long)prof_fifo_rd, (unsigned long)sw, (unsigned long)prof_ovh);
 #ifdef DGL_PROF_FINE
     /* (log lines stop at 255 characters: the rest on lines of their own, for the DGL-PROF line before them) */
@@ -368,9 +369,10 @@ static void prof_report(uint32_t tris)
      * takes that out), and calls counted. */
 #define N(s) ((unsigned long)prof_n[s])
     DGL_ERR("DGL-PCNT app=%lu fifo=%lu splane=%lu sinc=%lu strap=%lu xform=%lu valid=%lu clip=%lu proj=%lu "
-            "setup=%lu tex=%lu clear=%lu drain=%lu vsync=%lu swap=%lu", N(PROF_APP), N(PROF_FIFO), N(PROF_SPLANE),
-            N(PROF_SINC), N(PROF_STRAP), N(PROF_D_XFORM), N(PROF_D_VALID), N(PROF_D_CLIP), N(PROF_D_PROJ),
-            N(PROF_D_SETUP), N(PROF_D_TEX), N(PROF_D_CLEAR), N(PROF_D_DRAIN), N(PROF_D_VSYNC), N(PROF_D_SWAP));
+            "setup=%lu tex=%lu clear=%lu drain=%lu vsync=%lu swap=%lu flip=%lu pres=%lu", N(PROF_APP), N(PROF_FIFO),
+            N(PROF_SPLANE), N(PROF_SINC), N(PROF_STRAP), N(PROF_D_XFORM), N(PROF_D_VALID), N(PROF_D_CLIP),
+            N(PROF_D_PROJ), N(PROF_D_SETUP), N(PROF_D_TEX), N(PROF_D_CLEAR), N(PROF_D_DRAIN), N(PROF_D_VSYNC),
+            N(PROF_D_SWAP), N(PROF_FLIP), N(PROF_PRES));
     DGL_ERR("DGL-PCNT fxf=%lu fprj=%lu ftri=%lu ring=%lu vidle=%lu batch=%lu c_verts=%lu c_binds=%lu c_xverts=%lu "
             "c_fverts=%lu", N(PROF_D_FXF), N(PROF_D_FPRJ), N(PROF_D_FTRI), N(PROF_D_RING), N(PROF_D_VIDLE),
             N(PROF_D_BATCH), dgl_pcount.verts, dgl_pcount.binds, dgl_pcount.xverts, dgl_pcount.fverts);

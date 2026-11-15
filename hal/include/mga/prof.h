@@ -20,6 +20,8 @@ enum {
     PROF_SINC,          /* setup_triangle: per-triangle increments */
     PROF_STRAP,         /* setup_triangle: per trapezoid (edges, starts, start) */
     PROF_VSYNC,         /* a swap waiting for the retrace (the device's: rg/mga.c) */
+    PROF_FLIP,          /* a swap's flip: the display start (rg/mga.c) */
+    PROF_PRES,          /* a scaled mode's present: the upscale and the sync after it (rg/mga.c) */
     PROF_CLIENT = 8,    /* the first stage a client may use */
     PROF_N = 24
 };
