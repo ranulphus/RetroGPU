@@ -263,7 +263,7 @@ def config_text(a, serial, cimg, bootimg, extra_hdd, tail=""):
         # COM2 (--com2) is 86Box's named-pipe device on the bridge's pty.
         "@COM2@": "1\nserial2_device = pipe" if getattr(a, "com2", False) else "0",
         # LPT1 is there only for --net plip: 86Box's PLIP device, a network card on a parallel port.
-        "@LPT1@": "1" if getattr(a, "net", None) == "plip" else "0",
+        "@LPT1@": "1" if "plip" in (getattr(a, "net", None), (getattr(a, "net2", None) or ":").split(":")[0]) else "0",
         # Sections appended at the end: the network card (--net), COM2's pipe.
         "@TAIL@": tail,
         "@RENDERER@": "sdl_software",
@@ -328,8 +328,9 @@ def emit_config(a):
     exe_name = os.path.basename(a.exe).upper() if a.exe else None
     tail = ""
     if a.net:
-        fw = hostio.parse_forwards(a.net_fwd or ["22"])
-        tail += hostio.net_config(a.net, [(h if h else "@HOSTPORT%d@" % i, g) for i, (h, g) in enumerate(fw)])
+        fw = [] if a.net_switch else hostio.parse_forwards(a.net_fwd or ["22"])
+        tail += hostio.net_config(a.net, [(h if h else "@HOSTPORT%d@" % i, g) for i, (h, g) in enumerate(fw)],
+                                  a.net_switch, tuple(a.net2.split(":", 1)) if a.net2 else None)
     if a.com2:
         tail += hostio.com2_config("@COM2PTY@")
     out = ["# 86box.cfg", config_text(a, "@SERIAL@", "@CIMG@", "@BOOTIMG@", "", tail),
@@ -484,8 +485,8 @@ def run(a):
         tail = ""
         ports = {}
         if a.net:
-            fw = [(h or hostio.free_port(), g) for h, g in hostio.parse_forwards(a.net_fwd or ["22"])]
-            tail += hostio.net_config(a.net, fw)
+            fw = [] if a.net_switch else [(h or hostio.free_port(), g) for h, g in hostio.parse_forwards(a.net_fwd or ["22"])]
+            tail += hostio.net_config(a.net, fw, a.net_switch, tuple(a.net2.split(":", 1)) if a.net2 else None)
             ports.update(("net:%d" % g, h) for h, g in fw)
             result["net"] = {"card": a.net, "forwards": [{"host": h, "guest": g} for h, g in fw]}
         if a.com2:
@@ -792,6 +793,11 @@ def main():
     ap.add_argument("--sound", default=None)
     ap.add_argument("--net", choices=sorted(hostio.NICS), help="network card on SLiRP user networking "
                     "(ne2k is ISA at 300h, IRQ 10)")
+    ap.add_argument("--net-switch", metavar="NAME", help="--net's card on 86Box's local network switch NAME "
+                    "instead of SLiRP: the 86Boxes on this computer that name the same switch are one Ethernet "
+                    "(no DHCP server there, no --net-fwd)")
+    ap.add_argument("--net2", metavar="CARD:NAME", help="a second network card, on the local network switch NAME "
+                    "(a PC on SLiRP and on a switch at once)")
     ap.add_argument("--net-fwd", action="append", default=[], metavar="[HOST:]GUEST",
                     help="forward a host TCP port to the guest's port (default 22 when --net is given; "
                     "a free host port is picked if HOST is left out; result.json records it)")

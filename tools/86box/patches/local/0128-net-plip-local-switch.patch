@@ -1,0 +1,21 @@
+net: the PLIP device may sit on the local network switch
+
+86Box puts a PLIP device on SLiRP whatever network type it was given. On the
+local switch two 86Boxes' PLIP devices carry each other's frames, which is a
+LapLink cable between two emulated PCs: GLOS's parallel cable link with a
+PC at each end (GLOS docs/v1/cable-network.md, N3). GLOS's PLIP speaks whole
+Ethernet frames with addresses of its own, so the switch has what it needs.
+Other network types are forced to SLiRP as before, and the modem always.
+
+--- a/src/network/network.c
++++ b/src/network/network.c
+@@ -510,7 +510,8 @@
+     }
+ 
+     const char *nic_name = network_card_get_internal_name(net_cards_conf[net_card_current].device_num);
+-    if ((!strcmp(nic_name, "modem") || !strcmp(nic_name, "plip")) && (net_type >= NET_TYPE_PCAP)) {
++    if ((!strcmp(nic_name, "modem") || !strcmp(nic_name, "plip")) && (net_type >= NET_TYPE_PCAP)
++        && !(!strcmp(nic_name, "plip") && net_type == NET_TYPE_NLSWITCH)) {
+         /* Force SLiRP here. Modem and PLIP only operate on non-Ethernet frames. */
+         net_type = NET_TYPE_SLIRP;
+     }

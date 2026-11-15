@@ -41,12 +41,31 @@ def parse_forwards(specs):
     return out
 
 
-def net_config(card, forwards):
+def net_config(card, forwards, switch=None, second=None):
     """[Network] and SLiRP port forwarding sections; forwards [(host, guest)],
-    host may be a placeholder string (run.py --emit-config)."""
-    text = "\n[Network]\nnet_01_card = %s\nnet_01_net_type = slirp\n" % card
+    host may be a placeholder string (run.py --emit-config).
+
+    switch: the card is on 86Box's local network switch of that name instead
+    of SLiRP: the 86Boxes on this computer whose cards name the same switch
+    are one Ethernet (no DHCP server, no forwards; the name is the switch's
+    "secret", which keeps runs apart). second: (card, name), a second card on
+    such a switch beside the first on SLiRP: a PC on two networks. A PLIP
+    device on a switch takes every frame (promiscuous), as a cable does: the
+    switch never learns the address the guest gives its end."""
+    text = "\n[Network]\nnet_01_card = %s\nnet_01_net_type = %s\n" % (card, "nlswitch" if switch else "slirp")
+    if switch:
+        text += "net_01_secret = %s\n" % switch
+        if card == "plip":
+            text += "net_01_promisc = 1\n"
+        forwards = []
+    if second:
+        text += "net_02_card = %s\nnet_02_net_type = nlswitch\nnet_02_secret = %s\n" % second
+        if second[0] == "plip":
+            text += "net_02_promisc = 1\n"
     if NICS[card]:
         text += "\n" + NICS[card]
+    if second and NICS[second[0]]:
+        text += "\n" + NICS[second[0]].replace(" #1]", " #2]")
     if forwards:
         text += "\n[SLiRP Port Forwarding #1]\n"
         for i, (host, guest) in enumerate(forwards):
