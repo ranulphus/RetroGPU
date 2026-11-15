@@ -45,7 +45,7 @@ fdc = internal
 serial1_enabled = 1
 serial1_device = file
 serial2_enabled = @COM2@
-lpt1_enabled = 0
+lpt1_enabled = @LPT1@
 
 [File (COM) #1]
 path = @SERIAL@

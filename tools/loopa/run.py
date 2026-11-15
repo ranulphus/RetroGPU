@@ -262,6 +262,8 @@ def config_text(a, serial, cimg, bootimg, extra_hdd, tail=""):
         "@DYNAREC@": str(getattr(a, "dynarec", 1)),
         # COM2 (--com2) is 86Box's named-pipe device on the bridge's pty.
         "@COM2@": "1\nserial2_device = pipe" if getattr(a, "com2", False) else "0",
+        # LPT1 is there only for --net plip: 86Box's PLIP device, a network card on a parallel port.
+        "@LPT1@": "1" if getattr(a, "net", None) == "plip" else "0",
         # Sections appended at the end: the network card (--net), COM2's pipe.
         "@TAIL@": tail,
         "@RENDERER@": "sdl_software",
