@@ -17,7 +17,7 @@ typedef struct {
      * pitch_px) and each swap scales it into the hidden display buffer,
      * then flips the display. Zoomed modes draw into the display buffers
      * and the chip doubles lines and pixels. */
-    int      scaled, zoomed, filter;
+    int      scaled, zoomed, filter, present_lag;
     uint32_t disp_off[2];
     int      disp_front, disp_pitch_px;
     mga_mode_plan plan;

@@ -332,11 +332,49 @@ static void show_start(uint32_t off, int pitch_bytes)
 #endif
 }
 
+/* present_lag (opt-in; fe.md): a scaled mode's double-buffered swap without
+ * vsync doesn't wait for the card. The frame's upscale is queued into the
+ * hidden display buffer with a fence after it, and the flip to it comes as
+ * soon as the fence has passed: at the program's next draw or clear
+ * (flip_poll), at a sync, or at the next swap at the latest, which waits for
+ * it before queuing its own. The CPU goes on with the next frame while the
+ * card finishes this one; a program that stops drawing after a swap shows
+ * the frame before until its next GL call that polls. */
+static struct { int pend; uint32_t tag, t0, us, max_us, n; } lag;
+
+static void lag_flip(void)
+{
+    uint32_t d = sys_time_us() - lag.t0;
+    lag.pend = 0;
+    rg_mga.disp_front = !rg_mga.disp_front;
+    show_start(rg_mga.disp_off[rg_mga.disp_front], rg_mga.disp_pitch_px * 2);
+    lag.us += d;
+    lag.n++;
+    if (d > lag.max_us)
+        lag.max_us = d;
+}
+
+static void lag_show(void)
+{
+    if (!lag.pend)
+        return;
+    engine_fence_wait(lag.tag, 500000);
+    lag_flip();
+}
+
+static void flip_poll(void)
+{
+    if (lag.pend && engine_fence_passed(lag.tag))
+        lag_flip();
+}
+
 static int sync(void)
 {
     RG_GPU_ENTER();
     if (engine_sync(500000) != 0)
         return -1;
+    if (lag.pend)
+        lag_flip();                     /* (everything drawn: its upscale too) */
     if (rg_mga.hooks.on_sync)
         rg_mga.hooks.on_sync();
     return 0;
@@ -348,11 +386,9 @@ static int idle(void) { return !mga_mmio || engine_idle(); }
  * swap, the one on screen for GL_FRONT or single buffering. The engine's
  * texture, blend and mask registers are overwritten: the caller writes its
  * state again (RG_SWAP_ENGINE). */
-static void present(int to_front)
+static void present_queue(int to_front)
 {
     mga_surface rs, ds;
-    uint32_t t0 = sys_time_us();
-    PROF_SCOPE(PROF_PRES);
     rs.off = rg_mga.front_off; rs.w = rg_mga.width; rs.h = rg_mga.height; rs.pitch_px = rg_mga.pitch_px;
     ds.off = rg_mga.disp_off[to_front ? rg_mga.disp_front : !rg_mga.disp_front];
     ds.w = rg_mga.plan.disp.width; ds.h = rg_mga.plan.disp.height; ds.pitch_px = rg_mga.disp_pitch_px;
@@ -362,14 +398,23 @@ static void present(int to_front)
                        rg_mga.filter ? MGA_PRESENT_BILINEAR : MGA_PRESENT_NEAREST);
         RG_FPU_LEAVE();
     }
+}
+
+static void present(int to_front)
+{
+    uint32_t t0 = sys_time_us();
+    PROF_SCOPE(PROF_PRES);
+    present_queue(to_front);
     sync();
     present_us += sys_time_us() - t0;
 }
+
 
 static int present_front(void)
 {
     if (!rg_mga.active || !rg_mga.scaled)
         return 0;
+    lag_show();
     sync();
     present(1);
     return RG_SWAP_ENGINE;
@@ -407,6 +452,19 @@ static int swap(int vsync)
         RG_GPU_QUIET();                 /* (the program's own work until the next frame's drawing) */
         return RG_SWAP_TARGET;
     }
+    if (rg_mga.scaled && rg_mga.double_buffer && rg_mga.present_lag && !vsync && mga.has_dwgsync) {
+        uint32_t t0 = sys_time_us();
+        PROF_SCOPE(PROF_PRES);
+        lag_show();                     /* (the frame before, if the program hasn't drawn since) */
+        present_queue(0);
+        lag.tag = engine_fence();
+        lag.t0 = sys_time_us();
+        lag.pend = 1;
+        present_us += sys_time_us() - t0;
+        set_target();
+        return RG_SWAP_ENGINE;
+    }
+    lag_show();                         /* (present_lag or vsync switched since) */
     if (rg_mga.scaled) {
         /* Scale the finished frame into the hidden display buffer, then
          * flip the display (single buffering: into the one on screen). */
@@ -488,6 +546,8 @@ static int open_screen(const rg_open *o, rg_opened *out)
     rg_mga.pitch_px = md->pitch_px;            /* the render buffer's (scaled) or the display's */
     rg_mga.disp_pitch_px = rg_mga_pitch_for(md->display_width);
     rg_mga.filter = o->scale_filter;
+    rg_mga.present_lag = o->present_lag;
+    lag.pend = 0;
     rg_mga.double_buffer = o->double_buffer != 0;
     rg_mga.depth_bits = o->depth_bits ? 16 : 0;
     rg_mga.vsync = o->vsync != 0;
@@ -736,6 +796,9 @@ static void get_stats(rg_stats *s)
     s->fence_stuck = engine_fence_stuck;
     s->present_us = present_us;
     s->retrace_us = retrace_us;
+    s->lag_us = lag.us;
+    s->lag_max_us = lag.max_us;
+    s->lag_n = lag.n;
 }
 
 static void crash_lines(void)
@@ -757,6 +820,7 @@ const rg_device rg_mga_device = {
     .close = close_dev,
     .swap = swap,
     .present_front = present_front,
+    .flip_poll = flip_poll,
     .draw_buffer = draw_buffer,
     .surface = surface,
     .target = target,

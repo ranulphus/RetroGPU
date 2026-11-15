@@ -287,6 +287,14 @@ extern int mga_fifo_free;
  * fifo_reserve. */
 extern int mga_dma_pending;
 extern void (*mga_dma_flush)(void);
+extern void (*mga_dma_kick)(void);      /* sends what is queued, without waiting (warp.c) */
+/* A fence after everything queued so far: its tag (0 where the chip has no
+ * DWGSYNC, the G100). engine_fence_wait returns once the drawing engine has
+ * finished what came before it, without waiting for what came after (0, or
+ * engine_sync's result when it timed out into a reset); tag 0 is engine_sync. */
+uint32_t engine_fence(void);
+int      engine_fence_wait(uint32_t tag, uint32_t timeout_us);
+int      engine_fence_passed(uint32_t tag);     /* 1 once passed (one register read, no wait); tag 0: 1 */
 /* WARP triangles sent since the engine was last idle (warp.c sets it,
  * engine_sync clears it). On a G400 the clip registers do not wait for
  * them: emit_clip puts the DRM's barrier in front of a new clip. */

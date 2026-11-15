@@ -601,6 +601,7 @@ static void dma_setup(void)
     if (!(cmd & 4u))
         mga_pci_write32(mga.bus, mga.dev, mga.fn, 0x04, cmd | 4u);   /* bus master */
     mga_dma_flush = dma_flush;
+    mga_dma_kick = dma_kick;
     mga_reset_hook = on_reset;
     dma_state = 1;
 }

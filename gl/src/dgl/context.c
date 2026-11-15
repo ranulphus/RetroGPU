@@ -36,6 +36,8 @@ static void prof_start(int level);
 static void prof_report(uint32_t tris);
 #endif
 static unsigned long present0_us;       /* stats.present_us at the last DGL-STAT */
+static uint32_t lag0_us, lag0_n;        /* the device's present_lag figures at the last DGL-STAT */
+static int present_lag;                 /* dglSetPresentLag */
 
 /* The first GL errors, with the address inside the GL function that raised
  * them (look it up in the program's link map). */
@@ -144,6 +146,8 @@ static void open_args(rg_open *o, const DGLConfig *c)
         o->vsync = *e != '0';
     e = getenv("DGL_SCALE_FILTER");
     o->scale_filter = c->scale_filter ? c->scale_filter == 2 : (e && !strcmp(e, "bilinear"));
+    e = getenv("DGL_PRESENT_LAG");                      /* (fe.md; or dglSetPresentLag before dglInit) */
+    o->present_lag = present_lag || (e && *e == '1');
     /* DGL_TEXHEAP_KB caps the texture heap (tests of eviction, or a smaller
      * card's memory on a bigger one). */
     e = getenv("DGL_TEXHEAP_KB");
@@ -382,6 +386,10 @@ static void prof_report(uint32_t tris)
 }
 #endif
 
+/* v1.5: the scaled modes' swap without waiting for the card (rg_open's
+ * present_lag; gl/docs/fe.md), for the next dglInit. */
+void dglSetPresentLag(int on) { present_lag = on != 0; }
+
 void dglSetWaitHook(void (*fn)(void *arg), void *arg)
 {
     wait_hook = fn;
@@ -461,10 +469,14 @@ static void swap_buffers(void)
             retrace0_us = rs.retrace_us;
             stats.present_us = rs.present_us - present_base_us;
             DGL_ERR("DGL-STAT fps=%.1f tris/s=%.0f swaps=%lu tex_kb=%lu stubs=%lu drain_ms=%lu retrace_ms=%lu "
-                    "present_ms=%lu hooks=%lu", (stats.swaps - stats_swaps0) * 1e6 / dt,
+                    "present_ms=%lu hooks=%lu lag_us=%lu/%lu", (stats.swaps - stats_swaps0) * 1e6 / dt,
                     (be_tris() - stats_tris0) * 1e6 / dt, stats.swaps, (unsigned long)(be_mem_used() >> 10),
                     dgl_stub_calls, (unsigned long)(drain_us / 1000), (unsigned long)(retrace_us / 1000),
-                    (unsigned long)((stats.present_us - present0_us) / 1000), stats.wait_hooks);
+                    (unsigned long)((stats.present_us - present0_us) / 1000), stats.wait_hooks,
+                    (unsigned long)(rs.lag_n != lag0_n ? (rs.lag_us - lag0_us) / (rs.lag_n - lag0_n) : 0),
+                    (unsigned long)rs.lag_max_us);    /* (present_lag: a swap's time until its flip, mean/longest) */
+            lag0_us = rs.lag_us;
+            lag0_n = rs.lag_n;
             drain_us = 0;
             present0_us = stats.present_us;
 #ifdef MGA_PROF

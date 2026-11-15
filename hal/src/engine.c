@@ -22,6 +22,7 @@ int mga_dma_pending;                    /* vertices buffered or in flight by DMA
 int mga_warp_pending;                   /* WARP triangles since the engine was last idle (hal.h) */
 uint32_t mga_warp_dwgctl;               /* the DWGCTL they were drawn with (setup_dwgctl; hal.h) */
 void (*mga_dma_flush)(void);            /* sends and waits for them: register writes come after */
+void (*mga_dma_kick)(void);             /* sends what is queued, without waiting (hal.h) */
 void (*mga_reset_hook)(void);
 int mga_cmd_open;                       /* the DMA command stream is taking register writes (mmio.h) */
 int (*mga_cmd_route)(uint32_t off, uint32_t v);
@@ -226,6 +227,45 @@ int engine_sync(uint32_t timeout_us)
     fifo_reset();
     mga_warp_pending = 0;
     fence_out = 0;
+    return 0;
+}
+
+/* A fence after everything queued so far (hal.h): DWGSYNC takes the tag
+ * when the drawing engine has finished what came before it. Queued in the
+ * WARPs' DMA list while it is open, and the list handed to the chip, so the
+ * fence doesn't wait for the next frame's vertices to be sent. */
+uint32_t engine_fence(void)
+{
+    uint32_t tag;
+    if (!mga.has_dwgsync)
+        return 0;
+    tag = mga_dwgsync_next();
+    fifo_reserve(1);
+    MGA_WR32(MGAREG_DWGSYNC, tag);
+    if (mga_cmd_open && mga_dma_pending && mga_dma_kick)
+        mga_dma_kick();
+    return tag;
+}
+
+int engine_fence_passed(uint32_t tag)
+{
+    return !tag || (int32_t)(MGA_RD32(MGAREG_DWGSYNC) - tag) >= 0;
+}
+
+/* A fence not taken within FENCE_WAIT_US (the G400's DWGSYNC that now and
+ * then never takes its tag, fence_passed; or one lost to a reset): the
+ * caller waits for everything instead, counted in engine_fence_stuck. */
+#define FENCE_WAIT_US 50000u
+int engine_fence_wait(uint32_t tag, uint32_t timeout_us)
+{
+    uint32_t start = sys_time_us(), polls = 0;
+    if (!tag)
+        return engine_sync(timeout_us);
+    while ((int32_t)(MGA_RD32(MGAREG_DWGSYNC) - tag) < 0)
+        if ((++polls & 255) == 0 && (uint32_t)(sys_time_us() - start) > FENCE_WAIT_US) {
+            engine_fence_stuck++;
+            return engine_sync(timeout_us);
+        }
     return 0;
 }
 

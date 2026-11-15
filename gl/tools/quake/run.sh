@@ -16,7 +16,7 @@
 # timedemos, 600 for the Quake 2 map), STATS (DGL_STATS, default 1), SNAP
 # (DGL_SNAP: frames to capture as out/NAME/files/F*.PPM, the same pictures on
 # every run), PRE (one more RUN.BAT line, e.g. "SET DGL_TEXHEAP_KB=2048"),
-# SHOTS (screenshot seconds after boot), NAME (result directory
+# PRE2 (a second such line), SHOTS (screenshot seconds after boot), NAME (result directory
 # out/NAME, default GAME-gl-CARD).
 # Needs build/quake (tools/quake/build.sh) and the fixtures
 # (tools/quake/fixtures.py). Screenshots of retail data stay local.
@@ -37,6 +37,7 @@ common=(--games-file "$here/games.json" --game "$game" --card "$card" --out "$ro
         --pre "SET DGL_STATS=${STATS:-1}" --timeout 3600 --idle 300)
 [ -n "${SNAP:-}" ] && common+=(--pre "SET DGL_SNAP=$SNAP")
 [ -n "${PRE:-}" ] && common+=(--pre "$PRE")
+[ -n "${PRE2:-}" ] && common+=(--pre "$PRE2")
 case $game in
   quake|lq)
     args=${*:-"-nosound -nocdaudio -nolan -width 640 -height 480 -fixedtime -tdresult C:\\OUT\\TD.TXT -tdquit +timedemo ${DEMO:-demo1}"}

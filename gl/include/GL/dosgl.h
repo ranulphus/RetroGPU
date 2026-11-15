@@ -58,8 +58,9 @@ typedef struct {
 } DGLStats;
 
 /* The API's version: 0x0103 is 1.3 (DOS-GL 0.3), which added dglSetWaitHook;
-   0x0104 the window on a GLOS desktop and dglGetGlosWindow. */
-#define DGL_API_VERSION 0x0104
+   0x0104 the window on a GLOS desktop and dglGetGlosWindow; 0x0105
+   dglSetPresentLag. */
+#define DGL_API_VERSION 0x0105
 
 /* The library's version string, e.g. "DOS-GL 0.3 (<build>)". */
 const char *dglVersion(void);
@@ -80,6 +81,14 @@ void dglSetVSync(int enabled);
  * there, so its audio thread keeps up while the chip works. The hook must
  * not call GL. NULL removes it. */
 void dglSetWaitHook(void (*fn)(void *arg), void *arg);
+/* v1.5, before dglInit: in the scaled modes (320x200, 320x240, 400x300,
+ * 512x384) with vsync off, dglSwapBuffers doesn't wait for the card to
+ * finish the frame and its upscale; the flip comes when it has, at the
+ * program's next draw or clear (or the next swap at the latest). For
+ * programs that draw continuously: one that swaps and then stops drawing
+ * shows the frame before until it next calls GL. DGL_PRESENT_LAG=1 does the
+ * same without the call. Off by default. */
+void dglSetPresentLag(int on);
 const char *dglGetErrorString(void);
 const DGLDeviceInfo *dglGetDeviceInfo(void);
 const DGLStats *dglGetStats(void);

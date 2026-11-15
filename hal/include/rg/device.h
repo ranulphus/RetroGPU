@@ -34,6 +34,8 @@ typedef struct {
     int color_bits, depth_bits, stencil_bits;
     int double_buffer, vsync;
     int scale_filter;               /* scaled modes: 0 nearest, 1 bilinear */
+    int present_lag;                /* scaled modes without vsync: don't wait for the upscale at the swap; flip once
+                                       the card has done it (flip_poll), the screen that much behind (DGL_PRESENT_LAG) */
     uint32_t heap_kb;               /* the memory left after the buffers capped (DGL_TEXHEAP_KB), 0 none */
     /* The user's hooks (each may be NULL): */
     void (*wait)(void);             /* before a retrace wait (the program's wait hook) */
@@ -70,6 +72,7 @@ typedef struct {
     uint32_t resets, timeouts, fence_stuck;   /* engine_* */
     uint32_t present_us;                       /* scaled modes: time spent scaling frames */
     uint32_t retrace_us;                       /* time spent waiting for the retrace */
+    uint32_t lag_us, lag_max_us, lag_n;        /* present_lag: swaps' time until their flips, the longest, how many */
 } rg_stats;
 
 /* GLOS's GPU lock (GLOS's API 2.0, its shared page), for any device that
@@ -137,6 +140,8 @@ typedef struct rg_device {
                                                        present, a GLOS window's), drawing to the other:
                                                        RG_SWAP_ flags for what it disturbed */
     int  (*present_front)(void);                    /* scaled modes: show what was drawn into the front now */
+    void (*flip_poll)(void);                        /* present_lag: a swap's flip, done if the card has finished
+                                                       its upscale (a register read when one is pending); may be NULL */
     void (*draw_buffer)(int front);                 /* where drawing goes: the shown buffer (1) or the hidden */
 
     /* 2D, on any surface of the device's memory (pixel values in the

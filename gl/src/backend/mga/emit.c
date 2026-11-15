@@ -492,6 +492,8 @@ static int emit_begin(void)
     const int idle = !(dgl_gl.dirty & DGL_DIRTY_REGS);    /* (PROF=2: no register group to write) */
     int prof_o = idle ? DGL_FINE_SWITCH(PROF_D_VIDLE) : 0;
     DGL_GPU_ENTER();
+    if (dgl_dev->flip_poll)
+        dgl_dev->flip_poll();           /* (a swap's flip once the card has done it: present_lag) */
     validate();
     if (idle)
         DGL_FINE_BACK(prof_o);
@@ -1457,6 +1459,8 @@ void dgl_mga_clear(GLbitfield mask)
     PROF_SCOPE(PROF_D_CLEAR);
     DGL_FPU_ENTER();
     DGL_GPU_ENTER();
+    if (dgl_dev->flip_poll)
+        dgl_dev->flip_poll();
     scissor_rows(&x0, &y0, &x1, &y1);
     engine_set_clip(x0, y0, x1, y1);
     /* Clears are engine fills: no blending or fog; the colour mask applies. */
