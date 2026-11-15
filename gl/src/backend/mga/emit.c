@@ -193,8 +193,8 @@ static uint32_t stage_word(int stage, int unit, const dgl_texture *t)
  * while ok is set and the HAL's register epoch hasn't moved (resets, resyncs,
  * VRAM copies, presents and WARP starts write some of these registers
  * themselves); anything that marks the target dirty (swaps, clears,
- * read-backs, the scissor), and any texel written (dgl_tex_wgen: the G400's
- * texel cache), has every group written again too. */
+ * read-backs, the scissor) has every group written again too; any texel
+ * written (dgl_tex_wgen: the G400's texel cache) both maps' state. */
 static struct {
     int ok;
     uint32_t epoch, wgen;
@@ -291,8 +291,12 @@ static void validate_state(void)
         dgl_gl.dirty |= DGL_DIRTY_RASTER | DGL_DIRTY_TEXTURE;
     if (dgl_gl.dirty & (DGL_DIRTY_RASTER | DGL_DIRTY_FOG | DGL_DIRTY_TARGET | DGL_DIRTY_TEXTURE)) {
         uint32_t white, w0 = 0, w1 = 0, plnwt, fogcol;
-        const int known = regs.ok && regs.epoch == engine_regs_epoch && regs.wgen == dgl_tex_wgen &&
-                          !(dgl_gl.dirty & DGL_DIRTY_TARGET);
+        const int known = regs.ok && regs.epoch == engine_regs_epoch && !(dgl_gl.dirty & DGL_DIRTY_TARGET);
+        /* Texels written since (dgl_tex_wgen): the G400's texel cache keeps
+         * what it read until the texture registers are written again (G4EXP
+         * E6), so both maps' state goes again, all of it; the rest of the
+         * block holds no texels. */
+        const int tex_known = known && regs.wgen == dgl_tex_wgen;
         memset(&tstate, 0, sizeof tstate);
         textured = 0;
         dual = map1_copy = 0;
@@ -352,12 +356,13 @@ static void validate_state(void)
         tstate1.texctl2 |= tc2_extra;
         tctx.texctl2_1 = tstate1.texctl2 | TEXCTL2_DUALTEX;
         if (textured) {
-            if (!known || regs.textured != textured || regs.dual != dual) {
+            if (!tex_known || regs.textured != textured || regs.dual != dual) {
                 if (dual)
                     tex_emit_dual(&tstate, &tstate1);
                 else
                     tex_emit(&tstate);
-                if (mga.has_dual_tex)
+                if (mga.has_dual_tex && (!known || regs.textured != textured || regs.dual != dual || w0 != regs.w0 ||
+                                         w1 != regs.w1))
                     tex_emit_combiner(w0, w1);  /* zero words pass the legacy result through */
             } else {
                 /* The maps hold regs.t0 and regs.t1: only what differs.

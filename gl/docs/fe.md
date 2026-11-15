@@ -173,6 +173,31 @@ What remains a triangle at 320x200: the vertex about 1,150 (projection, colour a
 reciprocal), draws about 750 (assembly, the fast path's set-up and loops), the general path for clipped
 triangles about 360, the ring and triangle work about 520, the swap's upscale about 650.
 
+### After F1-F3: the owner's "swap, then lightmaps" (2026-11-15)
+
+The owner's answers: drop F3 (reverted), then the swap, then GLQuake's lightmaps.
+
+**The flip.** Every flip is a video BIOS call (4F07h). On bench-g400 it costs about 35 us a frame (`PROF_FLIP`,
+8 cycles a GLQuake triangle), not the millisecond guessed; flipping by the card's own registers measured no
+different (37.02 against 37.05 fps) and was dropped. Checked for GLOS on the way: the G400's BIOS answers 4F07h's
+get from the card (so `glos shot` follows a direct flip), and `glos shot` captured each held frame correctly with
+either kind of flip.
+
+**The scaled modes' present.** At 320x200 every swap queued the upscale and then waited for the card to finish
+everything (`PROF_PRES`: about 1.9 ms a frame, the CPU idle). `dglSetPresentLag` (API 1.5) or
+`DGL_PRESENT_LAG=1` (opt-in, the owner's choice), with vsync off: the swap queues the upscale with a fence and
+returns; the flip comes as soon as the fence has passed, at the program's next draw or clear (`flip_poll`), a
+sync, or the next swap at the latest. bench-g400, GLQuake 320x200, two runs each: 54.2/54.5 fps without, 59.7/59.6
+with (+9.9%); a swap's flip comes 1.9 ms after it (3.2 ms at most), when the old wait ended, so the picture is not
+later than before (the owner's question was latency at low frame rates: flipping at the next swap instead would
+have added a whole frame). A program that swaps and stops drawing shows the frame before until its next GL call:
+hence opt-in.
+
+**Lightmaps.** After any texel write F1 wrote the whole register block again (about 40 writes): GLQuake `-mtex`
+writes a lightmap between surfaces, so most of its validations paid for all of it. The G400's texel cache only
+needs the texture state written again (G4EXP E6: re-emitting it clears the stale texels), so now both maps' state
+goes again and the combiner, the WARPs' sizes, ALPHACTRL, PLNWT and FOGCOL only when they change.
+
 ### F-last. Docs and numbers
 - Update this file, `gl/docs/porting.md` and DOSBench's records with before and after on bench-g400.
 
