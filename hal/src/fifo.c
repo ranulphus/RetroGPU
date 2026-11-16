@@ -11,6 +11,9 @@ uint32_t prof_n[PROF_N];
 uint64_t prof_t;
 int      prof_cur;
 uint32_t prof_wr, prof_fifo_rd;
+uint64_t prof_wcyc[PROF_W_N];
+uint32_t prof_wn[PROF_W_N], prof_fl[PROF_FL_N];
+uint32_t prof_nc_off[8], prof_nc_n[8];
 #endif
 
 int mga_fifo_free;                      /* slots known free (fifo_need's fast path) */
@@ -48,6 +51,8 @@ void fifo_reserve(int n)
     }
     mga_fifo_free -= n;
 #ifdef MGA_PROF
+    prof_wcyc[PROF_W_FIFO] += prof_rdtsc() - prof_t;
+    prof_wn[PROF_W_FIFO]++;
     PROF_BACK(o);
 #endif
 }

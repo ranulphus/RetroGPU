@@ -8,6 +8,7 @@
 #include "../gl/gl_state.h"
 #include "../gl/gl_tex.h"
 #include "mga/sys.h"
+#include "mga/hal.h"
 #include "../backend/backend.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -382,6 +383,23 @@ static void prof_report(uint32_t tris)
             N(PROF_D_BATCH), dgl_pcount.verts, dgl_pcount.binds, dgl_pcount.xverts, dgl_pcount.fverts);
 #undef N
     memset(&dgl_pcount, 0, sizeof dgl_pcount);
+    /* The waits for the chip by cause (K cycles/count), the flushes by cause,
+     * and the registers outside the DMA list that forced one (offset:count). */
+    DGL_ERR("DGL-PWAIT fifo=%lu/%lu flush=%lu/%lu kq=%lu/%lu vroom=%lu/%lu fl_noncmd=%lu fl_list=%lu fl_ext=%lu "
+            "nc=%lx:%lu,%lx:%lu,%lx:%lu,%lx:%lu", (unsigned long)(prof_wcyc[PROF_W_FIFO] >> 10),
+            (unsigned long)prof_wn[PROF_W_FIFO], (unsigned long)(prof_wcyc[PROF_W_FLUSH] >> 10),
+            (unsigned long)prof_wn[PROF_W_FLUSH], (unsigned long)(prof_wcyc[PROF_W_KQ] >> 10),
+            (unsigned long)prof_wn[PROF_W_KQ], (unsigned long)(prof_wcyc[PROF_W_VROOM] >> 10),
+            (unsigned long)prof_wn[PROF_W_VROOM], (unsigned long)prof_fl[PROF_FL_NONCMD],
+            (unsigned long)prof_fl[PROF_FL_LIST], (unsigned long)prof_fl[PROF_FL_EXT], (unsigned long)prof_nc_off[0],
+            (unsigned long)prof_nc_n[0], (unsigned long)prof_nc_off[1], (unsigned long)prof_nc_n[1],
+            (unsigned long)prof_nc_off[2], (unsigned long)prof_nc_n[2], (unsigned long)prof_nc_off[3],
+            (unsigned long)prof_nc_n[3]);
+    memset(prof_wcyc, 0, sizeof prof_wcyc);
+    memset(prof_wn, 0, sizeof prof_wn);
+    memset(prof_fl, 0, sizeof prof_fl);
+    memset(prof_nc_n, 0, sizeof prof_nc_n);
+    memset(prof_nc_off, 0, sizeof prof_nc_off);
     prof_reset(prof_cur);
 }
 #endif
@@ -440,13 +458,26 @@ static void drain_with_hook(void)
     dgl_sync();
 }
 
+/* DGL_NODRAIN=1 (experiment, g4path.md): the swap doesn't wait for the card
+ * to finish the frame. Frames may show unfinished: a measure of what overlap
+ * of the CPU and the card would gain, not a mode to use. */
+static int no_drain = -1;
+
 static void swap_buffers(void)
 {
     PROF_SCOPE(PROF_D_SWAP);
 #ifdef __DJGPP__
     __djgpp_nearptr_enable();           /* the consumer may have turned near pointers off */
 #endif
-    if (stats_on || dgl_ftrace_on) {
+    if (no_drain < 0) {
+        const char *e = getenv("DGL_NODRAIN");
+        no_drain = e && atoi(e) > 0;
+    }
+    if (no_drain) {
+        if (mga_dma_kick)
+            mga_dma_kick();             /* (the frame's tail goes to the card now) */
+    }
+    else if (stats_on || dgl_ftrace_on) {
         uint32_t t0 = sys_time_us(), dt;
         drain_with_hook();              /* retired texture blocks go back to the heap */
         dt = sys_time_us() - t0;

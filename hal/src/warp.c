@@ -92,6 +92,14 @@ static int agp_on;
 static int agp_enable(void);
 static void agp_disable(void);
 
+#ifdef MGA_PROF
+static int wait_cause = PROF_W_FLUSH, flush_cause = PROF_FL_EXT;
+#  define WAIT_CAUSE(c) (wait_cause = (c))
+#  define FLUSH_CAUSE(c) (flush_cause = (c))
+#else
+#  define WAIT_CAUSE(c) ((void)0)
+#  define FLUSH_CAUSE(c) ((void)0)
+#endif
 static void dma_flush(void);
 static void stream_close(void);
 
@@ -261,6 +269,9 @@ static int dma_wait(void)
     if (kq_head == kq_tail)
         return 0;
     o = PROF_SWITCH(PROF_FIFO);         /* (a wait for the chip, as fifo_reserve's) */
+#ifdef MGA_PROF
+    uint64_t w0 = prof_rdtsc();
+#endif
     start = sys_time_us();
     for (;;) {
         if ((MGA_RD32(MGAREG_STATUS) & (1u << 17)) &&
@@ -273,6 +284,10 @@ static int dma_wait(void)
         if ((++polls & 1023) == 0 && (uint32_t)(sys_time_us() - start) > 1000000u)
             break;
     }
+#ifdef MGA_PROF
+    prof_wcyc[wait_cause] += prof_rdtsc() - w0;
+    prof_wn[wait_cause]++;
+#endif
     PROF_BACK(o);
     if (!done)
         return -1;
@@ -330,7 +345,7 @@ static void dma_kick(void)
         list_put(DMAREG(MGAREG_DMAPAD), 0);    /* (the last packet before an end: 4-16) */
     while (kq_tail - kq_head >= KICKS) {
         reap();
-        if (kq_tail - kq_head >= KICKS && dma_wait() != 0) {
+        if (kq_tail - kq_head >= KICKS && (WAIT_CAUSE(PROF_W_KQ), dma_wait()) != 0) {
             fail();
             return;
         }
@@ -357,10 +372,15 @@ static void dma_kick(void)
  * starts. */
 static void dma_flush(void)
 {
+#ifdef MGA_PROF
+    prof_fl[flush_cause]++;
+    flush_cause = PROF_FL_EXT;          /* (the next one, unless its caller says) */
+#endif
     mga_dma_pending = 0;
     dma_kick();
     if (!mga_cmd_open)
         return;                         /* (a failed kick) */
+    WAIT_CAUSE(PROF_W_FLUSH);
     if (dma_wait() != 0) {
         fail();
         return;
@@ -378,6 +398,7 @@ static int list_room(uint32_t n)
 {
     if (lused + n + LIST_SLACK <= lcap)
         return 0;
+    FLUSH_CAUSE(PROF_FL_LIST);
     dma_flush();
     return mga_cmd_open ? 0 : -1;
 }
@@ -389,6 +410,9 @@ static int vert_room(uint32_t n)
 {
     uint32_t polls = 0, start = 0;
     int o = -1;
+#ifdef MGA_PROF
+    uint64_t vw0 = 0;
+#endif
     for (;;) {
         if (vused >= vhead) {           /* (from vhead to vused in use) */
             if (vused + n <= vcap)
@@ -413,6 +437,9 @@ static int vert_room(uint32_t n)
         reap();
         if (o < 0) {
             o = PROF_SWITCH(PROF_FIFO);
+#ifdef MGA_PROF
+            vw0 = prof_rdtsc();
+#endif
             start = sys_time_us();
         }
         if ((++polls & 63) == 0 && (uint32_t)(sys_time_us() - start) > 1000000u) {
@@ -421,8 +448,13 @@ static int vert_room(uint32_t n)
             return -1;
         }
     }
-    if (o >= 0)
+    if (o >= 0) {
+#ifdef MGA_PROF
+        prof_wcyc[PROF_W_VROOM] += prof_rdtsc() - vw0;
+        prof_wn[PROF_W_VROOM]++;
+#endif
         PROF_BACK(o);
+    }
     return 0;
 }
 
@@ -445,8 +477,19 @@ static int cmd_route(uint32_t off, uint32_t v)
         cmd_write(off, v);
         return 1;
     }
-    if (mga_dma_pending)
+    if (mga_dma_pending) {
+#ifdef MGA_PROF
+        int k;
+        for (k = 0; k < 8 && prof_nc_n[k] && prof_nc_off[k] != off; k++)
+            ;
+        if (k < 8) {
+            prof_nc_off[k] = off;
+            prof_nc_n[k]++;
+        }
+#endif
+        FLUSH_CAUSE(PROF_FL_NONCMD);
         dma_flush();
+    }
     return 0;
 }
 
