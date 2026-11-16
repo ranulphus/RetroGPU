@@ -16,7 +16,7 @@ export WATCOM DJGPP_PREFIX MGA_CACHE OW_URL OW_SHA256 DJGPP_URL DJGPP_SHA256 CWS
 
 
 # ---- HAL -----------------------------------------------------------------
-HAL_COMMON := hal/src/debug/serial.c hal/src/debug/regtrace.c hal/src/pci.c hal/src/chip.c hal/src/vbe.c hal/src/fifo.c hal/src/engine.c hal/src/dac.c hal/src/texhw.c hal/src/present.c hal/src/setup/trap.c hal/src/vram.c hal/src/blit.c hal/src/cursor.c hal/src/warp.c
+HAL_COMMON := hal/src/debug/serial.c hal/src/debug/regtrace.c hal/src/pci.c hal/src/chip.c hal/src/clocks.c hal/src/vbe.c hal/src/fifo.c hal/src/engine.c hal/src/dac.c hal/src/texhw.c hal/src/present.c hal/src/setup/trap.c hal/src/vram.c hal/src/blit.c hal/src/cursor.c hal/src/warp.c
 HAL_OW     := $(HAL_COMMON) hal/port/ow_dos4g.c
 HAL_DJGPP  := $(HAL_COMMON) hal/port/djgpp.c
 HAL_HOST   := $(HAL_COMMON) hal/port/host.c

@@ -341,6 +341,7 @@ static void show_start(uint32_t off, int pitch_bytes)
  * card finishes this one; a program that stops drawing after a swap shows
  * the frame before until its next GL call that polls. */
 static struct { int pend; uint32_t tag, t0, us, max_us, n; } lag;
+static mga_clocks clocks_saved;         /* what open_screen's mga_clocks_fast found (valid: put back at close) */
 
 static void lag_flip(void)
 {
@@ -626,6 +627,19 @@ static int open_screen(const rg_open *o, rg_opened *out)
             ramp[i] = (uint8_t)i;
         dac_set_ramp(ramp);
     }
+    {
+        /* The G400 at the clocks Matrox's own driver uses (clocks.c; put back
+         * at close). Under GLOS, GLOS owns them (it raises them for its whole
+         * run: the owner's choice, 2026-11-16). DGL_CLOCKS=0 leaves the BIOS's;
+         * DGL_CLOCKS=2 raises them under GLOS too (a test of this path where
+         * GLOS doesn't). */
+        const char *e = getenv("DGL_CLOCKS");
+        if (!(e && *e == '0') && (!rg_glos_caps() || (e && *e == '2'))) {
+            int r = mga_clocks_fast(&clocks_saved);
+            if (r != 1)
+                RG_ERR("DGL-CLOCKS %s", mga_clocks_why);
+        }
+    }
 #endif
     rg_mga.front_is_a = 1;
     rg_mga.active = 1;
@@ -678,6 +692,7 @@ static void close_dev(void)
     if (mga_mmio && engine_sync(100000) != 0)
         engine_reset();
 #ifndef DGL_RIG
+    mga_clocks_restore(&clocks_saved);          /* (the BIOS's clocks, if open raised them) */
     vbe_set_text_mode();                        /* Loop C never left the host's mode */
 #endif
     rg_mga.active = 0;

@@ -50,7 +50,7 @@ endif
 
 # The shared HAL (PRD D15) goes into libGL.a so consumers link only -lGL. Its
 # objects are built here, under build/*/mgahal/ (the root's hal/ is only read).
-HAL_SRCS := $(addprefix $(MGAHAL)/hal/,src/debug/serial.c src/pci.c src/chip.c src/vbe.c src/fifo.c \
+HAL_SRCS := $(addprefix $(MGAHAL)/hal/,src/debug/serial.c src/pci.c src/chip.c src/clocks.c src/vbe.c src/fifo.c \
               src/engine.c src/dac.c src/texhw.c src/present.c src/debug/regtrace.c src/setup/trap.c src/warp.c \
               src/blit.c src/cursor.c \
               src/rg/device.c src/rg/glos.c src/rg/mga.c src/rg/mga_glos.c \

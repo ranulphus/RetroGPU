@@ -54,6 +54,19 @@ void     mga_unmap(void);
 const char *mga_family_name(mga_family f);
 int      mga_detect_emulator(void);
 void     mga_chip_caps(mga_chip *c);   /* fill capabilities from c->family */
+/* The G400's clocks (clocks.c; gl/docs/g4path.md, C). mga_clocks_fast raises
+ * them from the BIOS's first PInS record to the one Matrox's own driver uses
+ * (system PLL 252 MHz), only where the PInS and the running clocks are the
+ * ones seen on bench-g400; no engine context needed (the engine idle). 0:
+ * raised, *saved holds what was there; 1: nothing changed (not this card, the
+ * PInS or clocks don't match, already raised; mga_clocks_why says which); -1:
+ * the PLL didn't lock, the BIOS's put back. mga_clocks_restore puts *saved
+ * back (nothing if it isn't valid). GLOS calls them for its whole run; the
+ * Matrox device only without GLOS (DGL_CLOCKS=0: never). */
+typedef struct { uint32_t opt, opt3; uint8_t m, n, p, valid; } mga_clocks;
+extern const char *mga_clocks_why;
+int  mga_clocks_fast(mga_clocks *saved);
+void mga_clocks_restore(mga_clocks *saved);
 uint32_t mga_probe_vram(void);
 
 /* vbe.c: modes via the card BIOS (VBE 2.0+). */
