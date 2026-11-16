@@ -62,3 +62,8 @@ Bench F's PInS v5 values:
 
 The G450's clocks are already the BIOS table's (OPTION3 `0090A409` = PInS), so the G400's clock step (`clocks.c`)
 doesn't apply to it.
+- MODETEST `resets=20` (each reset with the set-up, under the bars on screen): 0 pixels changed after every one. So
+  the set-up loses nothing in VRAM, and `-mtex`'s thousands of resets are safe.
+
+Open: during one conformance run the owner saw about 10% of GLOS's text screen briefly garbled, restored by the next
+graphical test. Not reproduced, and not caused by the set-up (above). Watch for it.

@@ -146,13 +146,15 @@ static void engine_quads(int pitch)
 int main(int argc, char **argv)
 {
     mga_vbe_mode m;
-    int i, pitch = 0, hold = 6, x, y, decay = 0;
+    int i, pitch = 0, hold = 6, x, y, decay = 0, resets = 0;
     uint32_t t0;
     for (i = 1; i < argc; i++)
         if (!strncmp(argv[i], "hold=", 5))
             hold = atoi(argv[i] + 5);
         else if (!strncmp(argv[i], "decay=", 6))
             decay = atoi(argv[i] + 6);      /* seconds of once-a-second readbacks of the bars */
+        else if (!strncmp(argv[i], "resets=", 7))
+            resets = atoi(argv[i] + 7);     /* engine resets with the bars on screen, each then counted */
     hx_init(1, argv, "modetest");
     if (mga_find(&mga) != 0 || mga_map(&mga) != 0) {
         hx_test("init", 0, "no Matrox card found or mapped");
@@ -188,6 +190,22 @@ int main(int argc, char **argv)
     }
     hx_log("HX-STAT modetest drawn: eight vertical colour bars (white, yellow, cyan, green, magenta, red, blue, black) "
            "inside a white border; pitch %d pixels; holding %d s", pitch, hold);
+    if (resets > 0) {
+        /* engine_reset (with a G450's memory set-up after it) under the bars:
+         * how many pixels each one changes. */
+        volatile uint16_t *fb = (volatile uint16_t *)mga_fb;
+        int k;
+        engine_init(pitch, 16);
+        for (k = 1; k <= resets; k++) {
+            unsigned long bad = 0;
+            engine_reset();
+            for (y = 0; y < 480; y++)
+                for (x = 0; x < 640; x++)
+                    bad += fb[(size_t)y * (size_t)pitch + (size_t)x] != want_bars(x, y);
+            hx_log("HX-STAT modetest reset %d: changed=%lu of 307200 (g450 reinits %lu)", k, bad,
+                   (unsigned long)mga_g450_reinits);
+        }
+    }
     if (decay > 0) {
         /* The bars counted every second: pixels no longer as drawn. */
         volatile uint16_t *fb = (volatile uint16_t *)mga_fb;
