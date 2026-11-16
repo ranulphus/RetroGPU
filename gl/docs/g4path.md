@@ -177,3 +177,51 @@ Each is measured on its own, as in F1-F3.
 - **Next:** the owner runs CLKINFO in a Windows 98 DOS box with Matrox's driver loaded. That reads the clocks
   Matrox's driver sets, read-only. A clock step for DOS-GL or GLOS (the PInS's values, set once at start and put
   back at exit) gets planned from what it shows.
+
+## What Matrox's driver sets (the owner, Windows 98, CLKINFO in a DOS box, 2026-11-16)
+
+| | DOS (the BIOS) | Windows 98 (Matrox's driver) |
+|---|---|---|
+| System PLL | M=09 N=3C P=10: 164.7 MHz | M=02 N=1B P=18: 252.0 MHz |
+| OPTION3 | `0190A419` | `019B8419` |
+| OPTION | `50040120` (rfhcnt 8) | `50538120` (rfhcnt 27h, bit 22 set) |
+
+The PInS v4 block holds three 10-byte clock records at bytes 55, 65 and 75. Each is
+{system PLL in 2 MHz units, the same in 4 MHz units, OPTION3, MCTLWTST}:
+- record 1: {52h, 29h, `0190A419`, `24045491`}, that is 164 MHz: the BIOS's;
+- records 2 and 3: {7Eh, 3Fh, `019B8419`, `24045491`}, that is 252 MHz: Matrox's driver's.
+
+Linux's `parse_pins4` reads `pins[65] * 4000` (504 MHz) and the OPTION3 at 67, so it would take record 2's
+OPTION3 and twice its clock. It only programs the clocks of a card the BIOS didn't start, so it never does on
+a primary card.
+
+## C: the clock step (replaces M1; for approval)
+
+- **C0. Measure (bench-g400, one run, the owner nearby).**
+  - `CLKSET` (a HAL test program) sets record 2, the way Linux's `g450_mclk_init` does:
+    1. switch the clocks to the PCI clock (OPTION3 sources cleared, under `sysclkdis`);
+    2. program the system PLL and wait for its lock bit;
+    3. write record 2's OPTION3;
+    4. write OPTION's refresh count and bit 22 as Windows has them.
+  - Then it repeats CLKINFO's fill test and G4COST's main cases, puts record 1 back, and checks it reads back.
+  - It also checks whether a VBE mode set puts the BIOS's clocks back. If it does, the step must come after every
+    mode set.
+- **C1. The HAL does it.**
+  - At engine start, when the card's PInS has a faster record than the clocks running, the HAL takes Matrox's
+    record 2 (`engine_clocks(1)`).
+  - It puts the BIOS's clocks back at exit, from the same exit paths as the engine reset and the text mode.
+  - `DGL_CLOCKS=0` / `MGAGLIDE` settings turn it off.
+  - G400 only at first. The G450 has PInS v5 and is checked on bench P4 the same way (Windows values first). The
+    G200 stays as it is.
+  - Every DOS-GL and Glide program and GLOS's desktop gets it. GLOS is told first, since under GLOS the program
+    writes PCI configuration.
+- **C2. Re-measure.**
+  - GLQuake and Quake II at 640x480 and 320x200 against main, with snapshots and conformance on silicon, as before.
+  - The card-alone time (kicks held) shows what is left.
+  - Then M2 (lightmap moves), M3 (overlap) and M4 (CPU) are re-ranked with the new numbers. M1 is dropped.
+- **Expected:** the card's frame time falls from about 17.7 ms toward 9-11 ms at 640x480. The CPU (about 17 ms a
+  frame) is then the limit, so 640x480 rises to about 55 fps at once and toward 60 with M3's overlap. The 70 fps
+  target needs M4.
+- **Risk:** a wrong sequence can stop the memory clock and hang the PC until it's power-cycled (Linux warns about
+  this). So C0 runs once with the owner at hand, uses only the card's own BIOS values that Windows uses, and
+  follows Linux's order step by step.
