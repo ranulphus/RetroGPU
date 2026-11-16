@@ -80,6 +80,7 @@ DJ_SRC_TWODTEST := tests/hal/twodtest.c tests/hal/sw2d.c
 DJ_SRC_WARPTRI := tests/hal/warptri.c
 DJ_SRC_G4COST := tests/hal/g4cost.c
 DJ_SRC_CLKINFO := tests/hal/clkinfo.c
+DJ_SRC_CLKSET := tests/hal/clkset.c
 DJ_SRC_CLOCKMON := tests/hal/clockmon.c
 # The S3 ViRGE/DX (docs/virge.md): its register layer as a library of its own (hal/src/virge, not part of the
 # Matrox HAL's), VPROBE (PCI, IDs, the BIOS's modes, the linear window) and VTWOD (its 2D against sw2d.c).
@@ -107,6 +108,7 @@ build/djgpp/TWODTEST.EXE: tests/hal/twodtest.c tests/hal/sw2d.c tests/hal/sw2d.h
 build/djgpp/WARPTRI.EXE: tests/hal/warptri.c
 build/djgpp/G4COST.EXE: tests/hal/g4cost.c
 build/djgpp/CLKINFO.EXE: tests/hal/clkinfo.c
+build/djgpp/CLKSET.EXE: tests/hal/clkset.c
 build/djgpp/CLOCKMON.EXE: tests/hal/clockmon.c
 build/djgpp/VPROBE.EXE: tests/virge/vprobe.c
 build/djgpp/VTWOD.EXE: tests/virge/vtwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libvirge.a
