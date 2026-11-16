@@ -3,8 +3,15 @@
 #include "mga/serial.h"
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 static char dgl_error[160] = "no error";
+
+/* DGL_LOG=path: the lines go to that file as well as COM1, for a PC whose
+ * serial port nobody reads (bench F). Opened at the first line, flushed after
+ * each (they are rare: a few a second at most). */
+static FILE *log_file;
+static int log_tried;
 
 void dgl_logf(const char *fmt, ...)
 {
@@ -17,6 +24,17 @@ void dgl_logf(const char *fmt, ...)
     va_end(ap);
     serial_puts(buf);
     serial_puts("\n");
+    if (!log_tried) {
+        const char *p = getenv("DGL_LOG");
+        log_tried = 1;
+        if (p && *p)
+            log_file = fopen(p, "a");
+    }
+    if (log_file) {
+        fputs(buf, log_file);
+        fputc('\n', log_file);
+        fflush(log_file);
+    }
 }
 
 void dgl_set_error(const char *fmt, ...)

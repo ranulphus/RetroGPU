@@ -14,6 +14,7 @@
 #define MGAREG_PAT0         0x1C10
 #define MGAREG_PAT1         0x1C14
 #define MGAREG_PLNWT        0x1C1C
+#define MGAREG_MEMRDBK      0x1E44      /* G200+: memory read-back timing (the G450 set-up after a reset: pci.c) */
 #define MGAREG_BCOL         0x1C20
 #define MGAREG_FCOL         0x1C24
 #define MGAREG_SRC0         0x1C30

@@ -121,6 +121,8 @@ dglShutdown();
       device's path.
     - Profiling builds' `DGL-PWAIT` lines time the waits for the card by cause, and `DGL-PRUN` lines count the DMA
       list's vertex runs and registers. See `docs/g4path.md`.
+  - `DGL_LOG=path` also appends DOS-GL's log lines (`DGL-STAT` and the rest) to that file, for a PC whose COM1
+    nobody reads. Each line is flushed as it is written.
   - `DGL_POLYCLIP=0` clips a GL_POLYGON that crosses the near plane or the guard band triangle by triangle, as
     before. By default it is clipped once, whole, as Mesa does; fans and strips always go triangle by triangle.
   - `DGL_ABLATE=n` is a diagnosis switch only: the frames are wrong on purpose. Each value switches off one layer,

@@ -24,6 +24,8 @@ uint32_t mga_warp_dwgctl;               /* the DWGCTL they were drawn with (setu
 void (*mga_dma_flush)(void);            /* sends and waits for them: register writes come after */
 void (*mga_dma_kick)(void);             /* sends what is queued, without waiting (hal.h) */
 void (*mga_reset_hook)(void);
+void (*mga_memory_reinit)(void);        /* mga_find's, on a G450 (pci.c) */
+uint32_t mga_g450_reinits;
 int mga_cmd_open;                       /* the DMA command stream is taking register writes (mmio.h) */
 int (*mga_cmd_route)(uint32_t off, uint32_t v);
 uint32_t mga_opmode = MGA_OPMODE_UNKNOWN;   /* what OPMODE holds (ILOAD here, vertices in warp.c) */
@@ -332,6 +334,8 @@ void engine_reset(void)
     MGA_WR32(MGAREG_RST, 1);
     sys_delay_us(20);
     MGA_WR32(MGAREG_RST, 0);
+    if (mga_memory_reinit)
+        mga_memory_reinit();            /* (a G450's memory needs its set-up again: pci.c) */
     fifo_reset();
     fence_out = 0;                      /* (nothing drawn is waited for any more) */
     stuck_timing = 0;

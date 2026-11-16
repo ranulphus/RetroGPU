@@ -1,5 +1,7 @@
 /* pci.c - PCI configuration mechanism #1 and Matrox discovery. */
 #include "mga/hal.h"
+#include "mga/mmio.h"
+#include "mga/regs_mga.h"
 #include "mga/sys.h"
 #include <string.h>
 
@@ -48,6 +50,8 @@ const char *mga_family_name(mga_family f)
 
 void mga_chip_caps(mga_chip *c);   /* chip.c */
 
+static void g450_memory_prepare(mga_chip *c);
+
 int mga_find(mga_chip *c)
 {
     int bus, dev, fn;
@@ -77,8 +81,10 @@ int mga_find(mga_chip *c)
                         c->fb_phys = mga_pci_read32(bus, dev, fn, 0x10) & ~0xFu;
                         c->mmio_phys = mga_pci_read32(bus, dev, fn, 0x14) & ~0xFu;
                         c->iload_phys = mga_pci_read32(bus, dev, fn, 0x18) & ~0xFu;
-                        if (c->family == MGA_FAMILY_G400 && c->revision >= 0x80)
+                        if (c->family == MGA_FAMILY_G400 && c->revision >= 0x80) {
                             c->name = "MGA-G450";
+                            g450_memory_prepare(c);
+                        }
                         mga_chip_caps(c);
                         return 0;
                     }
@@ -90,6 +96,85 @@ int mga_find(mga_chip *c)
         }
     }
     return -1;
+}
+
+/* ---- The G450's memory after a soft reset (bench F, 2026-11-16) -------------
+ * A drawing-engine soft reset (MGAREG_RST, engine_reset) leaves a G450's DDR
+ * memory un-initialised: nothing written holds for more than a second or two,
+ * until the next boot (bench F: writes to 8-byte-aligned words read back 0,
+ * all of VRAM changed within 3 s). The G400's SGRAM doesn't mind. The memory
+ * registers themselves survive the reset; the chips need their set-up again,
+ * as Linux matroxfb's g450_memory_init does at start, with the PInS v5
+ * block's values (OPTION2 as the card has it). mga_find reads them for a G450
+ * and points mga_memory_reinit at the sequence, which engine_reset runs. No
+ * PInS v5 block (or no BIOS to read): no hook, and a reset stays unsafe. */
+static struct { uint32_t opt, mctlwtst, core, memmisc, memrdbk, maccess; int ddr, dll, emrswen; } g450mem;
+static mga_chip *g450chip;
+
+static uint32_t le32b(const volatile uint8_t *b)
+{
+    return (uint32_t)b[0] | (uint32_t)b[1] << 8 | (uint32_t)b[2] << 16 | (uint32_t)b[3] << 24;
+}
+
+static void g450_memory_reinit(void)
+{
+    mga_chip *c = g450chip;
+    uint32_t o, opt2;
+    if (!c || !mga_mmio)
+        return;
+    opt2 = mga_pci_read32(c->bus, c->dev, c->fn, 0x50);
+    o = mga_pci_read32(c->bus, c->dev, c->fn, 0x40) & ~0x001F8000u;     /* refresh off */
+    mga_pci_write32(c->bus, c->dev, c->fn, 0x40, o);
+    o = (o & ~0x00207E00u) | (g450mem.opt & 0x00207E00u);               /* the memory interface */
+    mga_pci_write32(c->bus, c->dev, c->fn, 0x40, o);
+    mga_pci_write32(c->bus, c->dev, c->fn, 0x50, opt2);
+    MGA_WR32_DIRECT(MGAREG_MCTLWTST, g450mem.mctlwtst);
+    mga_pci_write32(c->bus, c->dev, c->fn, 0x58, g450mem.memmisc & ~0x80000000u);   /* memory clocks off */
+    MGA_WR32_DIRECT(MGAREG_MEMRDBK, g450mem.memrdbk);
+    MGA_WR32_DIRECT(MGAREG_MACCESS, g450mem.maccess);
+    mga_pci_write32(c->bus, c->dev, c->fn, 0x58, g450mem.memmisc | 0x80000000u);    /* memory clocks on */
+    sys_delay_us(200);
+    if (g450mem.ddr && (!g450mem.emrswen || !g450mem.dll))
+        MGA_WR32_DIRECT(MGAREG_MEMRDBK, g450mem.memrdbk & ~0x1000u);
+    MGA_WR32_DIRECT(MGAREG_MACCESS, g450mem.maccess | 0x8000u);         /* the chips' mode registers */
+    sys_delay_us(200);
+    o |= 0x001F8000u & g450mem.opt;                                     /* refresh on */
+    mga_pci_write32(c->bus, c->dev, c->fn, 0x40, o);
+    MGA_WR32_DIRECT(MGAREG_PLNWT, 0);
+    MGA_WR32_DIRECT(MGAREG_PLNWT, 0xFFFFFFFFu);
+    if (g450mem.mctlwtst != g450mem.core)
+        MGA_WR32_DIRECT(MGAREG_MCTLWTST, g450mem.core);
+    mga_g450_reinits++;
+}
+
+static void g450_memory_prepare(mga_chip *c)
+{
+    const volatile uint8_t *rom = (const volatile uint8_t *)sys_real_ptr(0xC000, 0), *p;
+    uint16_t at;
+    if (!rom || rom[0] != 0x55 || rom[1] != 0xAA)
+        return;                         /* (no video BIOS here: Loop C, the host) */
+    at = (uint16_t)(rom[0x7FFC] | rom[0x7FFD] << 8);
+    if (at < 0x40 || at > 0x7F00)
+        return;
+    p = rom + at;
+    if (p[0] != 0x2E || p[1] != 0x41 || p[5] != 5 || p[2] < 116)
+        return;
+    g450mem.opt = le32b(p + 48);
+    g450mem.mctlwtst = le32b(p + 98);
+    g450mem.memmisc = le32b(p + 102);
+    g450mem.memrdbk = le32b(p + 106);
+    g450mem.ddr = (p[114] & 0x60) == 0x20;
+    g450mem.dll = (p[115] & 0x02) != 0;
+    g450mem.emrswen = (p[115] & 0x01) != 0;
+    g450mem.maccess = g450mem.emrswen ? 0x00004000u : 0;
+    if (p[115] & 4)
+        g450mem.core = g450mem.mctlwtst;
+    else {
+        static const uint8_t xlat[8] = { 0, 1, 5, 6, 7, 5, 2, 3 };
+        g450mem.core = (g450mem.mctlwtst & ~7u) | xlat[g450mem.mctlwtst & 7];
+    }
+    g450chip = c;
+    mga_memory_reinit = g450_memory_reinit;
 }
 
 int mga_map(mga_chip *c)

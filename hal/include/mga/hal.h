@@ -321,6 +321,10 @@ extern uint32_t mga_warp_dwgctl;
 void engine_warp_order(void);
 /* Called by engine_reset after the soft reset (warp.c's DMA stream). */
 extern void (*mga_reset_hook)(void);
+/* A G450: its DDR memory set up again after a soft reset (pci.c sets it at
+ * mga_find from the PInS v5 block; engine_reset calls it), and how often. */
+extern void (*mga_memory_reinit)(void);
+extern uint32_t mga_g450_reinits;
 /* DWGSYNC's tags: a new one, and the last given (one sequence). */
 uint32_t mga_dwgsync_next(void);
 uint32_t mga_dwgsync_last(void);
