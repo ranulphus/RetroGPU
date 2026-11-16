@@ -408,3 +408,56 @@ transform 145, triangle 144, texture state 124.
 The cost is spread thin over a per-vertex, per-triangle and per-draw structure: function calls, a vertex cache
 that immediate mode never hits, volatile stores, and x87 comparisons and branches for each vertex. Single trims
 gain 1-5% each.
+
+## V: the vertex path per draw (plan, for approval)
+
+**Why.** After E1 and E2a, the fast path costs about 8 ms of a 16.7 ms GLQuake frame at 640x480 (ablation). That
+is about 700 cycles per vertex all told. The cost is in the structure, not in any one instruction (F3 gained
+nothing from Pentium II instructions):
+- every vertex goes through a function call and a cache lookup, though immediate mode never shares a vertex;
+- values are forced through memory (volatile) and tested by x87 comparisons and branches;
+- every triangle reserves ring room separately;
+- every clipped polygon is transformed a second time.
+
+Matrox's driver does the whole frame, card waits included, in about 8 ms.
+
+**The idea.** A draw whose vertices come in order (immediate mode, `glDrawArrays`), which is most of GLQuake and
+all of Echoes' sky and HUD, is handled in loops over the whole draw, not vertex by vertex. Indexed draws
+(`glDrawElements`, Echoes' terrain) keep the cached path, with V3's cheaper clipping. Every step keeps the
+arithmetic as it is, so the frames are byte-identical.
+
+**Steps:**
+- **V0. The floor** (bench, about 15 minutes). A tight loop that transforms and projects 4,500 vertices the way
+  the fast path does, timed on the Pentium II. That gives the cycles per vertex this CPU can reach, and sets V1's
+  target before any rework.
+- **V1. The batch vertex stage.** One loop transforms the draw's vertices into a local array of clip
+  coordinates and clip codes; the clip codes come from the coordinates' sign bits, stored once. If no vertex is
+  outside (the common case), a second loop projects them all straight into WARP form, with the texture
+  coordinates' whole periods taken once per draw. Otherwise the draw goes to the polygon or triangle path with
+  the coordinates already computed (V3).
+- **V2. Straight into the ring.** For a draw that is all inside, each triangle is culled by its integer area and
+  written into one ring reservation for the whole draw, instead of one per triangle.
+- **V3. Clipping without the second transform.** Clipped polygons and triangles are built from the batch's or
+  the cache's clip coordinates, plus the arrays' colours and texture coordinates, instead of `dgl_transform`.
+  These are the same values: the fast path already stores them as `dgl_transform` does. This is Echoes' biggest
+  cost (31% of its triangles are clipped) and about a fifth of GLQuake's.
+- **V4. Per draw.** Validation's exit when nothing changed (96% of draws), `plan_imm`, and the dispatch from
+  `glEnd` to the fast path.
+- **V5. Only if worth it after V0-V4: cheaper arithmetic.** Viewport constants once per viewport, and a
+  single-precision reciprocal. Frames would then differ by rounding, so the fast and general paths change
+  together, so that vertices they share stay identical.
+
+**Targets** (GLQuake demo1 on bench-g400, fast clocks; now 59.9 / 65.5): 640x480 70 fps, 320x200 80 fps.
+
+**Tests at each step:**
+- snapshots byte-identical to E2a's (V1-V4);
+- conformance on the three emulated cards and on bench-g400;
+- REGCRC streams may change; pixels may not;
+- `loopa-quake`, Quake II, Half-Life and Echoes (its own suite, run by its session);
+- the merge tier, then your OK.
+
+**Risks:**
+- A bug in the batch path draws wrong triangles. The snapshots and conformance catch that, and `DGL_FAST=0` stays
+  as a way back.
+- The gain could be smaller than hoped. V0 gives the floor before any rework, and if the floor doesn't leave room
+  for the targets, I stop and come back to you.
