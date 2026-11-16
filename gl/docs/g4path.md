@@ -153,3 +153,27 @@ Each is measured on its own, as in F1-F3.
 | Stale texels from reordered texture writes | t18, t31 and t32 and G4EXP's cache cases at every step |
 | The rare G400 corruption (~1 in 105 runs) gets mixed up with new faults | Snapshot checks on every bench run; any corrupt frame is compared against a main build on the same day |
 | Bench time shared with Echoes and GLOS | Sessions of about an hour, arranged with them first |
+
+## M0 results (2026-11-16, bench-g400): the plan's suspect was wrong
+
+- **Vertex runs cost the card nothing.** G4COST (tests/hal/g4cost.c, kicks held, kick-to-idle timed) gives the
+  same time per triangle whether each run is ended by a DMAPAD, an ALPHACTRL write, a texture switch
+  (`tex_emit_change`) or the whole texture state, or the triangles go in one run. For example: 1.50 µs against
+  1.53 µs at 8 pixels, 4.07 µs against 4.06 µs at 64 pixels. Fans by the sequencer cost the same as the same
+  triangles as lists at 64 pixels (2.81 µs in both cases), and 0.4 µs more per fan at 8 pixels. M1 as planned
+  would gain nothing.
+- **GLQuake's stream** (Loop A counts, `DGL-PRUN`): about 230 runs a frame of about 7 triangles each, nearly
+  every run after a WACCEPTSEQ write (a GL_POLYGON as a fan).
+- **The card's time for GLQuake's frame hardly moves** with the stream's content: 17.7/18.0 normal, 17.2 with
+  GL_NEAREST, 17.1 with GL_NEAREST_MIPMAP_NEAREST, 18.0 trilinear, 16.8 with `gl_picmip 2`, 17.6 without
+  entities, 16.4 with `DGL_SEQ=0` (ms per frame, kicks held).
+- **The clocks** (CLKINFO, tests/hal/clkinfo.c):
+  - The card runs on the first record of its BIOS's PInS v4 block: OPTION3 `0190A419`, which is also Linux's
+    `default_pins4`. Records 2 and 3 hold `019B8419`, a different memory-clock field.
+  - System PLL: M=09, N=3C, P=10, so 164.7 MHz from 27 MHz. The PInS's `pins[65]` is 0x7E.
+  - Whole-screen fills reach 641 Mpix/s (1.28 GB/s), which is 16 bytes a clock at about 82 MHz.
+  - Matrox's frames cost the card about a quarter as much per pixel as ours (from the 640-to-320 difference),
+    which fits slower clocks under DOS.
+- **Next:** the owner runs CLKINFO in a Windows 98 DOS box with Matrox's driver loaded. That reads the clocks
+  Matrox's driver sets, read-only. A clock step for DOS-GL or GLOS (the PInS's values, set once at start and put
+  back at exit) gets planned from what it shows.
