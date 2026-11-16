@@ -8,7 +8,6 @@
 #include "../gl/gl_state.h"
 #include "../gl/gl_tex.h"
 #include "mga/sys.h"
-#include "mga/hal.h"
 #include "../backend/backend.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -481,26 +480,13 @@ static void drain_with_hook(void)
     dgl_sync();
 }
 
-/* DGL_NODRAIN=1 (experiment, g4path.md): the swap doesn't wait for the card
- * to finish the frame. Frames may show unfinished: a measure of what overlap
- * of the CPU and the card would gain, not a mode to use. */
-static int no_drain = -1;
-
 static void swap_buffers(void)
 {
     PROF_SCOPE(PROF_D_SWAP);
 #ifdef __DJGPP__
     __djgpp_nearptr_enable();           /* the consumer may have turned near pointers off */
 #endif
-    if (no_drain < 0) {
-        const char *e = getenv("DGL_NODRAIN");
-        no_drain = e && atoi(e) > 0;
-    }
-    if (no_drain) {
-        if (mga_dma_kick)
-            mga_dma_kick();             /* (the frame's tail goes to the card now) */
-    }
-    else if (stats_on || dgl_ftrace_on) {
+    if (stats_on || dgl_ftrace_on) {
         uint32_t t0 = sys_time_us(), dt;
         drain_with_hook();              /* retired texture blocks go back to the heap */
         dt = sys_time_us() - t0;

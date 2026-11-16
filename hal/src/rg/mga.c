@@ -341,7 +341,9 @@ static void show_start(uint32_t off, int pitch_bytes)
  * card finishes this one; a program that stops drawing after a swap shows
  * the frame before until its next GL call that polls. */
 static struct { int pend; uint32_t tag, t0, us, max_us, n; } lag;
+#ifndef DGL_RIG
 static mga_clocks clocks_saved;         /* what open_screen's mga_clocks_fast found (valid: put back at close) */
+#endif
 
 static void lag_flip(void)
 {

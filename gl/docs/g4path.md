@@ -26,7 +26,7 @@ Waits for the card by cause (`DGL-PWAIT`, a PROF=2 build), then three switches:
    to finish. Waits for ring room, kick slots or FIFO slots are negligible. The kick size and ring size don't
    help either: 1.5 KB kicks change nothing, 24 KB and 96 KB kicks are slower (42.5 and 33.1 fps), and a 128 KB
    ring is slower (43.7).
-2. **Not draining doesn't help.** With `DGL_NODRAIN=1` (an experiment: the swap kicks and goes on, so frames
+2. **Not draining doesn't help.** With `DGL_NODRAIN=1` (an experiment on branch g4path, since removed: the swap kicks and goes on, so frames
    may show unfinished), 640x480 gains only 2% (46.4 against 45.3-45.8), Quake II gains 1.5%, and 320x200 with
    the present lag loses 3%. The wait moves to the next frame's first lightmap update. Its total stays at about
    a third of the frame.

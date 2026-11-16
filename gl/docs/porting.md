@@ -120,8 +120,7 @@ dglShutdown();
     - `DGL_CLOCKS=0` leaves the BIOS's clocks alone. `DGL_CLOCKS=2` raises them under GLOS too: a test of the
       device's path.
     - Profiling builds' `DGL-PWAIT` lines time the waits for the card by cause, and `DGL-PRUN` lines count the DMA
-      list's vertex runs and registers. `DGL_NODRAIN=1` (an experiment: frames may show unfinished) doesn't wait
-      for the card at the swap. See `docs/g4path.md`.
+      list's vertex runs and registers. See `docs/g4path.md`.
   - `DGL_FAST=0` turns off the fast path: triangles from vertex arrays, immediate mode and display lists straight
     to the WARP (no texture matrix, polygon offset or remapped unit; two textures on the G400 and G450 when unit 1
     has its own), each vertex transformed and projected once.
