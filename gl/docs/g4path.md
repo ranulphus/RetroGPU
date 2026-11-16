@@ -385,3 +385,26 @@ Immediate mode's colour plan is marked uniform when every vertex of the draw has
 | GLQuake 640x480 | 59.4 / 59.5 | 59.8 / 59.9 (+0.7%) |
 | GLQuake 320x200 | 64.5 | 65.5 (+1.7%) |
 | `-mtex` | 48.8 | 48.8 |
+
+### E2b (dropped): sequences from 4 vertices
+
+With E1 and E2a, GLQuake on bench-g400 at the fast clocks:
+
+| Sequences (WACCEPTSEQ fans) | 640x480 | 320x200 |
+|---|---|---|
+| From 5 vertices, as now | 59.7 / 59.6 | 65.0 |
+| From 4 | 58.8 / 58.8 | 63.9 |
+| From 3 | 58.4 / 58.4 | |
+| None (`DGL_SEQ=0`) | 59.8 | |
+
+Sequences for small polygons cost more than they save, and on GLQuake they don't pay at all now. Dropped.
+
+### Where E1-E2b leave it
+
+PROF=2 profile with E1 and E2a (640x480, per triangle): GLQuake 920 cycles, card waits 372, per draw (`batch`)
+606, transform 554, projection 554, ring 234, clipping 225, swap 195, validation 158, the general path's
+transform 145, triangle 144, texture state 124.
+
+The cost is spread thin over a per-vertex, per-triangle and per-draw structure: function calls, a vertex cache
+that immediate mode never hits, volatile stores, and x87 comparisons and branches for each vertex. Single trims
+gain 1-5% each.
