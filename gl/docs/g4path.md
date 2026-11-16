@@ -461,3 +461,31 @@ arithmetic as it is, so the frames are byte-identical.
   as a way back.
 - The gain could be smaller than hoped. V0 gives the floor before any rework, and if the floor doesn't leave room
   for the targets, I stop and come back to you.
+
+### V0's result (bench-g400): the arithmetic, not the structure
+
+VFLOOR (`gl/tools/perf/vfloor.c`) puts 4,500 GLQuake-like vertices through the fast path's arithmetic in tight
+loops on the Pentium II:
+
+| Variant | Cycles per vertex |
+|---|---|
+| Transform and clip codes only | 141 |
+| Transform, clip codes, projection and WARP form, batched | 407 |
+| The same one vertex per call through the cache, as `fast_get` does now | 416 |
+| The viewport and depth range as doubles computed once | 367-387 |
+| Plus no volatile (the transform in registers, stored once) | 360 |
+| Plus clip codes from the stored sums' sign bits | 346 |
+| Plus the reciprocal under single precision (the control word set once around the loop) | 334 |
+| Plus texture coordinates' range tests by exponent bits | **304** |
+
+- **The structure costs about 9 cycles a vertex.** V1-V2's whole-draw loops would gain little, so they are
+  dropped.
+- **The arithmetic as compiled is the cost.**
+
+**Plan V, revised (the owner, 2026-11-16):**
+- **VC.** The 304-cycle formulation goes into both the fast path (`fast_get`) and the general path (`project`),
+  so that vertices the two share stay identical. Frames then differ from E2a's by rounding: checked by
+  conformance (all cards and the bench) and by snapshot differences.
+- **V3.** Clipping without the second transform, as planned.
+- **VA.** A hand-scheduled x87 version is tried in VFLOOR first, and ported only if it clearly beats VC.
+- **V4** as planned. V1, V2 and V5 are folded into these.
