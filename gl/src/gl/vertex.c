@@ -153,6 +153,7 @@ dgl_aplan dgl_pl_v, dgl_pl_c, dgl_pl_t, dgl_pl_t1;
 static void plan_one(const dgl_array *a, int on, aplan *o)
 {
     o->on = on;
+    o->uniform = 0;
     if (!on)
         return;
     o->p = (const unsigned char *)dgl_buffer_address(a->buf, a->ptr);
@@ -163,10 +164,14 @@ static void plan_one(const dgl_array *a, int on, aplan *o)
 
 /* Immediate mode's vertices (glEnd) as arrays, for the fast path: the
  * values fetch() would read from them are these. */
-static void plan_imm(const dgl_vin *v)
+static void plan_imm(const dgl_vin *v, GLsizei n)
 {
+    GLsizei i;
     pl_v.p = (const unsigned char *)v->pos; pl_v.stride = sizeof *v; pl_v.type = GL_FLOAT; pl_v.size = 4; pl_v.on = 1;
     pl_c.p = (const unsigned char *)v->col; pl_c.stride = sizeof *v; pl_c.type = GL_FLOAT; pl_c.size = 4; pl_c.on = 1;
+    for (i = 1; i < n && !memcmp(v[i].col, v[0].col, sizeof v[0].col); i++)
+        ;
+    pl_c.uniform = i >= n;
     pl_t.p = (const unsigned char *)v->tex; pl_t.stride = sizeof *v; pl_t.type = GL_FLOAT; pl_t.size = 2; pl_t.on = 1;
     pl_t1.p = (const unsigned char *)v->tex1; pl_t1.stride = sizeof *v; pl_t1.type = GL_FLOAT; pl_t1.size = 2;
     pl_t1.on = 1;
@@ -343,7 +348,7 @@ static void assemble(GLenum mode, GLsizei count, const GLint *idx, GLint first, 
         }
     }
     if (imm)
-        plan_imm(imm);
+        plan_imm(imm, count);
     else
         plan_arrays();
     if (dgl_sink.fast && dgl_sink.fast(mode, count, idx, first)) {     /* (a list's: indices into its vertices) */
@@ -464,10 +469,12 @@ void APIENTRY glBegin(GLenum mode)
 
 void dgl_imm_vertex(float x, float y, float z, float w);
 
+int dgl_ablate;
+
 static void imm_vertex(float x, float y, float z, float w)
 {
     dgl_vin *v;
-    if (!imm.active)
+    if (!imm.active || (dgl_ablate & 8))
         return;
     if (imm.n == imm.cap) {
         GLsizei nc = imm.cap ? imm.cap * 2 : 1024;
@@ -487,6 +494,8 @@ void APIENTRY glEnd(void)
 {
     if (!imm.active) { dgl_gl_error(GL_INVALID_OPERATION); return; }
     imm.active = 0;
+    if (dgl_ablate & 12)
+        return;
     if (dgl_sink.record_imm && dgl_sink.record_imm(imm.mode, imm.n, imm.v))
         return;
     dgl_assemble(imm.mode, imm.n, NULL, 0, imm.v);

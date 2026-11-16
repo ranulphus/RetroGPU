@@ -616,6 +616,8 @@ static void warp_wrap(mga_wvtx *w, int map1, const mga_texstate *t)
  * ones (GL_FLAT on the fast path: the same product project() makes). */
 static void draw_projected(const proj *p0, const proj *p1, const proj *p2, const dgl_cvtx *flat)
 {
+    if (dgl_ablate & 1)
+        return;
     mga_svtx a = p0->v, b = p1->v, c = p2->v;
     if (flat) {
         a.r = flat->r * 255.0f; a.g = flat->g * 255.0f; a.b = flat->b * 255.0f; a.a = flat->a * 255.0f;
@@ -769,6 +771,8 @@ static const mga_wvtx *slot_warp(int s, const dgl_cvtx *v)
  * when the WARP failed (the CPU sets up this triangle and the rest). */
 static int draw_warp(const mga_wvtx *a, const mga_wvtx *b, const mga_wvtx *c, const dgl_cvtx *flat)
 {
+    if (dgl_ablate & 1)
+        return 0;
     mga_wvtx w[3];
     int i;
     w[0] = *a; w[1] = *b; w[2] = *c;
@@ -977,7 +981,8 @@ static fast_vtx fv[FAST_SLOTS];
 static unsigned fgen;
 static const float *fm;                 /* the MVP matrix */
 static const float *fmv;                /* the modelview matrix, for fog's eye distance */
-static uint32_t fbgra;                  /* the current colour, without a colour array */
+static uint32_t fbgra;                  /* the current colour, without a colour array (or one colour throughout) */
+static int fcol;                        /* per-vertex colours from the colour plan (not uniform) */
 static float fs0, ft0;                  /* the current texture coordinates, without an array */
 static float fs1, ft1;                  /* unit 1's */
 
@@ -1003,13 +1008,13 @@ static const fast_vtx *fast_get(GLint i)
     w = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15] * p3;
     f->oc = (z + w < 0) | ((w - z < 0) << 1) | ((x + guard_x * w < 0) << 2) | ((guard_x * w - x < 0) << 3) |
             ((y + guard_y * w < 0) << 4) | ((guard_y * w - y < 0) << 5);
-    if (dgl_pl_c.on && dgl_pl_c.type == GL_FLOAT) {
+    if (fcol && dgl_pl_c.type == GL_FLOAT) {
         /* project()'s products, stored as floats, then warp_form's bytes */
         const float *c = (const float *)(dgl_pl_c.p + (size_t)i * dgl_pl_c.stride);
         volatile float r = c[0] * 255.0f, g = c[1] * 255.0f, b = c[2] * 255.0f,
                        a = (dgl_pl_c.size > 3 ? c[3] : 1.0f) * 255.0f;
         f->w.bgra = byte_of(b) | (byte_of(g) << 8) | (byte_of(r) << 16) | (byte_of(a) << 24);
-    } else if (dgl_pl_c.on) {
+    } else if (fcol) {
         const unsigned char *c = dgl_pl_c.p + (size_t)i * dgl_pl_c.stride;
         f->w.bgra = (uint32_t)c[2] | ((uint32_t)c[1] << 8) | ((uint32_t)c[0] << 16) |
                     ((uint32_t)(dgl_pl_c.size > 3 ? c[3] : 255) << 24);
@@ -1163,6 +1168,8 @@ static void fast_tri(GLint ia, GLint ib, GLint ic, GLint ip)
         int dw;
         uint32_t *d;
         DGL_FINE_SWITCH(PROF_D_RING);           /* (the scope's end puts the caller's stage back) */
+        if (dgl_ablate & 1)
+            return;
         d = warp_reserve(3, &dw);
         if (d) {                                /* straight into the DMA stream */
             int32_t su = 0, sv = 0, su1 = 0, sv1 = 0;
@@ -1341,6 +1348,8 @@ static int fast_seq(GLenum mode, GLsizei count, const GLint *idx, GLint first)
             }
     }
     DGL_FINE_SWITCH(PROF_D_RING);
+    if (dgl_ablate & 1)
+        return 1;
     d = warp_reserve_seq(fan, (int)count, &dw);
     if (!d)
         return 0;
@@ -1377,6 +1386,8 @@ static int emit_fast(GLenum mode, GLsizei count, const GLint *idx, GLint first)
     default:
         return 0;
     }
+    if (dgl_ablate & 2)
+        return 1;
     DGL_FINE_SCOPE(PROF_D_BATCH);
     if (++fgen == 0) {                          /* (a wrapped generation: every slot stale) */
         memset(fv, 0, sizeof fv);
@@ -1386,9 +1397,15 @@ static int emit_fast(GLenum mode, GLsizei count, const GLint *idx, GLint first)
     fmv = dgl_gl.mv.stack[dgl_gl.mv.depth - 1].m;
     /* The current colour and coordinates stand in for an array that is off
      * (fast_get); immediate mode's vertices carry their own (plan_imm). */
+    fcol = dgl_pl_c.on && !dgl_pl_c.uniform;
     if (!dgl_pl_c.on)
         fbgra = byte_of(dgl_gl.cur_color[2] * 255.0f) | (byte_of(dgl_gl.cur_color[1] * 255.0f) << 8) |
                 (byte_of(dgl_gl.cur_color[0] * 255.0f) << 16) | (byte_of(dgl_gl.cur_color[3] * 255.0f) << 24);
+    else if (!fcol) {                           /* (immediate mode's one colour: fast_get's conversion, once) */
+        const float *c = (const float *)dgl_pl_c.p;
+        volatile float r = c[0] * 255.0f, g = c[1] * 255.0f, b = c[2] * 255.0f, a = c[3] * 255.0f;
+        fbgra = byte_of(b) | (byte_of(g) << 8) | (byte_of(r) << 16) | (byte_of(a) << 24);
+    }
     if (!dgl_pl_t.on) {
         fs0 = dgl_gl.cur_tex[0] * tex_scale_s;
         ft0 = dgl_gl.cur_tex[1] * tex_scale_t;

@@ -350,3 +350,38 @@ bench-g400, fast clocks:
   pixels, by at most 17 per channel, all on floors right in front of the camera. That is rounding of the new
   triangulation and can't be seen.
 - **Conformance** passed 35 of 35 on the emulated G400.
+
+### Ablation: a GLQuake frame by layer (`DGL_ABLATE`, diagnosis only; bench-g400, fast clocks, E1)
+
+| Removed | 640x480 frame | 320x200 frame |
+|---|---|---|
+| nothing | 16.8 ms | 15.5 ms |
+| 1: nothing sent to the card | 12.7 ms | 14.0 ms |
+| 2: the fast path returns at once | 4.4 ms | 5.8 ms |
+| 4: `glEnd` returns at once | 3.1 ms | 4.4 ms |
+| 8: `glVertex` and `glEnd` do nothing | 2.8 ms | 4.1 ms |
+
+So per 640x480 frame:
+
+| | ms |
+|---|---|
+| GLQuake itself, with the swap and the GL calls' overhead | 2.8 |
+| Storing the vertices | 0.3 |
+| Validation and planning (826 draws) | 1.3 |
+| **The fast path: transform, project, clip, assemble** | **8.3** (the same at 320x200: pure CPU) |
+| The ring writes and the card | 4.1 |
+
+The fast path works out at about 740 cycles per vertex (4,493 a frame). Matrox's driver does everything in about
+8 ms a frame.
+
+### E2a: one colour per draw converted once
+
+Immediate mode's colour plan is marked uniform when every vertex of the draw has the first one's colour (a
+16-byte compare each), and the fast path then converts it once per draw. Frames are byte-identical to E1's (7 of
+7 snapshots).
+
+| | E1 | E2a |
+|---|---|---|
+| GLQuake 640x480 | 59.4 / 59.5 | 59.8 / 59.9 (+0.7%) |
+| GLQuake 320x200 | 64.5 | 65.5 (+1.7%) |
+| `-mtex` | 48.8 | 48.8 |

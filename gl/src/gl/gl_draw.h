@@ -37,7 +37,9 @@ extern dgl_sinks dgl_sink;
 void dgl_transform(const dgl_vin *in, dgl_cvtx *out);
 /* The arrays resolved for the current draw (vertex.c, once a draw): each
  * one's first element, stride, type and size, and whether it is on. */
-typedef struct { const unsigned char *p; size_t stride; GLenum type; int size, on; } dgl_aplan;
+typedef struct { const unsigned char *p; size_t stride; GLenum type; int size, on, uniform; } dgl_aplan;
+/* (uniform: immediate mode's colour plan when every vertex of the draw has
+ * the colour of the first: the fast path converts it once, E2a.) */
 extern dgl_aplan dgl_pl_v, dgl_pl_c, dgl_pl_t, dgl_pl_t1;
 /* One triangle of the current array draw the general way (vertex.c's cache,
  * then the triangle sink): for the fast path's triangles that need clipping. */
@@ -46,6 +48,10 @@ void dgl_tri_general(GLint a, GLint b, GLint c, GLint provoking);
  * transformed once, then the polygon sink (g4path.md, E1). 0 when there is
  * no polygon sink or n is out of its range: the caller sends triangles. */
 #define DGL_POLY_MAX 9
+/* DGL_ABLATE (diagnosis, g4path.md; frames wrong on purpose): 1 nothing
+ * sent to the card, 2 the fast path returns at once, 4 glEnd returns at
+ * once, 8 glVertex and glEnd do nothing. */
+extern int dgl_ablate;
 int dgl_poly_general(const GLint *ids, int n, GLint provoking);
 /* Assemble a primitive from the current arrays (imm = NULL; idx or first)
  * or from an immediate-mode buffer (imm). */

@@ -7,6 +7,7 @@
 #include "dgl.h"
 #include "../gl/gl_state.h"
 #include "../gl/gl_tex.h"
+#include "../gl/gl_draw.h"
 #include "mga/sys.h"
 #include "../backend/backend.h"
 #include <stdio.h>
@@ -261,7 +262,9 @@ static void after_init(const DGLConfig *cp)
 {
     const DGLConfig c = *cp;
     {
+        const char *a = getenv("DGL_ABLATE");
         const char *e = getenv("DGL_EXIT_AFTER");
+        dgl_ablate = a ? atoi(a) : 0;
         exit_after = e ? strtoul(e, NULL, 10) : 0;
         if (e && *e) {                  /* the harness pairs each DGL-START with a DGL-EXIT; 0 = no limit */
             exit_pending = 1;
