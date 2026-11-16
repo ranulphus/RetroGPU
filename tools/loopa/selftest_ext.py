@@ -240,9 +240,32 @@ def check_clock():
     return report("clock", good, "CLOCKMON %s: %s" % (st, stat[len("HX-STAT clock "):] or "no clock line"))
 
 
+def check_g450mem():
+    """Local patch 0129: an emulated G450's VRAM after a soft reset, as bench F's card (RetroGPU
+    docs/g450-memory.md). With the HAL's memory set-up nothing changes and no hazard is reported; with it skipped
+    (MODETEST noreinit) VRAM decays and g450-memory is reported. Needs bench F's BIOS in the local ROM set (its PInS
+    v5 block carries the set-up's values): skipped without it."""
+    rom = os.path.join(os.environ.get("BOX86_DIR", os.path.join(os.environ.get("MGA_CACHE",
+                       os.path.expanduser("~/.cache/mga-glide")), "86box")), "roms/video/matrox/mgaglide/g450-benchf.bin")
+    if not os.path.exists(rom):
+        return report("g450-memory", True, "skipped: no %s (bench F's BIOS, local only)" % rom)
+    exe = ("--card", "g450", "--exe", "build/djgpp/MODETEST.EXE")
+    out = {}
+    for name, args in (("fixed", "hold=1 resets=2 decay=3"), ("broken", "hold=1 resets=1 noreinit decay=3")):
+        st, serial = job("selftest-g450mem-" + name, *exe, "--args", args)
+        last = [l for l in serial.split("\n") if l.startswith("HX-STAT modetest decay t=3s")]
+        changed = int(last[-1].split("changed=")[1].split()[0]) if last else -1
+        hz = hazards_of("selftest-g450mem-" + name) or {}
+        out[name] = (st, changed, sorted(hz))
+    good = out["fixed"][0] == "PASS" and out["fixed"][1] == 0 and out["fixed"][2] == [] and \
+        out["broken"][0] == "PASS" and out["broken"][1] > 100000 and out["broken"][2] == ["g450-memory"]
+    return report("g450-memory", good, "with the set-up %s, %d changed, hazards %s; without %s, %d changed, hazards %s" % (
+        out["fixed"] + out["broken"]))
+
+
 CHECKS = {"486": check_486, "vbe": check_vbe, "net": check_net, "com2": check_com2, "himemx": check_himemx,
           "cpu": check_cpu, "pci": check_pci, "rtc": check_rtc, "hazards": check_hazards, "clock": check_clock,
-          "umbpci": check_umbpci}
+          "umbpci": check_umbpci, "g450mem": check_g450mem}
 
 
 def main():

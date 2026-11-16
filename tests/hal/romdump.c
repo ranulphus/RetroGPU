@@ -1,82 +1,39 @@
-/* ROMDUMP - save the Matrox card's video BIOS (PRD WP-4).
- *
- * Reads the image through the PCI expansion-ROM BAR, not the C000h shadow
- * (which the system BIOS may have modified), writes it to C:\OUT\VBIOS.BIN
- * and reports its size and CRC. The dump stays with the owner of the card:
- * it goes into the local 86Box ROM set, never into this repository.
- *
- * Steps: set OPTION.biosen (the BAR only decodes with it), size the ROM BAR (write all ones, read back), place it at an
- * address the card is not using (just above the framebuffer aperture),
- * enable decoding, copy the image (length from its header, 512-byte units),
- * then restore the BAR. */
+/* romdump.c - ROMDUMP: the video BIOS image at C000:0000 (its length from the header's byte 2, in 512-byte
+ * units) to C:\OUT\VIDEOROM.BIN, with its PInS block's place, length and version on COM1/stdout (HX-STAT
+ * romdump). Reads only. For the emulator's ROM set (RetroGPU local patch 0129: the emulated G450 with bench F's
+ * own BIOS, whose PInS v5 block the HAL's memory set-up reads). */
 #include "hx.h"
-#include "mga/hal.h"
 #include "mga/sys.h"
 #include <stdio.h>
-#include <string.h>
-
-static uint8_t image[128 * 1024];
+#include <stdint.h>
 
 int main(int argc, char **argv)
 {
-    uint32_t old_bar, old_option, size_mask, size, base, len, i;
-    volatile uint8_t *rom;
+    const volatile uint8_t *rom;
+    unsigned len, at, i;
+    uint8_t sum = 0;
     FILE *f;
-    int ok;
-
-    hx_init(argc, argv, "romdump");
-    ok = mga_find(&mga) == 0;
-    hx_test("pci", ok, "%s id=%04x rev=%02x", ok ? mga.name : "none", mga.device_id, mga.revision);
-    if (!ok)
-        hx_done(HX_INIT_FAILED);
-    /* OPTION.biosen (bit 30) must be set for the ROM BAR to decode. */
-    old_option = mga_pci_read32(mga.bus, mga.dev, mga.fn, 0x40);
-    mga_pci_write32(mga.bus, mga.dev, mga.fn, 0x40, old_option | (1u << 30));
-    old_bar = mga_pci_read32(mga.bus, mga.dev, mga.fn, 0x30);
-    mga_pci_write32(mga.bus, mga.dev, mga.fn, 0x30, 0xFFFFF800u);
-    size_mask = mga_pci_read32(mga.bus, mga.dev, mga.fn, 0x30) & 0xFFFFF800u;
-    size = size_mask ? (~size_mask + 1u) : 0;
-    if (!size || size > sizeof image) {
-        mga_pci_write32(mga.bus, mga.dev, mga.fn, 0x30, old_bar);
-        hx_test("rombar", 0, "ROM BAR size %lu unsupported (bar=%08lx)", (unsigned long)size, (unsigned long)old_bar);
-        hx_done(HX_FAIL);
+    (void)argc;
+    hx_init(1, argv, "romdump");
+    rom = (const volatile uint8_t *)sys_real_ptr(0xC000, 0);
+    if (!rom || rom[0] != 0x55 || rom[1] != 0xAA) {
+        hx_test("romdump", 0, "no option ROM signature at C000:0000");
+        hx_done(1);
     }
-    /* Use the BIOS-assigned address if there is one, else one above the
-     * framebuffer aperture (aligned to the ROM size). */
-    base = old_bar & 0xFFFFF800u;
-    if (!base) {
-        /* Above every aperture of the card (framebuffer, MMIO, ILOAD). */
-        uint32_t top = mga.fb_phys + mga.fb_size;
-        if (mga.mmio_phys + 0x4000u > top) top = mga.mmio_phys + 0x4000u;
-        if (mga.iload_phys + 0x800000u > top) top = mga.iload_phys + 0x800000u;
-        base = (top + size - 1) & ~(size - 1);
+    len = (unsigned)rom[2] * 512u;
+    at = (unsigned)(rom[0x7FFC] | rom[0x7FFD] << 8);
+    for (i = 0; i < len; i++)
+        sum = (uint8_t)(sum + rom[i]);
+    f = fopen("C:\\OUT\\VIDEOROM.BIN", "wb");
+    if (!f) {
+        hx_test("romdump", 0, "cannot write C:\\OUT\\VIDEOROM.BIN");
+        hx_done(1);
     }
-    hx_log("HX-STAT rombar old=%08lx size=%lu use=%08lx option=%08lx", (unsigned long)old_bar,
-           (unsigned long)size, (unsigned long)base, (unsigned long)old_option);
-    mga_pci_write32(mga.bus, mga.dev, mga.fn, 0x30, base | 1u);
-    rom = (volatile uint8_t *)sys_map_phys(base, size);
-    if (!rom) {
-        mga_pci_write32(mga.bus, mga.dev, mga.fn, 0x30, old_bar);
-        hx_test("map", 0, "cannot map %08lx", (unsigned long)base);
-        hx_done(HX_FAIL);
-    }
-    for (i = 0; i < size; i++)
-        image[i] = rom[i];
-    mga_pci_write32(mga.bus, mga.dev, mga.fn, 0x30, old_bar);
-    mga_pci_write32(mga.bus, mga.dev, mga.fn, 0x40, old_option);
-    ok = image[0] == 0x55 && image[1] == 0xAA;
-    len = ok ? (uint32_t)image[2] * 512u : 0;
-    if (!len || len > size)
-        len = size;
-    hx_test("signature", ok, "55AA %s, header length %lu of BAR size %lu", ok ? "found" : "missing",
-            (unsigned long)len, (unsigned long)size);
-    f = fopen("C:\\OUT\\VBIOS.BIN", "wb");
-    if (f) {
-        fwrite(image, 1, len, f);
-        fclose(f);
-    }
-    hx_stat("romdump device=%04x bytes=%lu crc32=%08lx file=C:\\OUT\\VBIOS.BIN", mga.device_id,
-            (unsigned long)len, (unsigned long)hx_crc32(0, image, len));
-    hx_done(ok && f ? 0 : HX_FAIL);
-    return 0;
+    for (i = 0; i < len; i++)
+        fputc(rom[i], f);
+    fclose(f);
+    hx_log("HX-STAT romdump length=%u checksum=%02x pins_at=%04x sig=%02x%02x pins_len=%u pins_ver=%u", len, sum, at,
+           rom[at], rom[at + 1], rom[at + 2], rom[at + 5]);
+    hx_test("romdump", 1, "%u bytes to C:\\OUT\\VIDEOROM.BIN", len);
+    hx_done(0);
 }

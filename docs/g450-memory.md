@@ -67,3 +67,10 @@ doesn't apply to it.
 
 Open: during one conformance run the owner saw about 10% of GLOS's text screen briefly garbled, restored by the next
 graphical test. Not reproduced, and not caused by the set-up (above). Watch for it.
+
+## In the emulator
+
+86Box local patch 0129 makes the emulated G450 behave the same way (`docs/emulated-g400.md`, "A real G450"),
+booting bench F's own BIOS from the local ROM set. `loopa-selftest-ext g450mem` checks that a reset with the
+set-up changes nothing and that one without it decays.
+

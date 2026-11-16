@@ -104,6 +104,32 @@ habits, and it is a lower bound: on the card, the clip barrier's untextured draw
 DWGSYNC writes (`docs/g400-warp.md`, copies among WARP triangles), which the check doesn't see. `WARPTRI hazards` commits each hazard once beside its
 safe form; `make loopa-selftest-ext CHECKS=hazards` checks the counts.
 
+## A real G450 (bench F, 2026-11-16; local patch 0129)
+
+The first runs on a real G450 found one thing the model did not do: **a drawing-engine soft reset (RST bit 0)
+leaves the G450's DDR memory uninitialised until its set-up**. Until then the first 16-bit word of every 8
+bytes reads 0, and with no refresh all of VRAM decays within seconds. The G400's SGRAM keeps its contents through
+the same reset. The HAL now re-initialises a G450's memory after every reset (`pci.c`'s `mga_memory_reinit`, from
+the BIOS's PInS v5 block; `docs/g450-memory.md`).
+
+Patch 0129 models it:
+- After an emulated G450's soft reset, the CPU's linear reads of those words return 0, and VRAM turns to noise
+  every 2 s of emulated time.
+- `MGA-HAZARD g450-memory` is reported once VRAM is used in that state.
+- A MACCESS write with bit 15 set (the memory reset command, the set-up's last step) ends the state.
+- The G450 reports revision 85h, as bench F's card.
+- It boots bench F's own BIOS when the local ROM set has it (`roms/video/matrox/mgaglide/g450-benchf.bin`, read
+  from the card with ROMDUMP; Matrox's code, so local only and never in a repository). 935-20's PInS is blank
+  (version 0), so without bench F's image the HAL can't find the set-up's values, and any reset would leave the
+  emulated card's memory decaying.
+
+`loopa-selftest-ext`'s check `g450mem` runs MODETEST with resets on the emulated G450:
+- with the HAL's set-up, nothing changes and nothing is reported;
+- with `noreinit`, VRAM decays and `g450-memory` is reported.
+
+It is skipped where bench F's BIOS isn't in the ROM set. DOS-GL's conformance passes 35 of 35 on the emulated
+G450 with the model, with no hazards.
+
 ## Still unchecked
 
 - On a real G450: the OPTION values, the pixel PLL, the clip quirk (`g400_clip_quirk` in the HAL caps is not yet

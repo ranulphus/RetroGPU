@@ -1,0 +1,195 @@
+mga: the G450's memory after a drawing-engine soft reset (local patch 0129)
+
+On a real G450 (bench F, 2026-11-16; RetroGPU docs/g450-memory.md) a soft reset (RST bit 0) leaves the DDR
+memory uninitialised until the memory reset command (MACCESS bit 15, the last step of Linux matroxfb's
+g450_memory_init): the first 16-bit word of every 8 bytes reads 0 at once, and with no refresh all of VRAM
+decays within ~3 s. Modelled: after a G450's soft reset the CPU's linear reads of those words return 0 and
+VRAM turns to noise every 2 s of emulated time, reported as MGA-HAZARD g450-memory once VRAM is used in that state, until a MACCESS write
+with bit 15 set. The G450 also reports revision 85h, as bench F's card, and boots bench F's own BIOS when the
+local ROM set has it (roms/video/matrox/mgaglide/g450-benchf.bin, read from the card with RetroGPU's ROMDUMP;
+Matrox's code: local only, never in a repository): its PInS v5 block carries the memory values the HAL's set-up
+reads, where 935-20's PInS is blank (version 0). The G400's SGRAM keeps its contents through a reset, as before.
+
+diff --git a/src/video/vid_mga.c b/src/video/vid_mga.c
+index 3e49174..3b18690 100644
+--- a/src/video/vid_mga.c
++++ b/src/video/vid_mga.c
+@@ -79,9 +79,11 @@ enum {
+     HZ_RFW,             /* TEXWIDTH/TEXHEIGHT rfw that doesn't fit the size */
+     HZ_AGP,             /* an AGP fetch from memory the CPU caches write-back */
+     HZ_TLUT,            /* the G200's LUT load on the G400 family */
++    HZ_G450_MEM,        /* a G450's VRAM used after a soft reset without its memory set-up (local patch 0129) */
+     HZ_KINDS
+ };
+-static const char *const hz_names[HZ_KINDS] = { "warp-inflight", "warp-opmode", "rfw", "agp-cached", "tlut" };
++static const char *const hz_names[HZ_KINDS] = { "warp-inflight", "warp-opmode", "rfw", "agp-cached", "tlut",
++                                                "g450-memory" };
+ 
+ static void
+ mga_hazard(int kind, const char *fmt, ...)
+@@ -119,6 +121,11 @@ mga_hazard(int kind, const char *fmt, ...)
+ /* MGA-Glide local: Matrox's G450 BIOS 935-20 (a 34 KB image; the flasher
+  * module appended to the file lies past the 64 KB window's image end). */
+ #define ROM_G450              "roms/video/matrox/mgaglide/935-20.bin"
++/* MGA-Glide local patch 0129: bench F's own G450 BIOS (read from its C000:0000
++ * with RetroGPU's ROMDUMP; local ROM set only), whose PInS v5 block carries the
++ * memory values the HAL's set-up after a soft reset reads. 935-20's PInS is
++ * blank (version 0). Used when present. */
++#define ROM_G450_BENCHF       "roms/video/matrox/mgaglide/g450-benchf.bin"
+ 
+ /* MGA-Glide local patch: the G400's texture cache, as a model: lines of
+  * texture memory, direct-mapped. What the silicon showed (bench-g400,
+@@ -727,6 +734,15 @@ typedef struct mystique_t {
+     uint8_t thread_run;
+ 
+     void *i2c, *i2c_ddc, *ddc;
++    /* MGA-Glide local patch 0129: a real G450's DDR memory after a drawing-
++     * engine soft reset (bench F, 2026-11-16; RetroGPU docs/g450-memory.md):
++     * uninitialised until the memory reset command (MACCESS bit 15, the last
++     * step of Linux matroxfb's g450_memory_init); meanwhile the first 16-bit
++     * word of every 8 bytes reads 0 and, unrefreshed, all of VRAM decays
++     * within seconds (here: turns to noise every 2 s of emulated time). */
++    int      g450_uninit, g450_used;
++    uint64_t g450_since;
++    uint32_t g450_noise;
+ } mystique_t;
+ 
+ static const uint8_t trans_masks[16][16] = {
+@@ -851,6 +867,32 @@ static void wake_fifo_thread(mystique_t *mystique);
+ static void wait_fifo_idle(mystique_t *mystique);
+ static void mystique_queue(mystique_t *mystique, uint32_t addr, uint32_t val, uint32_t type);
+ 
++/* Local patch 0129: an uninitialised G450's VRAM decays: every 2 s of
++ * emulated time since the reset (or the last decay) it turns to noise. */
++static void
++g450_mem_decay(svga_t *svga, mystique_t *m)
++{
++    uint32_t i, x;
++
++    if (!m->g450_used) {
++        m->g450_used = 1;
++        mga_hazard(HZ_G450_MEM, "VRAM used after a soft reset without the G450's memory set-up (MACCESS bit 15)");
++    }
++    if (!cpu_s || (tsc - m->g450_since) < 2ull * (uint64_t) cpu_s->rspeed)
++        return;
++    m->g450_since = tsc;
++    x = m->g450_noise ? m->g450_noise : 0x2545F491u;
++    for (i = 0; i + 4 <= svga->vram_max; i += 4) {
++        x ^= x << 13;
++        x ^= x >> 17;
++        x ^= x << 5;
++        *(uint32_t *) &svga->vram[i] = x;
++    }
++    m->g450_noise = x;
++    memset(svga->changedvram, svga->monitor->mon_changeframecount, svga->vram_max >> 12);
++    mga_hazard(HZ_G450_MEM, "VRAM decayed: a soft reset without the G450's memory set-up (MACCESS bit 15) since");
++}
++
+ static uint8_t  mystique_readb_linear(uint32_t addr, void *priv);
+ static uint16_t mystique_readw_linear(uint32_t addr, void *priv);
+ static uint32_t mystique_readl_linear(uint32_t addr, void *priv);
+@@ -2087,6 +2129,10 @@ mystique_accel_ctrl_write_b_raw(uint32_t addr, uint8_t val, void *priv)
+         case REG_MACCESS + 2:
+         case REG_MACCESS + 3:
+             WRITE8(addr, mystique->maccess, val);
++            if (mystique->g450_uninit && (mystique->maccess & 0x8000)) {
++                mystique->g450_uninit = 0;      /* (local patch 0129: the memory reset command) */
++                pclog("MGA: G450 memory set up again (MACCESS bit 15)\n");
++            }
+             mystique->dwgreg.dither = mystique->maccess >> 30;
+             g200_origin_update(mystique);
+             if (mystique->type < MGA_2164W)
+@@ -2546,6 +2592,12 @@ mystique_ctrl_write_b(uint32_t addr, uint8_t val, void *priv)
+         case REG_RST + 2:
+         case REG_RST + 3:
+             wait_fifo_idle(mystique);
++            if ((addr & 0x3fff) == REG_RST && (val & 1) && mystique->type == MGA_G450 && !mystique->g450_uninit) {
++                mystique->g450_uninit = 1;      /* (local patch 0129: a hazard once VRAM is used so) */
++                mystique->g450_used   = 0;
++                mystique->g450_since  = tsc;
++                pclog("MGA: G450 soft reset: its memory uninitialised until the set-up (MACCESS bit 15)\n");
++            }
+             if ((addr & 0x3fff) == REG_RST && (val & 1)) {
+                 mystique->warp.running = 0;     /* MGA-Glide local patch: the soft reset stops the WARPs */
+                 mystique->warp.loads   = 0;
+@@ -3673,6 +3725,11 @@ mystique_readb_linear(uint32_t addr, void *priv)
+     addr &= svga->decode_mask;
+     if (addr >= svga->vram_max)
+         return 0xff;
++    if (((mystique_t *) svga->priv)->g450_uninit) {     /* (local patch 0129) */
++        g450_mem_decay((svga_t *) svga, (mystique_t *) svga->priv);
++        if ((addr & 7) < 2)
++            return 0;
++    }
+ 
+     return svga->vram[addr & svga->vram_mask];
+ }
+@@ -3687,6 +3744,11 @@ mystique_readw_linear(uint32_t addr, void *priv)
+     addr &= svga->decode_mask;
+     if (addr >= svga->vram_max)
+         return 0xffff;
++    if (((mystique_t *) svga->priv)->g450_uninit) {     /* (local patch 0129) */
++        g450_mem_decay(svga, (mystique_t *) svga->priv);
++        if ((addr & 7) == 0)
++            return 0;
++    }
+ 
+     return *(uint16_t *) &svga->vram[addr & svga->vram_mask];
+ }
+@@ -3701,6 +3763,11 @@ mystique_readl_linear(uint32_t addr, void *priv)
+     addr &= svga->decode_mask;
+     if (addr >= svga->vram_max)
+         return 0xffffffff;
++    if (((mystique_t *) svga->priv)->g450_uninit) {     /* (local patch 0129) */
++        g450_mem_decay(svga, (mystique_t *) svga->priv);
++        if ((addr & 7) == 0)
++            return *(uint32_t *) &svga->vram[addr & svga->vram_mask] & 0xffff0000u;
++    }
+ 
+     return *(uint32_t *) &svga->vram[addr & svga->vram_mask];
+ }
+@@ -3725,6 +3792,8 @@ mystique_writeb_linear(uint32_t addr, uint8_t val, void *priv)
+     addr &= svga->vram_mask;
+     svga->changedvram[addr >> 12] = svga->monitor->mon_changeframecount;
+     svga->vram[addr]              = val;
++    if (((mystique_t *) svga->priv)->g450_uninit)
++        g450_mem_decay(svga, (mystique_t *) svga->priv);     /* (local patch 0129) */
+ }
+ 
+ static void
+@@ -3740,6 +3809,8 @@ mystique_writew_linear(uint32_t addr, uint16_t val, void *priv)
+     addr &= svga->vram_mask;
+     svga->changedvram[addr >> 12]   = svga->monitor->mon_changeframecount;
+     *(uint16_t *) &svga->vram[addr] = val;
++    if (((mystique_t *) svga->priv)->g450_uninit)
++        g450_mem_decay(svga, (mystique_t *) svga->priv);     /* (local patch 0129) */
+ }
+ 
+ static void
+@@ -3755,6 +3826,8 @@ mystique_writel_linear(uint32_t addr, uint32_t val, void *priv)
+     addr &= svga->vram_mask;
+     svga->changedvram[addr >> 12]   = svga->monitor->mon_changeframecount;
+     *(uint32_t *) &svga->vram[addr] = val;
++    if (((mystique_t *) svga->priv)->g450_uninit)
++        g450_mem_decay(svga, (mystique_t *) svga->priv);     /* (local patch 0129) */
+ }
+ 
+ static void
+@@ -7774,7 +7847,7 @@ mystique_pci_read(UNUSED(int func), int addr, UNUSED(int len), void *priv)
+             case 0x08:
+                 /* G400: 5, as bench-g400's (MGA-Glide local patch; its BIOS's
+                  * workarounds are for revision 2); a G450 is 0x80 and up. */
+-                ret = (mystique->type == MGA_G450) ? 0x82 :
++                ret = (mystique->type == MGA_G450) ? 0x85 :
+                       (mystique->type == MGA_G400) ? 5 : (mystique->type == MGA_1164SG) ? 3 : 0;
+                 break; /*Revision ID*/
+             case 0x09:
+@@ -8200,7 +8273,7 @@ mystique_init(const device_t *info)
+     else if (mystique->type == MGA_1064SG)
+         romfn = ROM_MYSTIQUE;
+     else if (mystique->type == MGA_G450)
+-        romfn = ROM_G450;
++        romfn = rom_present(ROM_G450_BENCHF) ? ROM_G450_BENCHF : ROM_G450;     /* (local patch 0129) */
+     else if (mystique->type == MGA_G400)
+         romfn = ROM_G400;
+     else if (mystique->type == MGA_G200 && !mystique->is_agp && rom_present(ROM_G200_PCI))

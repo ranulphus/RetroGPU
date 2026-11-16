@@ -146,7 +146,7 @@ static void engine_quads(int pitch)
 int main(int argc, char **argv)
 {
     mga_vbe_mode m;
-    int i, pitch = 0, hold = 6, x, y, decay = 0, resets = 0;
+    int i, pitch = 0, hold = 6, x, y, decay = 0, resets = 0, noreinit = 0;
     uint32_t t0;
     for (i = 1; i < argc; i++)
         if (!strncmp(argv[i], "hold=", 5))
@@ -155,6 +155,8 @@ int main(int argc, char **argv)
             decay = atoi(argv[i] + 6);      /* seconds of once-a-second readbacks of the bars */
         else if (!strncmp(argv[i], "resets=", 7))
             resets = atoi(argv[i] + 7);     /* engine resets with the bars on screen, each then counted */
+        else if (!strcmp(argv[i], "noreinit"))
+            noreinit = 1;                   /* those resets without a G450's memory set-up (the bug, on purpose) */
     hx_init(1, argv, "modetest");
     if (mga_find(&mga) != 0 || mga_map(&mga) != 0) {
         hx_test("init", 0, "no Matrox card found or mapped");
@@ -196,6 +198,8 @@ int main(int argc, char **argv)
         volatile uint16_t *fb = (volatile uint16_t *)mga_fb;
         int k;
         engine_init(pitch, 16);
+        if (noreinit)
+            mga_memory_reinit = NULL;
         for (k = 1; k <= resets; k++) {
             unsigned long bad = 0;
             engine_reset();

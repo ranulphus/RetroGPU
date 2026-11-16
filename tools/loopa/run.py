@@ -684,7 +684,7 @@ def run(a):
         # 86Box's silicon checks (local patch 0124): each kind's count (the highest reported, so at least
         # this many) and its first message
         hazards = {}
-        for kind, n, msg in re.findall(r"MGA-HAZARD: ([a-z-]+): #(\d+): (.*)", stderr_text):
+        for kind, n, msg in re.findall(r"MGA-HAZARD: ([a-z0-9-]+): #(\d+): (.*)", stderr_text):
             h = hazards.setdefault(kind, {"count": 0, "first": msg})
             h["count"] = max(h["count"], int(n))
         result["mga_hazards"] = hazards
