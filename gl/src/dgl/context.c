@@ -395,6 +395,29 @@ static void prof_report(uint32_t tris)
             (unsigned long)prof_nc_n[0], (unsigned long)prof_nc_off[1], (unsigned long)prof_nc_n[1],
             (unsigned long)prof_nc_off[2], (unsigned long)prof_nc_n[2], (unsigned long)prof_nc_off[3],
             (unsigned long)prof_nc_n[3]);
+    {
+        /* The list's shape: runs, their dwords, and the ten registers written
+         * most (DMA index:count; 0x... = MGAREG offset 0x1c00 + 4*index for
+         * indices below 0x80, else 0x2c00 + 4*(index-0x80)). */
+        char b[200] = "";
+        int k, m, used = 0, idx[10];
+        for (k = 0; k < 10; k++) {
+            int best = -1;
+            for (m = 0; m < 256; m++) {
+                int seen = 0, q;
+                for (q = 0; q < k; q++)
+                    seen |= idx[q] == m;
+                if (!seen && prof_lreg[m] && (best < 0 || prof_lreg[m] > prof_lreg[best]))
+                    best = m;
+            }
+            idx[k] = best;
+            if (best >= 0)
+                used += snprintf(b + used, sizeof b - (size_t)used, " %02x:%lu", best, (unsigned long)prof_lreg[best]);
+        }
+        DGL_ERR("DGL-PRUN runs=%lu run_dw=%lu list=%s", (unsigned long)prof_runs, (unsigned long)prof_run_dw, b);
+        prof_runs = prof_run_dw = 0;
+        memset(prof_lreg, 0, sizeof prof_lreg);
+    }
     memset(prof_wcyc, 0, sizeof prof_wcyc);
     memset(prof_wn, 0, sizeof prof_wn);
     memset(prof_fl, 0, sizeof prof_fl);

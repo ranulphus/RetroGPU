@@ -307,6 +307,9 @@ static void list_put(uint32_t idx, uint32_t v)
     }
     lhval |= idx << (8 * lslots);
     lring[lused++] = v;
+#ifdef MGA_PROF
+    prof_lreg[idx & 255]++;
+#endif
     lslots = (lslots + 1) & 3;
     if (!lslots)
         lring[lhdr] = lhval;
@@ -324,6 +327,10 @@ static void close_run(void)
     if (vrun == NO_RUN)
         return;
     if (vused != vrun) {
+#ifdef MGA_PROF
+        prof_runs++;
+        prof_run_dw += (vused - vrun) / 4u;
+#endif
         list_pad();
         list_put(DMAREG(MGAREG_DMAPAD), 0);
         list_put(DMAREG(MGAREG_DMAPAD), 0);

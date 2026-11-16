@@ -84,6 +84,9 @@ enum { PROF_FL_NONCMD, PROF_FL_LIST, PROF_FL_EXT, PROF_FL_N };
 extern uint64_t prof_wcyc[PROF_W_N];
 extern uint32_t prof_wn[PROF_W_N], prof_fl[PROF_FL_N];
 extern uint32_t prof_nc_off[8], prof_nc_n[8];   /* non-list registers that forced a flush, and how often */
+/* The DMA list's shape (warp.c; DGL-PRUN): vertex runs and their dwords, and
+ * the list's register writes by DMA index (DMAPAD and the run packets too). */
+extern uint32_t prof_runs, prof_run_dw, prof_lreg[256];
 #  define PROF_SWITCH(c) prof_switch(c)
 #  define PROF_BACK(o)   prof_back(o)
 #  define PROF_WR()      (prof_wr++)
