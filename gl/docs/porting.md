@@ -121,6 +121,14 @@ dglShutdown();
       device's path.
     - Profiling builds' `DGL-PWAIT` lines time the waits for the card by cause, and `DGL-PRUN` lines count the DMA
       list's vertex runs and registers. See `docs/g4path.md`.
+  - `DGL_POLYCLIP=0` clips a GL_POLYGON that crosses the near plane or the guard band triangle by triangle, as
+    before. By default it is clipped once, whole, as Mesa does; fans and strips always go triangle by triangle.
+  - `DGL_ABLATE=n` is a diagnosis switch only: the frames are wrong on purpose. Each value switches off one layer,
+    and the frame time saved is that layer's cost:
+    - `1`: nothing is sent to the card;
+    - `2`: the fast path returns at once;
+    - `4`: `glEnd` returns at once;
+    - `8`: `glVertex` and `glEnd` do nothing.
   - `DGL_FAST=0` turns off the fast path: triangles from vertex arrays, immediate mode and display lists straight
     to the WARP (no texture matrix, polygon offset or remapped unit; two textures on the G400 and G450 when unit 1
     has its own), each vertex transformed and projected once.
