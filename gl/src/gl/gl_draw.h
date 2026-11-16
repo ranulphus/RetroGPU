@@ -18,6 +18,9 @@ extern unsigned char dgl_vslot_sink[DGL_VSLOTS];
 typedef struct {
     int  (*begin)(void);        /* validate state; 0 = draw nothing */
     void (*triangle)(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *c, const dgl_cvtx *provoking);
+    /* A convex polygon of n (3..DGL_POLY_MAX) vertices that needs clipping,
+     * whole: clipped once, then its fan (NULL: triangle by triangle). */
+    void (*polygon)(const dgl_cvtx *v, int n, const dgl_cvtx *provoking);
     void (*line)(const dgl_cvtx *a, const dgl_cvtx *b);
     void (*point)(const dgl_cvtx *a);
     void (*end)(void);
@@ -39,6 +42,11 @@ extern dgl_aplan dgl_pl_v, dgl_pl_c, dgl_pl_t, dgl_pl_t1;
 /* One triangle of the current array draw the general way (vertex.c's cache,
  * then the triangle sink): for the fast path's triangles that need clipping. */
 void dgl_tri_general(GLint a, GLint b, GLint c, GLint provoking);
+/* A polygon of the current array draw the general way, whole: its vertices
+ * transformed once, then the polygon sink (g4path.md, E1). 0 when there is
+ * no polygon sink or n is out of its range: the caller sends triangles. */
+#define DGL_POLY_MAX 9
+int dgl_poly_general(const GLint *ids, int n, GLint provoking);
 /* Assemble a primitive from the current arrays (imm = NULL; idx or first)
  * or from an immediate-mode buffer (imm). */
 void dgl_assemble(GLenum mode, GLsizei count, const GLint *idx, GLint first, const dgl_vin *imm);

@@ -285,3 +285,68 @@ Snapshots (7 frames, `-fixedtime`) are byte-identical at both clocks.
   - the G450 (PInS v5; Windows's values to be read on bench P4 the same way);
   - the Glide runtime (it opens the screen through its own path, not the device);
   - whether a warm reboot's POST puts record 1 back.
+
+## The CPU side (2026-11-16): where the remaining gap is
+
+At the fast clocks the gap to Matrox's driver is a fixed amount of time per frame, about the same at both sizes,
+so it is not pixel work:
+
+| | DOS-GL | Matrox | DOS-GL's extra time |
+|---|---|---|---|
+| 640x480 | 17.6 ms | 10.7 ms | 6.9 ms |
+| 320x200 | 16.3 ms | 8.6 ms | 7.7 ms |
+
+- **Not GLOS.** The owner ran the same build under plain MS-DOS (`C:\GAMES\DGL\PLAIN\PLAIN.BAT`):
+
+  | | Plain DOS | GLOS, write-combining and AGP off | GLOS, normal |
+  |---|---|---|---|
+  | 640x480 | 55.5 | 54.7 | 56.7 |
+  | 320x200 | 60.9 | 58.7 | 60.9 |
+  | `-mtex` | 47.1 | 45.8 | 47.8 |
+  | BIOS clocks | 42.5 | 42.3 | |
+
+  GLOS costs 1.5–3.5% against plain DOS under the same conditions. The HAL's clock switch also worked under
+  plain DOS, with the clocks put back after each run.
+- **Not the game build.** Our software Quake port beats id's `QUAKE.EXE` on this PC (107 against 91 fps at
+  320x200).
+- **It is DOS-GL's CPU work.** From the PROF=2 profile (profsum.py), per triangle:
+
+  | | Cycles |
+  |---|---|
+  | GLQuake | 879 |
+  | Waits for the card | 1,047 at the BIOS clocks (far less at the fast ones) |
+  | DOS-GL | 3,366 |
+  | … transform | 654, about 260 a vertex |
+  | … projection | 535, about 250 a vertex |
+  | … per draw | 415, about 900 per `glBegin`/`glEnd` |
+  | … clipping | 365 |
+
+  Matrox's whole frame works out at about 2,400 cycles a triangle, so its driver has about 1,500.
+- **The half-second pause** at frame 200 of demo1 is DOSBench's results writer: `-dosbench` saves `L<test>.PPM`
+  there (`dbwrite.c`). Its time is left out of the results' frame times and fps.
+
+### E1: GL_POLYGON clipped whole (branch g4cpu)
+
+About 20% of GLQuake's triangles need clipping: floors and walls crossing the near plane. The guard band is
+already 2,000 pixels. Before E1 each of them was clipped as its own triangle, after a second full transform.
+
+- **What E1 does.** A GL_POLYGON with a vertex outside goes whole to the new polygon sink (`dgl_poly_general`,
+  then `emit_polygon`). It is clipped once, culled on its whole signed area, and drawn as a fan, the way Mesa
+  clips polygons.
+- **Fans and strips stay triangle by triangle.** Clipping a fan whole moved GLQuake's weapon's texture visibly,
+  because its texture coordinates are not planar across the fan.
+- `DGL_POLYCLIP=0` turns E1 off.
+
+bench-g400, fast clocks:
+
+| | Before | E1 | Gain |
+|---|---|---|---|
+| GLQuake 640x480 | 56.5 / 56.7 | 59.5 / 59.5 | +5.0% |
+| GLQuake 320x200 | 61.5 | 64.5 | +4.8% |
+| GLQuake `-mtex` | 47.9 | 48.8 | +2.0% |
+| Quake II 640x480 (fans included, in the first version) | | | +0.9% |
+
+- **Frames.** 2 of 7 snapshots are identical and 1 differs in one pixel. The other four differ in 193 to 1,584
+  pixels, by at most 17 per channel, all on floors right in front of the camera. That is rounding of the new
+  triangulation and can't be seen.
+- **Conformance** passed 35 of 35 on the emulated G400.

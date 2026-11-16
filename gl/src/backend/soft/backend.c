@@ -471,6 +471,7 @@ static void install(void)
     dgl_sink.begin = sb_begin;
     dgl_sink.triangle = sb_triangle;
     dgl_sink.fast = NULL;                       /* (the general path only) */
+    dgl_sink.polygon = NULL;                    /* (triangle by triangle) */
     dgl_sink.line = sb_line;
     dgl_sink.point = sb_point;
     dgl_sink.end = sb_end;

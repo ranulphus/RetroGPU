@@ -300,6 +300,19 @@ void dgl_tri_general(GLint a, GLint b, GLint c, GLint provoking)
     tri(a, b, c, provoking, NULL);
 }
 
+int dgl_poly_general(const GLint *ids, int n, GLint provoking)
+{
+    dgl_cvtx v[DGL_POLY_MAX], pv;
+    int i;
+    if (!dgl_sink.polygon || n < 3 || n > DGL_POLY_MAX)
+        return 0;
+    for (i = 0; i < n; i++)
+        v[i] = *get(ids[i], NULL);      /* (copies: two of them may share a cache slot) */
+    pv = *get(provoking, NULL);
+    dgl_sink.polygon(v, n, &pv);
+    return 1;
+}
+
 static void line(GLint a, GLint b, const dgl_vin *imm)
 {
     dgl_cvtx v0 = *get(a, imm), v1 = *get(b, imm);

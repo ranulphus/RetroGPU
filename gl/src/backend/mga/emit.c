@@ -896,6 +896,70 @@ static void emit_triangle(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *
     }
 }
 
+/* A whole convex polygon that needs clipping (g4path.md, E1): clipped once
+ * rather than triangle by triangle, culled on its whole signed area, then
+ * drawn as emit_triangle draws its clipped fan. */
+static void emit_polygon(const dgl_cvtx *v, int nv, const dgl_cvtx *prov)
+{
+    dgl_cvtx in[DGL_POLY_MAX], out[16];
+    proj p[16];
+    const proj *P[16];
+    const dgl_cvtx *C[16];
+    int n, i;
+    int64_t area2 = 0;
+    PROF_SCOPE(PROF_D_CLIP);
+    dgl_prims.tris_in += (unsigned long)(nv - 2);
+    memcpy(in, v, (size_t)nv * sizeof *v);
+    if (dgl_gl.shade_model == GL_FLAT)
+        for (i = 0; i < nv; i++) {
+            in[i].r = prov->r; in[i].g = prov->g; in[i].b = prov->b; in[i].a = prov->a;
+        }
+    n = dgl_clip_polygon(in, nv, out, guard_x, guard_y);
+    if (n < 3) {
+        dgl_prims.clipped += (unsigned long)(nv - 2);
+        return;
+    }
+    PROF_SWITCH(PROF_D_PROJ);
+    for (i = 0; i < n; i++) {
+        project(&out[i], &p[i]);
+        P[i] = &p[i];
+        C[i] = &out[i];
+    }
+    for (i = 1; i + 1 < n; i++)
+        area2 += (int64_t)(P[i]->v.X16 - P[0]->v.X16) * (P[i + 1]->v.Y16 - P[0]->v.Y16) -
+                 (int64_t)(P[i + 1]->v.X16 - P[0]->v.X16) * (P[i]->v.Y16 - P[0]->v.Y16);
+    if (area2 == 0) {
+        dgl_prims.zero_area++;
+        return;
+    }
+    if (dgl_gl.cull_face) {
+        int front = (dgl_gl.front_face == GL_CCW) ? area2 < 0 : area2 > 0;
+        if (dgl_gl.cull_mode == GL_FRONT_AND_BACK || (dgl_gl.cull_mode == GL_BACK) != front) {
+            dgl_prims.culled++;
+            return;
+        }
+    }
+    PROF_SWITCH(PROF_D_SETUP);
+    if (warp_now && !dgl_gl.fog) {
+        mga_wvtx wl[16];
+        for (i = 0; i < n; i++)
+            warp_form(C[i], P[i], &wl[i]);
+        for (i = 1; i + 1 < n; i++) {
+            tri_offset = offset_for(P[0], P[i], P[i + 1]);
+            if (!warp_now || draw_warp(&wl[0], &wl[i], &wl[i + 1], NULL) != 0)
+                draw_projected(P[0], P[i], P[i + 1], NULL);
+        }
+        return;
+    }
+    for (i = 1; i + 1 < n; i++) {
+        tri_offset = offset_for(P[0], P[i], P[i + 1]);
+        if (dgl_gl.fog)
+            fog_split(C[0], C[i], C[i + 1], P[0], P[i], P[i + 1], 0, NULL);
+        else
+            draw_projected(P[0], P[i], P[i + 1], NULL);
+    }
+}
+
 /* ---- The fast path: vertex arrays straight to the WARP (S1) ---------------
  * A draw of triangles from vertex arrays (or immediate mode's vertices,
  * planned as arrays at glEnd: vertex.c), while the WARP draws the state and
@@ -1187,6 +1251,28 @@ static void fast_tri(GLint ia, GLint ib, GLint ic, GLint ip)
  * not each triangle's. 1 when sent; 0: the caller sends triangles. */
 #define SEQ_MAX 64
 static int seq_kinds = 7;               /* DGL_SEQ: 1 fans and polygons, 2 strips, 4 flat polygons (0: none) */
+/* A GL_POLYGON with a vertex that needs clipping, whole (E1): one clip
+ * instead of one per triangle, as Mesa clips polygons. Not fans or strips:
+ * their triangles are GL's, and a clipped fan drawn from a new first vertex
+ * interpolates non-planar attributes differently (GLQuake's weapon's
+ * texture moved on bench-g400). 1 when sent. */
+static int poly_whole = 1;              /* DGL_POLYCLIP=0: triangle by triangle, as before */
+static int fast_poly_general(GLenum mode, GLsizei count, const GLint *idx, GLint first)
+{
+    GLint ids[DGL_POLY_MAX];
+    GLsizei i;
+    unsigned oc = 0;
+    if (!poly_whole || mode != GL_POLYGON || count < 4 || count > DGL_POLY_MAX)
+        return 0;
+    for (i = 0; i < count; i++) {
+        ids[i] = idx ? idx[i] : first + i;
+        oc |= fast_get(ids[i])->oc;
+    }
+    if (!oc)
+        return 0;
+    return dgl_poly_general(ids, (int)count, ids[0]);    /* (a polygon's provoking vertex: its first) */
+}
+
 static int fast_seq(GLenum mode, GLsizei count, const GLint *idx, GLint first)
 {
     /* The vertices' slots; with indices, copies (a slot may be refilled
@@ -1344,7 +1430,7 @@ static int emit_fast(GLenum mode, GLsizei count, const GLint *idx, GLint first)
         }
         break;
     case GL_POLYGON:
-        if (fast_seq(mode, count, idx, first))
+        if (fast_seq(mode, count, idx, first) || fast_poly_general(mode, count, idx, first))
             break;
         for (i = 1; i + 1 < count; i++)
             fast_tri(I(0), I(i), I(i + 1), I(0));
@@ -1446,10 +1532,13 @@ void dgl_emit_install(void)
     force_combiner = e && *e && *e != '0';
     e = getenv("DGL_TC2_EXTRA");
     tc2_extra = e && *e && mga.has_dual_tex ? (uint32_t)strtoul(e, NULL, 16) : 0;
+    e = getenv("DGL_POLYCLIP");
+    poly_whole = !(e && *e == '0');
     e = getenv("DGL_GUARD_PX");
     guard_px = e && atoi(e) > 0 && atoi(e) <= 2000 ? (float)atoi(e) : 2000.0f;
     dgl_sink.begin = emit_begin;
     dgl_sink.triangle = emit_triangle;
+    dgl_sink.polygon = emit_polygon;
     e = getenv("DGL_FAST");
     dgl_sink.fast = e && *e == '0' ? NULL : emit_fast;     /* DGL_FAST=0: the general path only */
     dgl_sink.line = emit_line;
