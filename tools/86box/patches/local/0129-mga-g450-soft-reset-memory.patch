@@ -9,9 +9,12 @@ with bit 15 set. The G450 also reports revision 85h, as bench F's card, and boot
 local ROM set has it (roms/video/matrox/mgaglide/g450-benchf.bin, read from the card with RetroGPU's ROMDUMP;
 Matrox's code: local only, never in a repository): its PInS v5 block carries the memory values the HAL's set-up
 reads, where 935-20's PInS is blank (version 0). The G400's SGRAM keeps its contents through a reset, as before.
+The memory is modelled only when the emulated G450 boots bench F's BIOS: that card is the one measured, and its
+PInS defines the set-up; with 935-20's blank PInS (no real card's) the G450 keeps its memory through a reset, as
+before (GitHub's CI, which has only the public ROM set).
 
 diff --git a/src/video/vid_mga.c b/src/video/vid_mga.c
-index 3e49174..3b18690 100644
+index 3e49174..ce35194 100644
 --- a/src/video/vid_mga.c
 +++ b/src/video/vid_mga.c
 @@ -79,9 +79,11 @@ enum {
@@ -39,7 +42,7 @@ index 3e49174..3b18690 100644
  
  /* MGA-Glide local patch: the G400's texture cache, as a model: lines of
   * texture memory, direct-mapped. What the silicon showed (bench-g400,
-@@ -727,6 +734,15 @@ typedef struct mystique_t {
+@@ -727,6 +734,16 @@ typedef struct mystique_t {
      uint8_t thread_run;
  
      void *i2c, *i2c_ddc, *ddc;
@@ -49,13 +52,14 @@ index 3e49174..3b18690 100644
 +     * step of Linux matroxfb's g450_memory_init); meanwhile the first 16-bit
 +     * word of every 8 bytes reads 0 and, unrefreshed, all of VRAM decays
 +     * within seconds (here: turns to noise every 2 s of emulated time). */
++    int      g450_model;                  /* (booted bench F's BIOS: the memory modelled as that card's) */
 +    int      g450_uninit, g450_used;
 +    uint64_t g450_since;
 +    uint32_t g450_noise;
  } mystique_t;
  
  static const uint8_t trans_masks[16][16] = {
-@@ -851,6 +867,32 @@ static void wake_fifo_thread(mystique_t *mystique);
+@@ -851,6 +868,32 @@ static void wake_fifo_thread(mystique_t *mystique);
  static void wait_fifo_idle(mystique_t *mystique);
  static void mystique_queue(mystique_t *mystique, uint32_t addr, uint32_t val, uint32_t type);
  
@@ -88,7 +92,7 @@ index 3e49174..3b18690 100644
  static uint8_t  mystique_readb_linear(uint32_t addr, void *priv);
  static uint16_t mystique_readw_linear(uint32_t addr, void *priv);
  static uint32_t mystique_readl_linear(uint32_t addr, void *priv);
-@@ -2087,6 +2129,10 @@ mystique_accel_ctrl_write_b_raw(uint32_t addr, uint8_t val, void *priv)
+@@ -2087,6 +2130,10 @@ mystique_accel_ctrl_write_b_raw(uint32_t addr, uint8_t val, void *priv)
          case REG_MACCESS + 2:
          case REG_MACCESS + 3:
              WRITE8(addr, mystique->maccess, val);
@@ -99,11 +103,12 @@ index 3e49174..3b18690 100644
              mystique->dwgreg.dither = mystique->maccess >> 30;
              g200_origin_update(mystique);
              if (mystique->type < MGA_2164W)
-@@ -2546,6 +2592,12 @@ mystique_ctrl_write_b(uint32_t addr, uint8_t val, void *priv)
+@@ -2546,6 +2593,13 @@ mystique_ctrl_write_b(uint32_t addr, uint8_t val, void *priv)
          case REG_RST + 2:
          case REG_RST + 3:
              wait_fifo_idle(mystique);
-+            if ((addr & 0x3fff) == REG_RST && (val & 1) && mystique->type == MGA_G450 && !mystique->g450_uninit) {
++            if ((addr & 0x3fff) == REG_RST && (val & 1) && mystique->type == MGA_G450 && mystique->g450_model &&
++                !mystique->g450_uninit) {
 +                mystique->g450_uninit = 1;      /* (local patch 0129: a hazard once VRAM is used so) */
 +                mystique->g450_used   = 0;
 +                mystique->g450_since  = tsc;
@@ -112,7 +117,7 @@ index 3e49174..3b18690 100644
              if ((addr & 0x3fff) == REG_RST && (val & 1)) {
                  mystique->warp.running = 0;     /* MGA-Glide local patch: the soft reset stops the WARPs */
                  mystique->warp.loads   = 0;
-@@ -3673,6 +3725,11 @@ mystique_readb_linear(uint32_t addr, void *priv)
+@@ -3673,6 +3727,11 @@ mystique_readb_linear(uint32_t addr, void *priv)
      addr &= svga->decode_mask;
      if (addr >= svga->vram_max)
          return 0xff;
@@ -124,7 +129,7 @@ index 3e49174..3b18690 100644
  
      return svga->vram[addr & svga->vram_mask];
  }
-@@ -3687,6 +3744,11 @@ mystique_readw_linear(uint32_t addr, void *priv)
+@@ -3687,6 +3746,11 @@ mystique_readw_linear(uint32_t addr, void *priv)
      addr &= svga->decode_mask;
      if (addr >= svga->vram_max)
          return 0xffff;
@@ -136,7 +141,7 @@ index 3e49174..3b18690 100644
  
      return *(uint16_t *) &svga->vram[addr & svga->vram_mask];
  }
-@@ -3701,6 +3763,11 @@ mystique_readl_linear(uint32_t addr, void *priv)
+@@ -3701,6 +3765,11 @@ mystique_readl_linear(uint32_t addr, void *priv)
      addr &= svga->decode_mask;
      if (addr >= svga->vram_max)
          return 0xffffffff;
@@ -148,7 +153,7 @@ index 3e49174..3b18690 100644
  
      return *(uint32_t *) &svga->vram[addr & svga->vram_mask];
  }
-@@ -3725,6 +3792,8 @@ mystique_writeb_linear(uint32_t addr, uint8_t val, void *priv)
+@@ -3725,6 +3794,8 @@ mystique_writeb_linear(uint32_t addr, uint8_t val, void *priv)
      addr &= svga->vram_mask;
      svga->changedvram[addr >> 12] = svga->monitor->mon_changeframecount;
      svga->vram[addr]              = val;
@@ -157,7 +162,7 @@ index 3e49174..3b18690 100644
  }
  
  static void
-@@ -3740,6 +3809,8 @@ mystique_writew_linear(uint32_t addr, uint16_t val, void *priv)
+@@ -3740,6 +3811,8 @@ mystique_writew_linear(uint32_t addr, uint16_t val, void *priv)
      addr &= svga->vram_mask;
      svga->changedvram[addr >> 12]   = svga->monitor->mon_changeframecount;
      *(uint16_t *) &svga->vram[addr] = val;
@@ -166,7 +171,7 @@ index 3e49174..3b18690 100644
  }
  
  static void
-@@ -3755,6 +3826,8 @@ mystique_writel_linear(uint32_t addr, uint32_t val, void *priv)
+@@ -3755,6 +3828,8 @@ mystique_writel_linear(uint32_t addr, uint32_t val, void *priv)
      addr &= svga->vram_mask;
      svga->changedvram[addr >> 12]   = svga->monitor->mon_changeframecount;
      *(uint32_t *) &svga->vram[addr] = val;
@@ -175,7 +180,7 @@ index 3e49174..3b18690 100644
  }
  
  static void
-@@ -7774,7 +7847,7 @@ mystique_pci_read(UNUSED(int func), int addr, UNUSED(int len), void *priv)
+@@ -7774,7 +7849,7 @@ mystique_pci_read(UNUSED(int func), int addr, UNUSED(int len), void *priv)
              case 0x08:
                  /* G400: 5, as bench-g400's (MGA-Glide local patch; its BIOS's
                   * workarounds are for revision 2); a G450 is 0x80 and up. */
@@ -184,12 +189,16 @@ index 3e49174..3b18690 100644
                        (mystique->type == MGA_G400) ? 5 : (mystique->type == MGA_1164SG) ? 3 : 0;
                  break; /*Revision ID*/
              case 0x09:
-@@ -8200,7 +8273,7 @@ mystique_init(const device_t *info)
+@@ -8199,8 +8274,10 @@ mystique_init(const device_t *info)
+         romfn = mystique->is_agp ? ROM_MILLENNIUM_II_AGP : ROM_MILLENNIUM_II;
      else if (mystique->type == MGA_1064SG)
          romfn = ROM_MYSTIQUE;
-     else if (mystique->type == MGA_G450)
+-    else if (mystique->type == MGA_G450)
 -        romfn = ROM_G450;
-+        romfn = rom_present(ROM_G450_BENCHF) ? ROM_G450_BENCHF : ROM_G450;     /* (local patch 0129) */
++    else if (mystique->type == MGA_G450) {
++        mystique->g450_model = rom_present(ROM_G450_BENCHF);   /* (local patch 0129) */
++        romfn                = mystique->g450_model ? ROM_G450_BENCHF : ROM_G450;
++    }
      else if (mystique->type == MGA_G400)
          romfn = ROM_G400;
      else if (mystique->type == MGA_G200 && !mystique->is_agp && rom_present(ROM_G200_PCI))

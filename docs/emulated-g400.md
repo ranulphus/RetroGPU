@@ -123,6 +123,10 @@ Patch 0129 models it:
   (version 0), so without bench F's image the HAL can't find the set-up's values, and any reset would leave the
   emulated card's memory decaying.
 
+The memory is modelled only when the emulated G450 boots bench F's BIOS: that card is the one measured, and its
+PInS defines the set-up. With 935-20 (GitHub's CI, which has only the public ROM set) a reset keeps the memory, as
+before.
+
 `loopa-selftest-ext`'s check `g450mem` runs MODETEST with resets on the emulated G450:
 - with the HAL's set-up, nothing changes and nothing is reported;
 - with `noreinit`, VRAM decays and `g450-memory` is reported.
