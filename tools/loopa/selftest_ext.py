@@ -158,7 +158,7 @@ def check_cpu():
 
 
 # The chip each PCI card is, as PROBE's pci case names it.
-PCI_CHIP = {"g200pci": "MGA-G200 (PCI) id=0520", "g400pci": "MGA-G400/G450 id=0525 rev=05", "g450pci": "MGA-G450 id=0525 rev=82"}
+PCI_CHIP = {"g200pci": "MGA-G200 (PCI) id=0520", "g400pci": "MGA-G400/G450 id=0525 rev=05", "g450pci": "MGA-G450 id=0525 rev=85"}
 
 
 def check_pci():
