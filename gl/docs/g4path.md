@@ -225,3 +225,35 @@ a primary card.
 - **Risk:** a wrong sequence can stop the memory clock and hang the PC until it's power-cycled (Linux warns about
   this). So C0 runs once with the owner at hand, uses only the card's own BIOS values that Windows uses, and
   follows Linux's order step by step.
+
+## C0 results (2026-11-16, bench-g400, the owner at the PC)
+
+CLKSET (tests/hal/clkset.c):
+
+| Step | Clocks | Fill | Read-back check |
+|---|---|---|---|
+| A | BIOS: 164.7 MHz, `0190A419`, OPTION `50040120` | 646 Mpix/s | 0 bad |
+| B | record 2: 252.0 MHz, `019B8419` | 979 Mpix/s | 0 bad |
+| C | plus OPTION `50538120` | 984 Mpix/s | 0 bad |
+| D | after a VBE mode set | still B/C: the BIOS doesn't put its clocks back | |
+| E | BIOS values back | 646 Mpix/s | 0 bad; registers read back exactly |
+
+GLQuake demo1 and Quake II demo1 on main's build (0f59088), with the clocks held at C (`CLKSET hold`, then
+`CLKSET restore`):
+
+| | BIOS clocks | Matrox's clocks |
+|---|---|---|
+| GLQuake 640x480 two-pass | 45.6 (43.8 just after) | 56.3 / 56.5 |
+| GLQuake 640x480 `-mtex` | 43.3 | 47.9 |
+| GLQuake 320x200 | 55.1 | 61.0 |
+| GLQuake 320x200 with `DGL_PRESENT_LAG` | 60.5 | 65.6 |
+| Quake II 640x480 / 320x240 | 31.9 / 36.1 | 36.1 / 38.2 |
+| Card alone, GLQuake 640x480 frame (kicks held) | 17.7 ms | 12.95 ms |
+
+Snapshots (7 frames, `-fixedtime`) are byte-identical at both clocks.
+
+**Where that leaves the gap.**
+- At 640x480, the card's 13 ms and the CPU's ~17 ms per frame are now close. So M3's overlap pays: the frame
+  could fall toward max(CPU, card) ≈ 17 ms, about 58 fps.
+- The rest is the CPU (M4). The card is also still slower than Matrox's whole 10.2 ms frame, so some card
+  inefficiency remains (M2's lightmap waits for `-mtex`, and the per-pixel cost left).

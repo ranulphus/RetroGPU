@@ -2,6 +2,11 @@
  * the BIOS's clocks put back.
  *
  *   CLKSET [dry] [emu]
+ *   CLKSET hold | restore
+ *
+ * hold (an experiment, bench-g400): step C's clocks set and left, for programs run after it; restore: the BIOS's
+ * clocks back as bench-g400's BIOS has them (M=09 N=3C P=10, OPTION3 0190A419, OPTION 50040120). Both only
+ * where the PInS check passes.
  *
  * Matrox's Windows 98 driver on bench-g400 runs the card at its PInS v4 block's second clock record (system PLL
  * 252 MHz: M=02 N=1B P=18; OPTION3 019B8419) and raises OPTION's refresh count (bits 15-20) and sets bit 22;
@@ -35,7 +40,7 @@
 #define OPT_WIN_BITS 0x005F8000u        /* rfhcnt (15-20) and bit 22 */
 #define OPT3_SOURCES 0x00300C03u        /* gclksel, mclksel, wclksel */
 
-static int dry, emu;
+static int dry, emu, hold, back;
 static uint32_t opt0, opt30;
 static uint8_t m0, n0, p0;
 
@@ -146,6 +151,8 @@ int main(int argc, char **argv)
     for (i = 1; i < argc; i++)
         if (!strcmp(argv[i], "dry")) dry = 1;
         else if (!strcmp(argv[i], "emu")) emu = 1;
+        else if (!strcmp(argv[i], "hold")) hold = 1;
+        else if (!strcmp(argv[i], "restore")) back = 1;
     hx_init(1, argv, "clkset");
     if (mga_find(&mga) != 0 || mga_map(&mga) != 0 || mga.device_id != 0x0525) {
         hx_test("init", 0, "a G400 is needed");
@@ -173,6 +180,17 @@ int main(int argc, char **argv)
     p0 = xread(0x2E);
     opt_win = (opt0 & ~OPT_WIN_BITS) | (0x50538120u & OPT_WIN_BITS);
     show("start");
+    if (hold || back) {
+        int r = hold ? set_clocks(0x02, 0x1B, 0x18, r2_opt3, opt_win)
+                     : set_clocks(0x09, 0x3C, 0x10, 0x0190A419u, (opt0 & ~OPT_WIN_BITS) | (0x50040120u & OPT_WIN_BITS));
+        if (r != 0 && hold) {
+            hx_log("HX-STAT clkset hold: the PLL did not lock");
+            restore();
+        }
+        show(hold ? "held" : "restored");
+        hx_test("clkset", r == 0, "%s", hold ? "record 2 held" : "BIOS clocks back");
+        hx_done(r == 0 ? 0 : 1);
+    }
     if (vbe_find_mode(640, 480, 16, &mode) != 0 || vbe_set_mode(&mode, 1024, &pitch) != 0 || pitch != 1024) {
         hx_test("init", 0, "640x480x16 with pitch 1024");
         hx_done(HX_INIT_FAILED);
