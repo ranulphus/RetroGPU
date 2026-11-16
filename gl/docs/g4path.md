@@ -257,3 +257,31 @@ Snapshots (7 frames, `-fixedtime`) are byte-identical at both clocks.
   could fall toward max(CPU, card) ≈ 17 ms, about 58 fps.
 - The rest is the CPU (M4). The card is also still slower than Matrox's whole 10.2 ms frame, so some card
   inefficiency remains (M2's lightmap waits for `-mtex`, and the per-pixel cost left).
+
+## C1 (2026-11-16): the HAL does it
+
+- **The code.** `hal/src/clocks.c` holds `mga_clocks_fast(mga_clocks *saved)` and `mga_clocks_restore(saved)`:
+  - no engine context;
+  - only bench-g400's PInS records and running clocks are acted on;
+  - `mga_clocks_why` gives the reason.
+- **Under GLOS** (the owner's choice, 2026-11-16) GLOS calls them for its whole run, with a `[display]` setting to
+  keep the BIOS's clocks. That is GLOS's change.
+- **The Matrox device** (`rg/mga.c`) calls them at the full-screen open and at close only without GLOS.
+  `DGL_CLOCKS=0`: never. `DGL_CLOCKS=2`: under GLOS too (the test hook).
+- **bench-g400, the device's path (`DGL_CLOCKS=2`):**
+
+  | | fps |
+  |---|---|
+  | GLQuake 640x480 two-pass | 56.7 (twice) |
+  | GLQuake 640x480 `-mtex` | 47.8 |
+  | GLQuake 320x200 | 61.5 |
+  | Quake II 640x480 | 36.2 |
+  | GLQuake 640x480 under GLOS by default (left alone) | 43.9 |
+
+  - CLKINFO after each program read the BIOS's clocks back.
+  - Snapshots matched the BIOS-clock set byte for byte.
+  - `conform-bench` with `DGL_CLOCKS=2` passed 35 of 35 (t33 and t34 skipped, as always on the bench).
+- **Not yet covered:**
+  - the G450 (PInS v5; Windows's values to be read on bench P4 the same way);
+  - the Glide runtime (it opens the screen through its own path, not the device);
+  - whether a warm reboot's POST puts record 1 back.

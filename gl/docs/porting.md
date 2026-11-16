@@ -110,6 +110,18 @@ dglShutdown();
     `DGL_AGP=1` or `2` caps the rate at 1x or 2x. The G200 keeps cached rings and PCI unless `DGL_AGP=1` or `2`
     asks (its AGP drew nothing on the real card: RetroGPU's `docs/g200-warp.md`). `DGL_RING=bytes` (256 KB) and `DGL_KICK=bytes` (6 KB of
     vertices between kicks) tune the rings.
+  - **The G400's clocks.** The BIOS starts a G400 at its PInS block's first clock record (system PLL 164.7 MHz on
+    bench-g400). Matrox's own driver runs it on the second (252 MHz), about half as fast again in the engine and
+    the memory, with identical pixels: GLQuake demo1 at 640x480 went from 45.6 to 56.7 fps.
+    - Without GLOS, the Matrox device raises them at the screen's open and puts the BIOS's back at its close
+      (RetroGPU's `hal/src/clocks.c`), printing `DGL-CLOCKS raised: ...`.
+    - Under GLOS, GLOS owns them: it raises them for its whole run.
+    - Only a card whose PInS and running clocks are the ones seen on bench-g400 is touched.
+    - `DGL_CLOCKS=0` leaves the BIOS's clocks alone. `DGL_CLOCKS=2` raises them under GLOS too: a test of the
+      device's path.
+    - Profiling builds' `DGL-PWAIT` lines time the waits for the card by cause, and `DGL-PRUN` lines count the DMA
+      list's vertex runs and registers. `DGL_NODRAIN=1` (an experiment: frames may show unfinished) doesn't wait
+      for the card at the swap. See `docs/g4path.md`.
   - `DGL_FAST=0` turns off the fast path: triangles from vertex arrays, immediate mode and display lists straight
     to the WARP (no texture matrix, polygon offset or remapped unit; two textures on the G400 and G450 when unit 1
     has its own), each vertex transformed and projected once.
