@@ -75,14 +75,47 @@ PROFILES = {
 _slot = None
 
 
+# LOOPA_OOM_FIRST=1 (regress-remote's runs on devserver; the owner's choice of 2026-11-17, as GLOS's gates there):
+# if the machine runs out of memory, the kernel ends this run's processes (run.py, its emulator) before anyone
+# else's: they are cheap to run again. Raising one's own score needs no privilege, and children inherit it.
+if os.environ.get("LOOPA_OOM_FIRST"):
+    try:
+        with open("/proc/self/oom_score_adj", "w") as _f:
+            _f.write("1000")
+    except OSError:
+        pass
+
+
+def memory_room():
+    """LOOPA_MIN_FREE_MB=N (regress-remote's runs on devserver, 8192; the owner's choice of 2026-11-17, as GLOS's
+    gates there): an emulator starts only while the machine has N MB available (/proc/meminfo's MemAvailable, the
+    machine's own in Docker too), else waits. Unset or 0: no wait."""
+    need = int(os.environ.get("LOOPA_MIN_FREE_MB", "0") or 0)
+    said = False
+    while need > 0:
+        try:
+            avail = int(re.search(r"^MemAvailable:\s+(\d+) kB", open("/proc/meminfo").read(), re.M).group(1)) // 1024
+        except (OSError, AttributeError, ValueError):
+            return
+        if avail >= need:
+            return
+        if not said:
+            print("loopa: %d MB available, %d MB wanted before an emulator starts: waiting" % (avail, need),
+                  file=sys.stderr, flush=True)
+            said = True
+        time.sleep(5)
+
+
 def vm_slot():
     """LOOPA_MAX_VMS=N: at most N emulators at once on this host, whatever
     started them (every run.py, in any session or container: the locks are
     files in the shared cache). Waits for a free slot and holds it until
-    this process ends. Unset or 0: no limit."""
+    this process ends. Unset or 0: no limit. Then LOOPA_MIN_FREE_MB's
+    memory floor (memory_room)."""
     global _slot
     n = int(os.environ.get("LOOPA_MAX_VMS", "0") or 0)
     if n <= 0 or _slot is not None:
+        memory_room()
         return
     import fcntl
     d = os.path.join(CACHE, "loopa-slots")
@@ -93,6 +126,7 @@ def vm_slot():
             try:
                 fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 _slot = f
+                memory_room()
                 return
             except OSError:
                 f.close()

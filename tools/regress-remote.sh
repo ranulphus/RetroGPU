@@ -14,7 +14,10 @@
 # logs back to out/regress-remote/. Exit status: the tier's.
 #
 # Environment: REGRESS_HOST (retro@devserver), REGRESS_JOBS (lanes, 4),
-# LOOPA_MAX_VMS (emulators at once, 8), MGA_NICE (10), ONLY (as regress.sh).
+# LOOPA_MAX_VMS (emulators at once, 8), MGA_NICE (10), ONLY (as regress.sh), LOOPA_MIN_FREE_MB (8192: an
+# emulator starts only while the machine has that much memory available) and LOOPA_OOM_FIRST (1: the kernel's
+# out-of-memory killer ends our processes first): the owner's choice of 2026-11-17, as GLOS's gates there, after
+# devserver ran out of memory with another project's job running.
 set -euo pipefail
 tier=${1:?usage: tools/regress-remote.sh host|smoke|merge [COMMIT]}
 root=$(cd "$(dirname "$0")/.." && pwd -P)
@@ -22,6 +25,7 @@ cd "$root"
 commit=$(git rev-parse --verify "${2:-HEAD}^{commit}")
 host=${REGRESS_HOST:-retro@devserver}
 jobs=${REGRESS_JOBS:-4} vms=${LOOPA_MAX_VMS:-8} niceness=${MGA_NICE:-10}
+minfree=${LOOPA_MIN_FREE_MB:-8192} oomfirst=${LOOPA_OOM_FIRST:-1}
 if [ -z "${2:-}" ] && [ -n "$(git status --porcelain --untracked-files=no)" ]; then
     echo "regress-remote: uncommitted changes are not sent; running $(git log -1 --format='%h' "$commit")" >&2
 fi
@@ -57,7 +61,7 @@ ssh -o BatchMode=yes "$host" "set -e
     git checkout -q --detach $commit
     git clean -fdq
     git submodule update -q --init --depth 1 || git submodule update -q --init   # (older git: no --filter)
-    export MGA_EXTRA_DIR=\$HOME MGA_NICE=$niceness LOOPA_MAX_VMS=$vms
+    export MGA_EXTRA_DIR=\$HOME MGA_NICE=$niceness LOOPA_MAX_VMS=$vms LOOPA_MIN_FREE_MB=$minfree LOOPA_OOM_FIRST=$oomfirst
     tools/dev tools/86box/build.sh > /dev/null
     tools/dev env REGRESS_JOBS=$jobs ONLY='${ONLY:-}' tools/regress.sh $tier" || rc=$?
 
