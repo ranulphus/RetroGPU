@@ -48,6 +48,7 @@ int warp_ucode_cache;
 static uint32_t uc_phys[16];            /* each pipe's code, 256-byte aligned (the DRM's MGA_WARP_CODE_ALIGN) */
 static int uc_state;                    /* 0 not set up, 1 the pipes in memory, -1 no DOS memory or no cache */
 static int uc_active;                   /* the WARPs last started from memory (their instruction memories hold nothing) */
+static int uc_primed;                   /* this program has started the WARPs once the loaded way (with its soft reset) */
 uint32_t warp_uc_switches;              /* pipe switches made in the stream */
 int warp_reset_before_load = 1;
 int warp_agp_xfer;                  /* the channels fetch by AGP cycles (AGP on, write-combining rings) */
@@ -216,14 +217,6 @@ void warp_stop(void)
     stream_close();
     dma_mode(0);
     suspend();
-    if (uc_active) {
-        /* Not left fetching from memory that may be freed (the program's
-         * exit) or reused: caching off, the next start begins again. */
-        fifo_reserve(1);
-        MGA_WR32(MGAREG_WMISC, 0);
-        uc_active = 0;
-        cur_pipe = -1;
-    }
     if (agp_on) {                       /* (the next start turns it on again) */
         agp_disable();
         warp_agp_xfer = 0;
@@ -546,6 +539,8 @@ static void on_reset(void)
     ring_reset();
     running = 0;
     cur_pipe = -1;
+    uc_active = 0;                      /* (the reset's caching: off) */
+    uc_primed = 0;                      /* the next start the loaded way: never from memory straight after a reset */
 }
 
 /* AGP (docs/g400-warp.md): the channels fetch by AGP cycles, which don't
@@ -816,25 +811,26 @@ int warp_select(int pipe)
     sel_pipe = pipe;
     if (running && pipe == cur_pipe)
         return 0;
-    if (warp_ucode_cache && !g200() && uc_setup() > 0 && pipe < 16 && uc_phys[pipe]) {
-        if (running && mga_cmd_open && cur_pipe >= 0) {
+    /* The program's first start is the loaded way, with the soft reset
+     * before its load: nothing the card holds from an earlier program
+     * carries over (bench-g400, 2026-11-17: the stretched-triangle state
+     * lasted from one program to the next until a reset). From memory after
+     * that. */
+    if (warp_ucode_cache && uc_primed && !g200() && uc_setup() > 0 && pipe < 16 && uc_phys[pipe]) {
+        if (running && mga_cmd_open && cur_pipe >= 0 && uc_active) {
             uc_switch(pipe);            /* (in the stream: no load, no reset, no wait) */
             return 0;
         }
-        /* The first start (or after a stop or a reset): direct, as below but
-         * with the WARPs fetching their code from memory. A soft reset first,
-         * as every load had one: nothing the card holds from an earlier
-         * program (or an earlier start) carries over, its code cache among
-         * it (bench-g400, 2026-11-17: a corrupt state lasted from one program
-         * to the next until a reset). It clears the drawing registers:
-         * callers see engine_resets move. */
+        /* After the program's first start (or after a stop or a reset):
+         * direct, as below but with the WARPs fetching their code from
+         * memory. Not with a soft reset just before: on a real G400 the
+         * WARPs then start but take no vertices, and the PC hung
+         * (bench-g400, 2026-11-17; 86Box draws). */
         stream_close();
         warp_diag[0] = MGA_RD32(MGAREG_STATUS);
         dma_mode(0);
         suspend();
         engine_sync(200000);
-        engine_reset();
-        dma_mode(0);
         MGA_WR32(MGAREG_WMISC, 0x0000000Bu);       /* code cache, master, cache flush (reads back 03h) */
         warp_diag[5] = MGA_RD32(MGAREG_WMISC);
         if ((warp_diag[5] & 3u) != 3u) {
@@ -900,6 +896,7 @@ int warp_select(int pipe)
             }
         }
         cur_pipe = pipe;
+        uc_primed = 1;
     }
     if (g200())
         return g200_start();

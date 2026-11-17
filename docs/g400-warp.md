@@ -354,9 +354,12 @@ it lasts for the rest of the program.
 - **A diagnosis build can't catch it.** A ring check (`DGL_RINGCHK=1`: every run and list copy compared with
   memory at each flush) found nothing in 25 runs, but it slows GLQuake to 34 fps, and no onset happened. Ring
   memory was never seen to change.
-- **What changed (branch warp-harden):** a start from memory takes a soft reset first, as every load did, so the
-  state can't outlast its program. `warp_stop` also turns code caching off (WMISC 0), so the WARPs aren't left
-  fetching from memory the program frees. The onset itself is still unexplained.
+- **A soft reset just before a start from memory hangs a real G400.** The WARPs start (busy bits set) but take no
+  vertices: WARPTRI drew 0 pixels and bench-g400 stopped answering (2026-11-17, a power cycle). 86Box draws.
+- **What changed (branch warp-harden):** each program's first start is the loaded way, with its soft reset before
+  the load (as before 35d2f0f), so the state can't outlast its program. The first switch to another pipe then
+  starts the WARPs from memory without a reset (as 35d2f0f's first start did), and later switches go into the
+  stream. The onset itself is still unexplained.
 
 ## In 86Box (local patch 0122)
 
