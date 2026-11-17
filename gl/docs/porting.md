@@ -125,6 +125,9 @@ dglShutdown();
     nobody reads. Each line is flushed as it is written.
   - `DGL_POLYCLIP=0` clips a GL_POLYGON that crosses the near plane or the guard band triangle by triangle, as
     before. By default it is clipped once, whole, as Mesa does; fans and strips always go triangle by triangle.
+  - `DGL_WARPCACHE=1` runs the G400's and G450's WARP pipes from memory, as Linux's DRM does: a switch between one
+    and two textures is register writes in the DMA stream, with no microcode load, no soft reset and no wait. See
+    `docs/g4path.md` (W).
   - `DGL_ABLATE=n` is a diagnosis switch only: the frames are wrong on purpose. Each value switches off one layer,
     and the frame time saved is that layer's cost:
     - `1`: nothing is sent to the card;

@@ -107,11 +107,17 @@ extern int warp_wc_status;              /* write-combining rings: 0 not asked, 1
 /* DMAPAD writes just before the start (Linux's mga DRM writes three: "Padding
  * required due to hardware bug"). */
 extern int warp_start_pads;
+/* 1: the G400's pipes run from memory with microcode caching, as Linux's DRM
+ * (a switch is register writes in the stream: no load, no reset, no wait);
+ * 0 (default): loaded into the instruction memories. Not the G200. Read at
+ * each warp_select. warp_uc_switches counts the switches made in the stream. */
+extern int warp_ucode_cache;
+extern uint32_t warp_uc_switches;
 /* 1 (the default): a soft reset (engine_reset) before each load of the
  * instruction memories; 0 only for experiments. */
 extern int warp_reset_before_load;
 /* The last start: STATUS at warp_select, before the start and after it,
  * then WARP0's and WARP1's instruction addresses (WIADDRNB, WIADDRNB1). */
-extern uint32_t warp_diag[5];
+extern uint32_t warp_diag[6];
 
 #endif

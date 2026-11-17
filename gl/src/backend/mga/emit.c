@@ -479,13 +479,15 @@ static void validate_state(void)
 
 
 /* A soft reset while validating (the WARP's microcode loads take one, and
- * so does a WARP that fails) clears the drawing registers: everything is
- * written again. The second pass finds the pipe running. */
+ * so does a WARP that fails) clears the drawing registers, and a pipe switch
+ * in the stream (warp_ucode_cache) writes TEXCTL2, DWGCTL and the WARPs' own
+ * registers behind the cache: everything is written again. The second pass
+ * finds the pipe running. */
 static void validate(void)
 {
-    uint32_t resets = engine_resets;
+    uint32_t resets = engine_resets, switches = warp_uc_switches;
     validate_state();
-    if (engine_resets != resets) {
+    if (engine_resets != resets || warp_uc_switches != switches) {
         dgl_gl.dirty |= DGL_DIRTY_REGS;
         regs_forget();
         validate_state();
@@ -1535,6 +1537,8 @@ void dgl_emit_install(void)
     warp_on = !(e && *e == '0') && warp_available() && !rg_lock.on;  /* (not in a GLOS window) */
     e = getenv("DGL_WARPDMA");
     warp_use_dma = !(e && *e == '0');          /* DGL_WARPDMA=0: vertices by the CPU, no DMA stream */
+    e = getenv("DGL_WARPCACHE");
+    warp_ucode_cache = e && *e == '1';          /* DGL_WARPCACHE=1: the G400's pipes from memory (no reloads) */
     e = getenv("DGL_AGP");
     warp_use_agp = !(e && *e == '0');          /* DGL_AGP=0: cached rings fetched by PCI, under GLOS too */
     warp_agp_rate = e && (*e == '1' || *e == '2') ? *e - '0' : 0;   /* DGL_AGP=1 or 2: at most 1x or 2x */

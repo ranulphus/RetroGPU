@@ -229,6 +229,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "reload")) reload = 1;
         else if (!strcmp(argv[i], "keep")) keep = 1;
         else if (!strcmp(argv[i], "noreset")) warp_reset_before_load = 0;
+        else if (!strcmp(argv[i], "ucache")) warp_ucode_cache = 1;        /* the pipes from memory (microcode caching) */
         else if (!strcmp(argv[i], "dmabw")) dmabw = 1;
         else if (!strcmp(argv[i], "agpinfo")) agpinfo = 1;
         else if (!strncmp(argv[i], "agp=", 4)) agp_rate = atoi(argv[i] + 4);

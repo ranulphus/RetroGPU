@@ -489,3 +489,40 @@ loops on the Pentium II:
 - **V3.** Clipping without the second transform, as planned.
 - **VA.** A hand-scheduled x87 version is tried in VFLOOR first, and ported only if it clearly beats VC.
 - **V4** as planned. V1, V2 and V5 are folded into these.
+
+## W: the WARP pipes from memory (2026-11-17, branch ucache)
+
+GLQuake `-mtex` was 16% slower than without it (44.0 against 52.7 fps, bench-g400 at the fast clocks), while
+Matrox's ICD is faster with it. Its profile showed why: about four pipe switches a frame, each a full wait, a soft
+reset, a load of both WARPs' instruction memories and a start, with every drawing register written again after
+the reset (validation 1,262 cycles a triangle against 172 without `-mtex`; 3,687 resets in demo1). The two pipes
+(T0 and T2, 1,000 and 1,256 bytes) don't fit in the 2 KB instruction memories together, and the G400's third load
+since a reset fails (`docs/g400-warp.md`), so each switch had to be a load after a reset.
+
+Linux's DRM never loads the instruction memories. It turns microcode caching on (WMISC 0Bh, which reads back
+03h), puts every pipe's code in memory, 256-byte aligned, and switches by writing the pipe's registers into the
+DMA stream, ending in WIADDR2 = the code's address | start (`mga_g400_emit_pipe`). The HAL now does the same
+behind `warp_ucode_cache` (`DGL_WARPCACHE=1`; WARPTRI `ucache`):
+- the pipes' code in conventional memory, as the DMA rings are;
+- the first start direct, as before, but with WMISC 0Bh and WIADDR2 at the code; WMISC reading back anything but
+  03h falls back to loads;
+- every later switch in the stream: suspend, the DRM's flush when leaving a T2 pipe, the WARP registers, three pads
+  and the start. No load, no soft reset, no wait. DOS-GL's validation writes its registers again after a switch
+  (`warp_uc_switches`), as after a reset.
+
+Results on bench-g400 (fast clocks, GLOS):
+
+| | Loaded (now) | From memory |
+|---|---|---|
+| WARPTRI `switch=200`: cycles a switch | 43,415 (200 resets) | 12,509 (no resets) |
+| WARPTRI `starts=30 reload` | (needs the resets) | 30 of 30, no resets |
+| GLQuake 640 `-mtex`, two runs each | 43.98, 43.98 fps | 48.53, 46.26 fps |
+| GLQuake 640 `-mtex`, snapshots at 7 frames | | identical to loaded |
+| GLQuake 640 without `-mtex` | 52.66 | 52.67 |
+
+- **The gain is +5-10%, not the 1% the cost of a switch predicted** (2026-10-28): each switch also emptied the
+  card's queue, so the card and the CPU stopped overlapping four times a frame, and every register went again.
+- **Conformance** with `DGL_WARPCACHE=1` passes on the emulated G400 and G450 (86Box already runs pipes from
+  memory: `warp_start` reads the code by bus mastering when WMISC bit 0 is set).
+- The first run after the fix differed in every snapshot (the textures garbled): the switch writes TEXCTL2, DWGCTL
+  and the WARPs' registers behind DOS-GL's register cache. Validation now forgets its cache after a switch.

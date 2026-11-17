@@ -242,10 +242,14 @@ wrap and flat shading's colour, and was 5% to 11% slower by AGP than by PCI unti
   - **Why it matters:** the two pipes DOS-GL uses (TGZSAF and T2GZSAF, 1,000 and 1,256 bytes) don't fit in the 2 KB
     instruction memories together, so switching between one and two textures is always a load.
   - **The DRM** never meets this: it runs the pipes from memory with microcode caching (WMISC.wucodecache = 1).
+    So does the HAL with `warp_ucode_cache` (2026-11-17, below): no loads, so no third load and no reset.
   - **Cost (2026-10-28, WARPTRI `switch=200`):** a switch between the T0 and T2 pipes (drain, reset, load, start)
     takes about 43,200 cycles (108 us), against 471 for a triangle on the same pipe. GLQuake `-mtex` switches about
     four times a frame (3,687 resets in demo1's 969 frames), some 0.4 ms of a 33 ms frame: running the pipes from
     memory, as the DRM does, would save about 1%.
+  - **From memory (2026-11-17):** `warp_ucode_cache` does it. A switch then costs about 12,500 cycles, with no
+    reset, and goes into the DMA stream: GLQuake `-mtex` gained 5-10%, not 1%, because each reset had also
+    emptied the card's queue and made every register go again (`gl/docs/g4path.md`, W).
 - **The clip (2026-10-27).** When DOS-GL's E9 changed the scissor between quads, the second triangle of each quad
   (the second WARP's) was cut by the next clip: host writes to CXBNDRY, YTOP and YBOT don't wait for the
   triangles the WARPs are still setting up. Linux's mga DRM writes DWGCTL and LEN|EXEC = 80000000h (a

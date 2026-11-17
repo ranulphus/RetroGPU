@@ -37,10 +37,21 @@ int warp_ring_mode;                 /* 0 none, 1 cached rings (PCI), 2 write-com
 int warp_wc_status;                 /* write-combining rings: 0 not asked, 1 given, -1 no DOS memory for them, -2 refused */
 uint32_t warp_ring_kb;
 int warp_start_pads = 3;
+/* 1: the G400's pipes run from memory, as Linux's DRM runs them (microcode
+ * caching: WMISC 0Bh, each pipe's code in conventional memory, fetched by
+ * PCI): a switch between pipes is register writes in the stream, ending in
+ * WIADDR2 = the pipe's address | start, with no load, no soft reset and no
+ * wait (gl/docs/g4path.md: GLQuake -mtex switches four times a frame). 0
+ * (the default for now): loaded into the instruction memories. Not the G200. */
+int warp_ucode_cache;
+static uint32_t uc_phys[16];            /* each pipe's code, 256-byte aligned (the DRM's MGA_WARP_CODE_ALIGN) */
+static int uc_state;                    /* 0 not set up, 1 the pipes in memory, -1 no DOS memory or no cache */
+static int uc_active;                   /* the WARPs last started from memory (their instruction memories hold nothing) */
+uint32_t warp_uc_switches;              /* pipe switches made in the stream */
 int warp_reset_before_load = 1;
 int warp_agp_xfer;                  /* the channels fetch by AGP cycles (AGP on, write-combining rings) */
 void (*warp_pre_kick)(void);        /* EXPERIMENT: called before each kick (a cache flush for AGP cycles) */
-uint32_t warp_diag[5];
+uint32_t warp_diag[6];
 int warp_g200 = 1;                  /* the G200's WARP driven (on since the real card passed: docs/g200-warp.md, G6) */
 
 static int g200(void)
@@ -707,6 +718,83 @@ static int g200_start(void)
     return started(STATUS_WBUSY);
 }
 
+/* The pipes' code into conventional memory (physical = linear there), once. */
+static int uc_setup(void)
+{
+    const unsigned char *code;
+    uint32_t total = 0, lin, at;
+    uint16_t seg;
+    char *mem;
+    int p, len;
+    if (uc_state)
+        return uc_state;
+    uc_state = -1;
+    for (p = 0; p < 16 && pipe_code(p, &code, &len) == 0; p++)
+        total += ((uint32_t)len + 255u) & ~255u;
+    if (!total || (mem = (char *)sys_dos_alloc(total + 256u, &seg)) == NULL)
+        return -1;
+    lin = (uint32_t)seg << 4;
+    at = (lin + 255u) & ~255u;
+    for (p = 0; p < 16 && pipe_code(p, &code, &len) == 0; p++) {
+        memcpy(mem + (at - lin), code, (size_t)len);
+        uc_phys[p] = at;
+        at += ((uint32_t)len + 255u) & ~255u;
+    }
+    uc_state = 1;
+    return 1;
+}
+
+/* The DRM's mga_g400_emit_pipe, into the open stream: the running WARPs
+ * suspended, the pipe's registers, then started at its code in memory. From
+ * the T2 pipes to the others, the DRM's flush first (a fence tag of the HAL's
+ * where the DRM writes DWGSYNC 7000h: the HAL's fences compare tags). */
+static void uc_switch(int pipe)
+{
+    const int t2 = (pipe & WARP_T2) != 0;
+    int i;
+    MGA_WR32(MGAREG_WIADDR2, WMODE_SUSPEND);
+    for (i = 0; i < 3; i++)
+        MGA_WR32(MGAREG_DMAPAD, 0);
+    if (!t2 && (cur_pipe & WARP_T2)) {
+        MGA_WR32(MGAREG_YDST, 0);
+        MGA_WR32(MGAREG_FXLEFT, 0);
+        MGA_WR32(MGAREG_FXRIGHT, 1);
+        MGA_WR32(MGAREG_DWGCTL, DWG_OPCOD_TEXTURE_TRAP | DWG_ATYPE_I | DWG_ZMODE_NOZCMP | DWG_ARZERO | DWG_SGNZERO |
+                                DWG_BOP_COPY | DWG_TRANS(15));
+        MGA_WR32(MGAREG_LEN + MGAREG_EXEC, 1);
+        MGA_WR32(MGAREG_DWGSYNC, mga_dwgsync_next());
+        MGA_WR32(MGAREG_TEXCTL2, 1u << 15);
+        MGA_WR32(MGAREG_LEN + MGAREG_EXEC, 0);
+        MGA_WR32(MGAREG_TEXCTL2, TEXCTL2_DUALTEX | (1u << 15));
+        MGA_WR32(MGAREG_LEN + MGAREG_EXEC, 0);
+        MGA_WR32(MGAREG_TEXCTL2, 1u << 15);
+        MGA_WR32(MGAREG_DMAPAD, 0);
+        setup_forget_dwgctl();
+    }
+    MGA_WR32(MGAREG_WVRTXSZ, t2 ? 0x00001E09 : 0x00001807);
+    MGA_WR32(MGAREG_WACCEPTSEQ, 0);
+    MGA_WR32(MGAREG_WACCEPTSEQ, 0);
+    MGA_WR32(MGAREG_WACCEPTSEQ, 0);
+    MGA_WR32(MGAREG_WACCEPTSEQ, t2 ? 0x1E000000 : 0x18000000);
+    MGA_WR32(MGAREG_WFLAG, 0);
+    MGA_WR32(MGAREG_WFLAG1, 0);
+    MGA_WR32(MGAREG_WR(56), 0x46480000);           /* 12800.0f */
+    MGA_WR32(MGAREG_WR(49), 0);
+    MGA_WR32(MGAREG_WR(57), 0);
+    MGA_WR32(MGAREG_WR(53), 0);
+    MGA_WR32(MGAREG_WR(61), 0);
+    MGA_WR32(MGAREG_WR(54), 1u << 6);              /* the DRM's G400 WR magic: the sizes, written again by the caller */
+    MGA_WR32(MGAREG_WR(62), 1u << 6);
+    MGA_WR32(MGAREG_WR(52), 1u << 6);
+    MGA_WR32(MGAREG_WR(60), 1u << 6);
+    for (i = 0; i < 3; i++)
+        MGA_WR32(MGAREG_DMAPAD, 0xFFFFFFFFu);      /* "required due to hardware bug" */
+    MGA_WR32(MGAREG_WIADDR2, uc_phys[pipe] | WMODE_START);
+    cur_pipe = pipe;
+    engine_regs_epoch++;                /* (the WARPs' registers: the caller writes its sizes again) */
+    warp_uc_switches++;
+}
+
 int warp_select(int pipe)
 {
     const unsigned char *code;
@@ -719,11 +807,59 @@ int warp_select(int pipe)
     sel_pipe = pipe;
     if (running && pipe == cur_pipe)
         return 0;
+    if (warp_ucode_cache && !g200() && uc_setup() > 0 && pipe < 16 && uc_phys[pipe]) {
+        if (running && mga_cmd_open && cur_pipe >= 0) {
+            uc_switch(pipe);            /* (in the stream: no load, no reset, no wait) */
+            return 0;
+        }
+        /* The first start (or after a stop or a reset): direct, as below but
+         * with the WARPs fetching their code from memory. */
+        stream_close();
+        warp_diag[0] = MGA_RD32(MGAREG_STATUS);
+        dma_mode(0);
+        suspend();
+        engine_sync(200000);
+        MGA_WR32(MGAREG_WMISC, 0x0000000Bu);       /* code cache, master, cache flush (reads back 03h) */
+        warp_diag[5] = MGA_RD32(MGAREG_WMISC);
+        if ((warp_diag[5] & 3u) != 3u) {
+            uc_state = -1;              /* (the DRM's check: no microcode cache here) */
+            return warp_select(pipe);
+        }
+        uc_active = 1;
+        cur_pipe = pipe;
+        fifo_reserve(12);
+        MGA_WR32(MGAREG_WGETMSB, 0x00000E00);
+        MGA_WR32(MGAREG_WVRTXSZ, (pipe & WARP_T2) ? 0x00001E09 : 0x00001807);
+        MGA_WR32(MGAREG_WACCEPTSEQ, 0);
+        MGA_WR32(MGAREG_WACCEPTSEQ, 0);
+        MGA_WR32(MGAREG_WACCEPTSEQ, 0);
+        MGA_WR32(MGAREG_WACCEPTSEQ, (pipe & WARP_T2) ? 0x1E000000 : 0x18000000);
+        MGA_WR32(MGAREG_WFLAG, 0);
+        MGA_WR32(MGAREG_WFLAG1, 0);
+        MGA_WR32(MGAREG_WR(56), 0x46480000);
+        MGA_WR32(MGAREG_WR(49), 0);
+        MGA_WR32(MGAREG_WR(57), 0);
+        MGA_WR32(MGAREG_WR(53), 0);
+        fifo_reserve(1);
+        MGA_WR32(MGAREG_WR(61), 0);
+        for (i = 0; i < warp_start_pads; i++) {
+            fifo_reserve(1);
+            MGA_WR32(MGAREG_DMAPAD, 0xFFFFFFFFu);
+        }
+        warp_diag[1] = MGA_RD32(MGAREG_STATUS);
+        fifo_reserve(1);
+        MGA_WR32(MGAREG_WIADDR2, uc_phys[pipe] | WMODE_START);
+        return started(STATUS_WBUSY | STATUS_WBUSY1);
+    }
     stream_close();                     /* (the start is direct work: loads, a reset, polling) */
     warp_diag[0] = MGA_RD32(MGAREG_STATUS);
     dma_mode(0);
     suspend();
     engine_sync(200000);
+    if (uc_active) {
+        cur_pipe = -1;                  /* (ran from memory: nothing in the instruction memories) */
+        uc_active = 0;
+    }
     if (pipe != cur_pipe) {
         /* On a real G400 the third load of the instruction memories after a
          * soft reset leaves the WARPs dead (the start reads no busy bits), at
