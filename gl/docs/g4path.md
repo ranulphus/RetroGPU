@@ -541,3 +541,17 @@ On bench-g400, WARPTRI's `same` was 490 cycles loaded and 1,908 from memory in a
 one-off of about 0.7 ms after the first start rather than a slower triangle (not yet checked with `switch=2000`
 there): the speed test's 4,000 triangles took 491 cycles each from memory, the G450's `same` matches both ways,
 and GLQuake without `-mtex` is unchanged.
+
+**M2 is not needed (2026-11-17).** The `-mtex` profile (PROF=2, bench-g400, one boot, the same build both ways):
+
+| Waits a second | Loaded (`DGL_WARPCACHE=0`) | From memory |
+|---|---|---|
+| Full flushes | 174 (97 ms) | 43 (81 ms): the swaps alone |
+| FIFO | 876 (2.8 ms) | 38 (0.0 ms) |
+
+The four extra waits a frame that M0 blamed on `sub_move`'s engine copies were the pipe switches: those copies
+already go into the DMA list. What `-mtex` still costs over two-pass is CPU: validation 1,049 cycles a triangle
+against 166 (39% of its 603 draws a frame change state, about 5,500 cycles each), lightmap updates 539 against 123.
+
+(These profiles ran with GLOS's disk cache full, which slows the game's own code most: "app" read about 2,900
+cycles a triangle without `-mtex`, against 920 on 11-16 on a fresh boot. Compare profiles within one boot.)
