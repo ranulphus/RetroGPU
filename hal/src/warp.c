@@ -216,6 +216,14 @@ void warp_stop(void)
     stream_close();
     dma_mode(0);
     suspend();
+    if (uc_active) {
+        /* Not left fetching from memory that may be freed (the program's
+         * exit) or reused: caching off, the next start begins again. */
+        fifo_reserve(1);
+        MGA_WR32(MGAREG_WMISC, 0);
+        uc_active = 0;
+        cur_pipe = -1;
+    }
     if (agp_on) {                       /* (the next start turns it on again) */
         agp_disable();
         warp_agp_xfer = 0;
@@ -814,12 +822,19 @@ int warp_select(int pipe)
             return 0;
         }
         /* The first start (or after a stop or a reset): direct, as below but
-         * with the WARPs fetching their code from memory. */
+         * with the WARPs fetching their code from memory. A soft reset first,
+         * as every load had one: nothing the card holds from an earlier
+         * program (or an earlier start) carries over, its code cache among
+         * it (bench-g400, 2026-11-17: a corrupt state lasted from one program
+         * to the next until a reset). It clears the drawing registers:
+         * callers see engine_resets move. */
         stream_close();
         warp_diag[0] = MGA_RD32(MGAREG_STATUS);
         dma_mode(0);
         suspend();
         engine_sync(200000);
+        engine_reset();
+        dma_mode(0);
         MGA_WR32(MGAREG_WMISC, 0x0000000Bu);       /* code cache, master, cache flush (reads back 03h) */
         warp_diag[5] = MGA_RD32(MGAREG_WMISC);
         if ((warp_diag[5] & 3u) != 3u) {

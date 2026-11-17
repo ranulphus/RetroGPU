@@ -326,6 +326,38 @@ wrap and flat shading's colour, and was 5% to 11% slower by AGP than by PCI unti
   - textures, culling (WFLAG), fog, specular, alpha;
   - the T2 pipes.
 
+## The stretched-triangle state (bench-g400, 2026-11-15 to 17)
+
+Now and then GLQuake on bench-g400 starts drawing many triangles wrong: long stretched triangles across the
+screen, the console text and status bar garbled, and the run slower (about 42.6 fps against 54). Once it starts,
+it lasts for the rest of the program.
+- **Rate:** on 11-15, about 13% of runs on the GLOS of the time, then 1 in 105. On 11-17, one onset in about 18
+  runs in each of two soaks (GLQuake 640 `-fixedtime`, back to back). It is never seen in 86Box.
+- **It is the WARPs' state.** WARP pipes from memory (`warp_ucode_cache`, main 35d2f0f) start without a soft reset,
+  so the state lasted from one program to the next. Soak 7 shows it: runs 18 to 30 all corrupt, each a new
+  program. Each probe below ran in that corrupt state:
+
+  | Probe | Result |
+  |---|---|
+  | AGP off (`DGL_AGP=0`: PCI fetches, plain rings) | still corrupt |
+  | Vertices by the CPU (`DGL_WARPDMA=0`: no DMA at all) | still corrupt |
+  | Loaded pipes (`DGL_WARPCACHE=0`: a soft reset and a load) | clean, and the next program too |
+
+  So the transport is not at fault: AGP, write-combining, the rings and the DMA engine all behave. Something in
+  the WARPs holds a bad state that a soft reset (or a load) clears. In soak 5 a WARP start failure's reset ended
+  it mid-run.
+- **Not in what reads back.** WARPDUMP (`tests/hal/warpdump.c`) read STATUS, the instruction addresses, WMISC,
+  WFLAG, WR0-WR63 and WARP0's instruction memory after each run. All were identical in clean and corrupt runs,
+  apart from cache lines moving between slots. WARP1's instruction memory reads back as zeros through
+  WIMEMDATA1, so it cannot be compared. Since the G400 alternates triangles between its WARPs, a bad state in one
+  of them would draw half the triangles wrong, which fits.
+- **A diagnosis build can't catch it.** A ring check (`DGL_RINGCHK=1`: every run and list copy compared with
+  memory at each flush) found nothing in 25 runs, but it slows GLQuake to 34 fps, and no onset happened. Ring
+  memory was never seen to change.
+- **What changed (branch warp-harden):** a start from memory takes a soft reset first, as every load did, so the
+  state can't outlast its program. `warp_stop` also turns code caching off (WMISC 0), so the WARPs aren't left
+  fetching from memory the program frees. The onset itself is still unexplained.
+
 ## In 86Box (local patch 0122)
 
 The model recognises the pipe by its microcode's length and CRC-32, then sets the triangle up with the HAL's own
