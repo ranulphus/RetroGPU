@@ -354,12 +354,22 @@ it lasts for the rest of the program.
 - **A diagnosis build can't catch it.** A ring check (`DGL_RINGCHK=1`: every run and list copy compared with
   memory at each flush) found nothing in 25 runs, but it slows GLQuake to 34 fps, and no onset happened. Ring
   memory was never seen to change.
-- **A soft reset just before a start from memory hangs a real G400.** The WARPs start (busy bits set) but take no
-  vertices: WARPTRI drew 0 pixels and bench-g400 stopped answering (2026-11-17, a power cycle). 86Box draws.
+- **After a soft reset, a start from memory doesn't work on a real G400.** The WARPs start (busy bits set) but take
+  no vertices. With the reset straight after the program before (the WARPs possibly still fetching code), WARPTRI
+  drew 0 pixels and bench-g400 stopped answering, so a power cycle was needed. With the WARPs suspended first
+  through WIADDRNB2, as `fail()` does, nothing hung, but WARPTRI still drew 0 pixels. 86Box draws in both cases.
+  Linux's DRM never soft-resets, so it doesn't meet this. (Soak 5's run 18 recovered after its failure's reset
+  only because DOS-GL then set the rest of its triangles up on the CPU.)
+- **Start failures** (no busy bits after a start, so `fail()` resets) happen now and then in both modes. On 11-16
+  and 11-17 that was about 1 in 20 runs with loaded pipes, and 8 of 60 with pipes from memory. Each costs its
+  GLQuake run about 5% (54.7 against 51.8 fps with `-mtex`). They explain the two levels of timings seen all day.
 - **What changed (branch warp-harden):** each program's first start is the loaded way, with its soft reset before
   the load (as before 35d2f0f), so the state can't outlast its program. The first switch to another pipe then
   starts the WARPs from memory without a reset (as 35d2f0f's first start did), and later switches go into the
-  stream. The onset itself is still unexplained.
+  stream. After any reset, the next start is loaded again. On bench-g400 the frames were identical (two-pass and
+  `-mtex`, 4 snapshots each) and `-mtex` kept its gain (1 reset and 3,685 switches in the stream a run). That
+  step from loaded to memory sometimes fails (WARPTRI `switch=200`: 2 failures, both recovered). The onset of the
+  corrupt state is still unexplained.
 
 ## In 86Box (local patch 0122)
 
