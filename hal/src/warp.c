@@ -42,7 +42,8 @@ int warp_start_pads = 3;
  * PCI): a switch between pipes is register writes in the stream, ending in
  * WIADDR2 = the pipe's address | start, with no load, no soft reset and no
  * wait (gl/docs/g4path.md: GLQuake -mtex switches four times a frame). 0
- * (the default for now): loaded into the instruction memories. Not the G200. */
+ * (the HAL's default: Glide's one pipe; DOS-GL sets 1): loaded into the
+ * instruction memories. Not the G200. */
 int warp_ucode_cache;
 static uint32_t uc_phys[16];            /* each pipe's code, 256-byte aligned (the DRM's MGA_WARP_CODE_ALIGN) */
 static int uc_state;                    /* 0 not set up, 1 the pipes in memory, -1 no DOS memory or no cache */

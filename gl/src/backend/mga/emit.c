@@ -1538,7 +1538,7 @@ void dgl_emit_install(void)
     e = getenv("DGL_WARPDMA");
     warp_use_dma = !(e && *e == '0');          /* DGL_WARPDMA=0: vertices by the CPU, no DMA stream */
     e = getenv("DGL_WARPCACHE");
-    warp_ucode_cache = e && *e == '1';          /* DGL_WARPCACHE=1: the G400's pipes from memory (no reloads) */
+    warp_ucode_cache = !(e && *e == '0');       /* the G400's pipes from memory (no reloads); DGL_WARPCACHE=0: loaded */
     e = getenv("DGL_AGP");
     warp_use_agp = !(e && *e == '0');          /* DGL_AGP=0: cached rings fetched by PCI, under GLOS too */
     warp_agp_rate = e && (*e == '1' || *e == '2') ? *e - '0' : 0;   /* DGL_AGP=1 or 2: at most 1x or 2x */

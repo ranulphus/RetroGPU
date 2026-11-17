@@ -502,7 +502,8 @@ since a reset fails (`docs/g400-warp.md`), so each switch had to be a load after
 Linux's DRM never loads the instruction memories. It turns microcode caching on (WMISC 0Bh, which reads back
 03h), puts every pipe's code in memory, 256-byte aligned, and switches by writing the pipe's registers into the
 DMA stream, ending in WIADDR2 = the code's address | start (`mga_g400_emit_pipe`). The HAL now does the same
-behind `warp_ucode_cache` (`DGL_WARPCACHE=1`; WARPTRI `ucache`):
+behind `warp_ucode_cache`, DOS-GL's default (`DGL_WARPCACHE=0` loads as before; WARPTRI `ucache`; Glide, with
+one pipe, still loads):
 - the pipes' code in conventional memory, as the DMA rings are;
 - the first start direct, as before, but with WMISC 0Bh and WIADDR2 at the code; WMISC reading back anything but
   03h falls back to loads;
@@ -526,3 +527,17 @@ Results on bench-g400 (fast clocks, GLOS):
   memory: `warp_start` reads the code by bus mastering when WMISC bit 0 is set).
 - The first run after the fix differed in every snapshot (the textures garbled): the switch writes TEXCTL2, DWGCTL
   and the WARPs' registers behind DOS-GL's register cache. Validation now forgets its cache after a switch.
+
+Bench F (G450, Pentium 4 3.06 GHz, PCI), the same builds:
+
+| | Loaded | From memory |
+|---|---|---|
+| WARPTRI `switch=200` and `switch=2000`: P4 cycles a switch | 1,797,882 and 1,802,547 (a reset and the G450's memory set-up each) | 208,221 and 208,653 (no resets) |
+| A triangle on one pipe (WARPTRI `same`, P4 cycles) | 14,407 and 13,945 | 15,501 and 14,052 |
+| GLQuake 640 `-mtex` | 59.95 fps (3,687 resets) | 67.04 fps (none) |
+| GLQuake 640 `-mtex` with snapshots | 55.74 | 61.83, 4 frames identical |
+
+On bench-g400, WARPTRI's `same` was 490 cycles loaded and 1,908 from memory in a 200-triangle run. Probably a
+one-off of about 0.7 ms after the first start rather than a slower triangle (not yet checked with `switch=2000`
+there): the speed test's 4,000 triangles took 491 cycles each from memory, the G450's `same` matches both ways,
+and GLQuake without `-mtex` is unchanged.
