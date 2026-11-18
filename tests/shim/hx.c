@@ -300,7 +300,21 @@ void hx_init(int argc, char **argv, const char *prog)
     serial_init(SERIAL_COM1, 115200);
     parse_args(argc, argv);
     ut_setbase(UT_IOBASE);
-    ut_base = (inp(UT_IOBASE) == 0xFF) ? 0 : UT_IOBASE;
+    ut_base = 0;
+    if (inp(UT_IOBASE) != 0xFF) {
+        /* 86Box's unit tester answers a no-op with "idle" (04h) and an unknown
+         * command with "idle, unsupported" (0Ch). A real board's port there
+         * reads something else (bench C's 486: a capture of 15420x15420). */
+        int s1, s2, s3;
+        outp(UT_IOBASE, 0x00);
+        s1 = inp(UT_IOBASE);
+        outp(UT_IOBASE, 0xFE);
+        s2 = inp(UT_IOBASE);
+        outp(UT_IOBASE, 0x00);
+        s3 = inp(UT_IOBASE);
+        if (s1 == 0x04 && s2 == 0x0C && s3 == 0x04)
+            ut_base = UT_IOBASE;
+    }
     if (!ut_base)
         ut_setbase(0xFFFF);
     hx_log("HX-START %s %s ut=%d ovl=%s", prog, HX_BUILD_ID, ut_base != 0,
