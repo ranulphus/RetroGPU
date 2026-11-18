@@ -27,5 +27,9 @@ extern rg_softbuf rg_sb;
 
 /* The buffer drawing goes into now: the shown one (1) or the hidden. */
 uint8_t *rg_sb_color(int front);
+/* mem.c: the buffers for a context (8, 16 or 32 bits), their end, and a read of them as RGBA (rg_device.read). */
+int  rg_sb_open(const rg_open *o, rg_opened *out);
+void rg_sb_close(void);
+int  rg_sb_read(int front, int x, int y, int w, int h, uint8_t *rgba, int stride);
 
 #endif

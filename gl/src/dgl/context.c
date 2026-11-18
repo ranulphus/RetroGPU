@@ -122,11 +122,29 @@ static void after_init(const DGLConfig *c);
 
 /* GL's drawing back end for a device: the Matrox one on the Matrox device,
  * the software one on buffers in memory (docs/b2.md). */
+static const dgl_backend *backend_for(const rg_device *d);
+
+/* The full-screen device: DGL_DEVICE's, or the first card found that DOS-GL
+   draws on; with none (or one without a back end of its own yet: the
+   ViRGE/DX's waits for V4), the software renderer through the VBE BIOS (B3).
+   NULL with rg_error() set. dglInit's, and dglEnumModes' before it. */
+const rg_device *dgl_pick_device(void)
+{
+    const char *want = getenv("DGL_DEVICE");
+    const rg_device *d = rg_choose(want), *v;
+    if (want && *want)
+        return d;
+    if (!d || !backend_for(d))
+        if ((v = rg_choose("vbe")) != NULL)
+            d = v;
+    return d;
+}
+
 static const dgl_backend *backend_for(const rg_device *d)
 {
     if (d == dgl_mga_backend.dev)
         return &dgl_mga_backend;
-    if (d == dgl_soft_backend.dev)
+    if (d == dgl_soft_backend.dev || d == &rg_vbe_device)  /* (the software renderer: in memory, a GLOS window, VBE) */
         return &dgl_soft_backend;
     return NULL;
 }
@@ -146,6 +164,8 @@ static void open_args(rg_open *o, const DGLConfig *c)
     o->vsync = c->vsync != 0;
     if ((e = getenv("DGL_VSYNC")) != NULL && *e)        /* a test or user override */
         o->vsync = *e != '0';
+    if ((e = getenv("DGL_COLOR_BITS")) != NULL && *e)   /* (likewise: 8, 16 or 32 where the device draws them) */
+        o->color_bits = atoi(e);
     e = getenv("DGL_SCALE_FILTER");
     o->scale_filter = c->scale_filter ? c->scale_filter == 2 : (e && !strcmp(e, "bilinear"));
     e = getenv("DGL_PRESENT_LAG");                      /* (fe.md; or dglSetPresentLag before dglInit) */
@@ -236,7 +256,9 @@ int dglInit(const DGLConfig *cfg)
         }
         /* (1: GLOS won't have it as an app: the screen, as on DOS) */
     }
-    if (!dgl_dev && !(dgl_dev = rg_choose(getenv("DGL_DEVICE")))) {
+    if (!dgl_dev)
+        dgl_dev = dgl_pick_device();
+    if (!dgl_dev) {
         dgl_set_error("%s", rg_error());
         return -1;
     }

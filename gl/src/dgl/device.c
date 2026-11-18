@@ -28,7 +28,7 @@ void dgl_mode_out(DGLMode *d, const rg_mode *m)
 /* The device: the one dglInit chose, or the first that would be. */
 static const rg_device *device(void)
 {
-    if (!dgl_dev && !(dgl_dev = rg_choose(getenv("DGL_DEVICE"))))
+    if (!dgl_dev && !(dgl_dev = dgl_pick_device()))
         dgl_set_error("%s", rg_error());
     return dgl_dev;
 }

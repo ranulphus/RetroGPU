@@ -206,6 +206,6 @@ void rg_log_line(const char *line);                 /* one line, as it is */
 #define RG_WARN(...) do { if (RG_LOG_LEVEL >= 1) rg_logf(__VA_ARGS__); } while (0)
 #define RG_INFO(...) do { if (RG_LOG_LEVEL >= 2) rg_logf(__VA_ARGS__); } while (0)
 #define RG_DBG(...)  do { if (RG_LOG_LEVEL >= 3) rg_logf(__VA_ARGS__); } while (0)
-extern const rg_device rg_mga_device, rg_virge_device, rg_mem_device;
+extern const rg_device rg_mga_device, rg_virge_device, rg_vbe_device, rg_mem_device;
 
 #endif

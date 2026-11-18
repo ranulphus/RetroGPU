@@ -118,6 +118,79 @@ int vbe_find_mode(int w, int h, int bpp, mga_vbe_mode *out)
     return 0;
 }
 
+/* A mode for the software renderer: supported, colour, graphics; direct colour, or packed pixels at 8 bits;
+   with a linear framebuffer or a window A that can be written. 1: not usable. */
+static int mode_info_any(uint16_t mode, vbe_any_mode *m)
+{
+    sys_rmregs r;
+    uint8_t *b = vbe_buf + 512;
+    memset(b, 0, 256);
+    memset(&r, 0, sizeof r);
+    r.eax = 0x4F01;
+    r.ecx = mode;
+    r.es = vbe_seg;
+    r.edi = 512;
+    if (vbe_call(&r) < 0)
+        return -1;
+    memset(m, 0, sizeof *m);
+    m->mode = mode;
+    m->pitch_bytes = (uint16_t)(b[0x10] | (b[0x11] << 8));
+    m->width = (uint16_t)(b[0x12] | (b[0x13] << 8));
+    m->height = (uint16_t)(b[0x14] | (b[0x15] << 8));
+    m->bpp = b[0x19];
+    m->red_size = b[0x1F]; m->red_pos = b[0x20];
+    m->green_size = b[0x21]; m->green_pos = b[0x22];
+    m->blue_size = b[0x23]; m->blue_pos = b[0x24];
+    if ((b[0] & 0x80) && vbe_ver >= 0x0200)     /* (a linear framebuffer: VBE 2.0's; 1.2 has only the window) */
+        m->lfb_phys = (uint32_t)b[0x28] | ((uint32_t)b[0x29] << 8) | ((uint32_t)b[0x2A] << 16) |
+                      ((uint32_t)b[0x2B] << 24);
+    m->win_seg = (uint16_t)(b[0x08] | (b[0x09] << 8));
+    m->gran_kb = (uint16_t)(b[0x04] | (b[0x05] << 8));
+    m->win_kb = (uint16_t)(b[0x06] | (b[0x07] << 8));
+    if ((b[0] & 0x19) != 0x19 || !(b[0x1B] == 6 || (b[0x1B] == 4 && m->bpp == 8)))
+        return 1;
+    if (!m->lfb_phys && ((b[0x02] & 0x05) != 0x05 || !m->win_seg || !m->gran_kb || !m->win_kb || (b[0] & 0x40)))
+        return 1;                       /* (no linear framebuffer and no writable window A) */
+    return 0;
+}
+
+int vbe_enumerate_any(void (*cb)(const vbe_any_mode *m, void *ctx), void *ctx)
+{
+    uint16_t list[128], *p;
+    int n = 0, i;
+    if (vbe_init() < 0)
+        return -1;
+    p = (uint16_t *)sys_real_ptr((uint16_t)(vbe_buf[0x10] | (vbe_buf[0x11] << 8)),
+                                 (uint16_t)(vbe_buf[0x0E] | (vbe_buf[0x0F] << 8)));
+    while (p && *p != 0xFFFF && n < 128)
+        list[n++] = *p++;
+    for (i = 0; i < n; i++) {
+        vbe_any_mode m;
+        if (mode_info_any(list[i], &m) == 0)
+            cb(&m, ctx);
+    }
+    return n;
+}
+
+int vbe_set_mode_any(const vbe_any_mode *m)
+{
+    sys_rmregs r;
+    memset(&r, 0, sizeof r);
+    r.eax = 0x4F02;
+    r.ebx = (m->lfb_phys ? 0x4000u : 0u) | m->mode;
+    return vbe_call(&r);
+}
+
+int vbe_set_bank(unsigned bank)
+{
+    sys_rmregs r;
+    memset(&r, 0, sizeof r);
+    r.eax = 0x4F05;
+    r.ebx = 0;                          /* window A, set */
+    r.edx = bank;
+    return vbe_call(&r);
+}
+
 int vbe_set_mode(const mga_vbe_mode *m, int pitch_px, int *actual_pitch_px)
 {
     sys_rmregs r;

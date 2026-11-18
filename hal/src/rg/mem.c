@@ -53,7 +53,8 @@ static int modes(rg_mode *out, int max)
     return n;
 }
 
-static void close_dev(void)
+/* The buffers go (and a GLOS window). Also the VBE device's (vbe_soft.c). */
+void rg_sb_close(void)
 {
     win_close();
     if (rg_sb.drop)
@@ -64,8 +65,11 @@ static void close_dev(void)
     free(rg_sb.stencil);
     memset(&rg_sb, 0, sizeof rg_sb);
 }
+#define close_dev rg_sb_close
 
-static int open_mem(const rg_open *o, rg_opened *out)
+/* Buffers in system memory for a context: the memory device's, the GLOS
+   window's and the VBE device's. */
+int rg_sb_open(const rg_open *o, rg_opened *out)
 {
     int bpp = o->color_bits ? o->color_bits : 16;
     size_t colour;
@@ -148,7 +152,7 @@ static int sync(void)
     return 0;
 }
 
-static int read_px(int front, int x, int y, int w, int h, uint8_t *rgba, int stride)
+int rg_sb_read(int front, int x, int y, int w, int h, uint8_t *rgba, int stride)
 {
     const uint8_t *buf = rg_sb_color(front);
     int i, j;
@@ -277,7 +281,7 @@ static void win_show(void)
 }
 
 /* 0 in a window; 1 when GLOS won't have the program as an app (it runs full-screen, as a session); -1 on an
-   error. The buffers are open_mem's. */
+   error. The buffers are rg_sb_open's. */
 static int open_glos(const rg_open *o, rg_opened *out)
 {
     static struct glos_init in;
@@ -300,9 +304,9 @@ static int open_glos(const rg_open *o, rg_opened *out)
     r = rg_glos_call(GLOS_CORE_INIT, &in);
     if (r && !(r == GLOS_E_INIT && in.why == GLOS_WHY_ALREADY))
         return 1;                       /* not to be an app (a session's, a child's): the screen, as on DOS */
-    if (open_mem(o, out) != 0)
+    if (rg_sb_open(o, out) != 0)
         return -1;
-    for (i = 0; i < 256; i++)           /* (RGB 3-3-2, as read_px expands it) */
+    for (i = 0; i < 256; i++)           /* (RGB 3-3-2, as rg_sb_read expands it) */
         palette332[i] = (uint32_t)((i >> 5) * 255 / 7) << 16 | (uint32_t)(((i >> 2) & 7) * 255 / 7) << 8 |
                         (uint32_t)((i & 3) * 255 / 3);
     memset(&w, 0, sizeof w);
@@ -349,7 +353,7 @@ const rg_device rg_mem_device = {
     .probe = probe,
     .caps = caps,
     .modes = modes,
-    .open = open_mem,
+    .open = rg_sb_open,
     .window_ok = window_ok,
     .window_modes = window_modes,
     .open_glos = open_glos,
@@ -359,7 +363,7 @@ const rg_device rg_mem_device = {
     .draw_buffer = draw_buffer,
     .idle = idle,
     .sync = sync,
-    .read = read_px,
+    .read = rg_sb_read,
     .info = info,
     .stats = stats,
     .crash = crash,

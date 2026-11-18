@@ -81,6 +81,18 @@ int  vbe_set_mode(const mga_vbe_mode *m, int pitch_px, int *actual_pitch_px);
 int  vbe_set_display_start(uint32_t byte_offset, int pitch_bytes, int bpp);
 void vbe_set_text_mode(void);
 int  vbe_version(void);
+/* Any card's modes for the software renderer's full screen (B3, rg/vbe_soft.c): direct colour at 15/16/32 bits
+   or packed pixels at 8, with a linear framebuffer or only the banked window (A at win_seg, win_kb long, moved in
+   gran_kb steps by vbe_set_bank). The Matrox device keeps vbe_find_mode's linear-framebuffer modes. */
+typedef struct {
+    uint16_t mode, width, height, bpp, pitch_bytes;
+    uint32_t lfb_phys;                  /* 0: banked only */
+    uint16_t win_seg, win_kb, gran_kb;
+    uint8_t  red_size, red_pos, green_size, green_pos, blue_size, blue_pos;
+} vbe_any_mode;
+int  vbe_enumerate_any(void (*cb)(const vbe_any_mode *m, void *ctx), void *ctx);
+int  vbe_set_mode_any(const vbe_any_mode *m);   /* the linear framebuffer when it has one */
+int  vbe_set_bank(unsigned bank);               /* window A, in gran_kb units */
 uint32_t vbe_total_memory(void);   /* bytes, from the VBE info block (0 if unknown) */
 
 /* The mode planner: how a requested size is shown with the modes this

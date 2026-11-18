@@ -27,6 +27,7 @@ void dgl_set_error(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 /* The device the context is on (context.c; rg/device.h), chosen at the
  * first dglInit and kept. */
 extern const rg_device *dgl_dev;
+const rg_device *dgl_pick_device(void);    /* context.c: the full-screen device (DGL_DEVICE, a card, or VBE) */
 void dgl_mode_out(DGLMode *d, const rg_mode *m);   /* device.c: a device's mode as DOS-GL's */
 
 /* crash.c: fault/exit teardown (FR-DBG-7..9). */

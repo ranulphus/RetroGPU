@@ -38,14 +38,14 @@ int main(int argc, char **argv)
 {
     GLenum e;
     hx_init(argc, argv, CT_NAME);
-#if CT_STENCIL
     DGLConfig c = { 0 };
     c.width = CT_W, c.height = CT_H, c.color_bits = 16, c.depth_bits = 16, c.double_buffer = 1, c.vsync = 1;
+#if CT_STENCIL
     c.stencil_bits = CT_STENCIL;
-    if (dglInit(&c) != 0) {
-#else
-    if (dglInit(NULL) != 0) {
 #endif
+    if (getenv("CT_BPP"))                      /* the colour depth (8, 16 or 32: run.py --bpp on a SOFT_DOS card) */
+        c.color_bits = atoi(getenv("CT_BPP"));
+    if (dglInit(CT_STENCIL || getenv("CT_BPP") ? &c : NULL) != 0) {
         hx_test("init", 0, "%s", dglGetErrorString());
         hx_done(HX_INIT_FAILED);
     }

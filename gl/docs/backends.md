@@ -98,7 +98,22 @@ include the WARP, AGP, dual texture, the HAL's 2D engine and GLOS's GPU lock. Th
     `GLOS_DRAW_BLIT`, which converts it to the screen's format. 8-bit contexts give their RGB 3-3-2 palette. The
     Matrox window keeps its place on a Matrox card's 16-bit desktop. `DGL_DEVICE=mem` asks for the software
     window there too, for tests. A program GLOS doesn't take as an app (a session's) still goes full-screen on the
-    hardware. `dglGlosHints` (API 1.6) applies to both windows. Full-screen VBE comes next.
+    hardware. `dglGlosHints` (API 1.6) applies to both windows.
+  - **Then full screen, the VBE device (2026-11-18, `hal/src/rg/vbe_soft.c`):** the software renderer on any card
+    with a VBE 1.2 or later BIOS. Its buffers are system memory (`rg_sb_open`, shared with the memory device).
+    Each swap copies the front buffer to the screen, through the linear framebuffer when the mode has one (VBE
+    2.0), else through window A in its granularity's steps (`vbe_set_bank`). 8-bit contexts set the DAC to their
+    3-3-2 colours. `dglInit` takes it by name (`DGL_DEVICE=vbe`), or when no card DOS-GL draws on is found, or the
+    one found has no back end of its own yet (the ViRGE/DX until V4). `DGL_VBE_BANKED=1` uses the window even
+    where there is a linear framebuffer (a test of the banked path). `DGL_COLOR_BITS` overrides the context's depth.
+  - **Tested in 86Box:** DOS-GL's conformance, all 35 tests run and passed (t33 and t34's stencil included):
+    - on the S3 Trio64 (`CARD=vbe`, VBE 2.0) at 16 bits through its linear framebuffer, at 16 bits through the
+      window, and at 32 and 8 bits (`BPP=`);
+    - on the ViRGE/DX (`CARD=virge`, whose BIOS is VBE 1.2: the window only).
+
+    `tools/conform/run.py` judges these cards as the software renderer (`SOFT_DOS`), and `--bpp` sets the DOS
+    programs' depth (`CT_BPP`). Screenshots of the screen itself (TEXCUBE) show the same pictures at every depth
+    and through both paths. The bench tier (bench C's Cirrus, the P3's TNT2) is still owed.
 - **B4, tests, in three tiers** (the owner's choice, 2026-11-06: 86Box's speed must not make suites hours long):
   - **Tier 1, the host, on every change:**
     - DOS-GL's GL layer and the software renderer built for Linux (32-bit, its MMX loops included), drawing into

@@ -54,6 +54,12 @@ dglShutdown();
   or 32 bits a pixel), the window is the software renderer's: each swap
   copies the frame into it (backends.md, B3). `DGL_DEVICE=mem` asks for that
   window on a Matrox desktop too.
+- **On a card DOS-GL has no back end for** (or `DGL_DEVICE=vbe`), `dglInit`
+  takes the software renderer full-screen through the VBE BIOS (1.2 or
+  later): any card, 8, 16 or 32 bits a pixel, with each swap copied to the
+  screen. It is much slower than a Matrox card's engine. `DGL_COLOR_BITS=n`
+  overrides the context's depth, and `DGL_VBE_BANKED=1` copies through the
+  banked window even where there is a linear framebuffer.
 - `dglSetWaitHook(fn, arg)` (0.3, `DGL_API_VERSION` 0x0103) runs `fn(arg)`
   about once a millisecond while `dglSwapBuffers` waits for the drawing
   engine to finish the frame, and once before it waits for the retrace

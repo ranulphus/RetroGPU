@@ -59,7 +59,9 @@ def run_dos(test, card, out):
     return json.load(open(os.path.join(out, "result.json")))
 
 
-SOFT_BPP = 16                                   # (--soft --bpp)
+SOFT_BPP = 16                                   # (--soft --bpp; and --bpp on the cards below)
+SOFT_DOS = ("vbe", "virge")                     # cards DOS-GL draws on with the software renderer (B3; the ViRGE
+                                                # until V4): judged as "soft" (soft8, soft32 with --bpp)
 
 
 def run_soft(test, out):
@@ -118,7 +120,10 @@ def check(test, card, pc=None):
     out = os.path.join(ROOT, "out", "conform", pc or card, test)
     ref = os.path.join(ROOT, "out", "conform", "ref", test)
     only = MANIFEST.get(test, {}).get("only")
-    who = "soft" if card.startswith("soft") and not pc else (pc or card)    # (soft8, soft32: the software renderer)
+    rend = card                                 # (whose tolerances: the software renderer's on SOFT_DOS cards)
+    if card in SOFT_DOS and not pc:
+        rend = "soft" if SOFT_BPP == 16 else "soft%d" % SOFT_BPP
+    who = "soft" if (card.startswith("soft") or card in SOFT_DOS) and not pc else (pc or card)  # (soft8, soft32 too)
     if only and who not in only:                # (a test for some renderers only: t33's stencil)
         return {"test": test, "card": pc or card, "run": "SKIPPED", "frames": {}, "ok": True}
     if card.startswith("soft") and not pc:
@@ -138,9 +143,9 @@ def check(test, card, pc=None):
         got = os.path.join(out, name + ".png")
         # The defaults, a card's or depth's ("_default_soft8"), the frame's own, and the frame's for that card ("soft8").
         m = dict(MANIFEST.get("_default", {}))
-        m.update(MANIFEST.get("_default_" + card, {}))
+        m.update(MANIFEST.get("_default_" + rend, {}))
         m.update({k: v for k, v in MANIFEST.get(name, {}).items() if not isinstance(v, dict)})
-        m.update(MANIFEST.get(name, {}).get(card, {}))
+        m.update(MANIFEST.get(name, {}).get(rend, {}))
         if not os.path.exists(got):
             report["frames"][name] = {"ok": False, "reason": "missing"}
             ok = False
@@ -164,10 +169,13 @@ def main():
     ap.add_argument("--refs", action="store_true", help="only make the Mesa references (in the dev container)")
     ap.add_argument("--soft", action="store_true", help="the software renderer natively (the Linux builds, in memory)")
     ap.add_argument("--bpp", type=int, default=16, choices=(8, 16, 32),
-                    help="--soft: the colour depth (results as soft, soft8, soft32)")
+                    help="--soft, or a card of SOFT_DOS: the colour depth (results as soft, soft8, soft32)")
     a = ap.parse_args()
-    if a.soft:
+    if a.card in SOFT_DOS and a.bpp != 16 and not a.soft:
         global SOFT_BPP
+        SOFT_BPP = a.bpp
+        PRE.append("SET CT_BPP=%d" % a.bpp)     # (ct_dos.c: the context's depth)
+    if a.soft:
         SOFT_BPP = a.bpp
         a.card = "soft" if a.bpp == 16 else "soft%d" % a.bpp
     PRE.extend(a.pre)

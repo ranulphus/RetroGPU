@@ -13,6 +13,8 @@ const rg_device rg_mga_device = { .name = "mga", .probe = probe_mga };
 const rg_device rg_virge_device = { .name = "virge", .probe = probe_virge };
 static int probe_mem(void) { probes++; return 0; }
 const rg_device rg_mem_device = { .name = "mem", .flags = RG_DEV_BY_NAME, .probe = probe_mem };
+static int probe_vbe(void) { probes++; return 0; }
+const rg_device rg_vbe_device = { .name = "vbe", .flags = RG_DEV_BY_NAME, .probe = probe_vbe };
 static const rg_device soft = { .name = "soft", .probe = probe_soft };
 
 static char logged[256];
@@ -41,6 +43,7 @@ int unit_main(void)
     mga_ok = 0, virge_ok = 0;
     CHECK(rg_choose(NULL) == NULL);              /* (the memory device only by name, though it would probe) */
     CHECK(rg_choose("mem") == &rg_mem_device);
+    CHECK(rg_choose("vbe") == &rg_vbe_device);   /* (the VBE device too: by name, or DOS-GL's fallback) */
     mga_ok = 1;
     virge_ok = 0;
 

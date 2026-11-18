@@ -55,7 +55,7 @@ HAL_SRCS := $(addprefix $(MGAHAL)/hal/,src/debug/serial.c src/pci.c src/chip.c s
               src/blit.c src/cursor.c \
               src/rg/device.c src/rg/glos.c src/rg/mga.c src/rg/mga_glos.c \
               src/virge/chip.c src/virge/engine2d.c src/virge/cursor.c src/virge/tri.c src/rg/virge.c \
-              src/rg/mem.c src/soft/raster.c src/soft/texture.c port/djgpp.c)
+              src/rg/mem.c src/rg/vbe_soft.c src/soft/raster.c src/soft/texture.c port/djgpp.c)
 hal_objs = $(patsubst $(MGAHAL)/%.c,build/$(1)/mgahal/%.o,$(2))
 # Per-test build flags of the conformance tests: those that ask for stencil bits (t33; ct.h's CT_STENCIL).
 ct_flags = $(if $(filter t33,$(1)),-DCT_STENCIL=8)
@@ -169,7 +169,7 @@ soft-conform:
 	  python3 tools/conform/run.py --soft --bpp $(or $(BPP),16) $(TESTS)'
 conform: conform-dos dostools
 	$(MGAHAL)/tools/dev sh -c '$(MAKE) conform-host && python3 tools/conform/run.py --card $(CARD) \
-	  $(if $(PRE),--pre "$(PRE)") $(TESTS)'
+	  $(if $(BPP),--bpp $(BPP)) $(if $(PRE),--pre "$(PRE)") $(TESTS)'
 # The same on a bench PC (RetroGPU's tools/bench/run.py, on the host: the PC must reach it).
 conform-bench: conform-dos
 	$(MGAHAL)/tools/dev sh -c '$(MAKE) conform-host && python3 tools/conform/run.py --refs $(TESTS)'
