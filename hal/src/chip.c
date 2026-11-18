@@ -47,15 +47,27 @@ void mga_chip_caps(mga_chip *c)
 
 /* Size VRAM by writing a signature at each megabyte and looking for
  * aliasing. Must run before anything useful is in VRAM. */
+/* Each MB's first word written and read back, the first MB's unchanged (no
+ * mirror). Between the write and the read: the CPU's write-combining buffers
+ * drained (a locked instruction: GLOS maps the frame buffer write-combining)
+ * and another value put on the bus by a write to memory that is there, or
+ * memory that isn't reads back the last value on the bus, which was the
+ * write's own: the real G100 in bench-g400 (4 MB, its BIOS says) measured
+ * 16 MB, the aperture, so (2026-11-18). */
 uint32_t mga_probe_vram(void)
 {
     volatile uint32_t *fb = (volatile uint32_t *)mga_fb;
-    uint32_t mb, max = mga.fb_size >> 20;
+    uint32_t mb, max = mga.fb_size >> 20, v;
     fb[0] = 0x4D474130u;             /* "MGA0" */
     for (mb = 1; mb < max; mb++) {
         volatile uint32_t *p = (volatile uint32_t *)(mga_fb + (mb << 20));
-        p[0] = 0x4D470000u | mb;
-        if (fb[0] != 0x4D474130u || p[0] != (0x4D470000u | mb))
+        v = 0x4D470000u | mb;
+        p[0] = v;
+        fb[1] = ~v;                  /* (another value on the bus) */
+#if defined(__GNUC__) && defined(__i386__)
+        __asm__ __volatile__("lock; orl $0, (%%esp)" ::: "memory");
+#endif
+        if (fb[0] != 0x4D474130u || p[0] != v || fb[1] != ~v)
             break;
     }
     return mb << 20;
