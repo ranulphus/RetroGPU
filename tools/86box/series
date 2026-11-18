@@ -42,3 +42,4 @@ local/0126-mga-g200-warp.patch
 local/0127-slirp-pollfd-size.patch
 local/0128-net-plip-local-switch.patch
 local/0129-mga-g450-soft-reset-memory.patch
+local/0130-mga-g100-bus-past-memory.patch

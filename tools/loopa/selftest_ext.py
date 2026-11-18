@@ -37,6 +37,7 @@ Runs inside the dev container (tools/dev). Arguments pick checks; the
 default is all of them. Exit status 1 if any check fails.
 """
 import json
+import re
 import os
 import subprocess
 import sys
@@ -263,9 +264,25 @@ def check_g450mem():
         out["fixed"] + out["broken"]))
 
 
+def check_g100vram():
+    """Local patch 0130: an emulated G100 with less memory than its 16 MB aperture, as bench-g400's real one (4 MB,
+    2026-11-18). Past its memory a write is lost and a read gives the last value written (VRAMBUS: as the real card
+    read back), and the HAL's VRAM probe still finds 4 MB (it once read back its own write there and found 16)."""
+    st, serial = job("selftest-g100vram", "--card", "g100", "--g100-mb", "4", "--exe", "build/djgpp/VRAMBUS.EXE",
+                     "--args", "6")
+    probe = re.search(r"vrambus card=.* probe=(\d+)", serial)
+    rows = re.findall(r"vrambus off=([0-9a-f]+) wrote=([0-9a-f]+) now=([0-9a-f]+) drained=[0-9a-f]+ after-other=([0-9a-f]+) "
+                      r"unwritten=([0-9a-f]+) fb0=([0-9a-f]+)", serial)
+    past = [r for r in rows if int(r[0], 16) >= 4 << 20]
+    good = st == "PASS" and probe is not None and int(probe.group(1)) == 4 << 20 and len(past) >= 2 and \
+        all(r[2] == r[1] and r[3] == "5a5a5a5a" and r[4] == "5a5a5a5a" and r[5] == "11111111" for r in past)
+    return report("g100-vram", good, "probe %s; past 4 MB: %s" % (
+        probe.group(1) if probe else "?", "; ".join("%s now=%s after=%s" % (r[0], r[2], r[3]) for r in past) or "no rows"))
+
+
 CHECKS = {"486": check_486, "vbe": check_vbe, "net": check_net, "com2": check_com2, "himemx": check_himemx,
           "cpu": check_cpu, "pci": check_pci, "rtc": check_rtc, "hazards": check_hazards, "clock": check_clock,
-          "umbpci": check_umbpci, "g450mem": check_g450mem}
+          "umbpci": check_umbpci, "g450mem": check_g450mem, "g100vram": check_g100vram}
 
 
 def main():

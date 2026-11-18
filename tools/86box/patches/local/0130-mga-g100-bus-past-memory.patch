@@ -1,0 +1,101 @@
+diff --git a/src/video/vid_mga.c b/src/video/vid_mga.c
+index ce35194..1f5b491 100644
+--- a/src/video/vid_mga.c
++++ b/src/video/vid_mga.c
+@@ -744,6 +744,7 @@ typedef struct mystique_t {
+     int      g450_uninit, g450_used;
+     uint64_t g450_since;
+     uint32_t g450_noise;
++    uint32_t g100_bus;              /* MGA-Glide local patch 0130: the frame buffer's data lines' last value (G100) */
+ } mystique_t;
+ 
+ static const uint8_t trans_masks[16][16] = {
+@@ -3710,6 +3711,22 @@ mystique_accel_iload_write_l(UNUSED(uint32_t addr), uint32_t val, void *priv)
+     }
+ }
+ 
++/* MGA-Glide local patch 0130: a real G100 (bench-g400's, 4 MB in a 16 MB
++ * aperture, 2026-11-18, RetroGPU tests/hal/vrambus.c) neither mirrors nor
++ * pulls up the frame buffer past its memory: a write there is lost, and a
++ * read gives the data lines' last value: what was last written.
++ * So a VRAM probe that reads back straight after its write finds memory that
++ * isn't there. Only writes set that value: a read of memory that is there
++ * leaves it as it was (measured). bytes 1 or 2: those lanes of the dword at
++ * addr's place. */
++static void
++g100_bus_lane(mystique_t *m, uint32_t addr, uint32_t val, int bytes)
++{
++    const int      sh   = (int) (addr & (bytes == 2 ? 2 : 3)) * 8;
++    const uint32_t mask = (bytes == 2 ? 0xffffu : 0xffu) << sh;
++    m->g100_bus         = (m->g100_bus & ~mask) | ((val << sh) & mask);
++}
++
+ static uint8_t
+ mystique_readb_linear(uint32_t addr, void *priv)
+ {
+@@ -3725,8 +3742,11 @@ mystique_readb_linear(uint32_t addr, void *priv)
+     }
+ 
+     addr &= svga->decode_mask;
+-    if (addr >= svga->vram_max)
++    if (addr >= svga->vram_max) {
++        if (((mystique_t *) svga->priv)->type == MGA_G100)   /* (local patch 0130: the bus's last value) */
++            return (uint8_t) (((mystique_t *) svga->priv)->g100_bus >> ((addr & 3) * 8));
+         return 0xff;
++    }
+     if (((mystique_t *) svga->priv)->g450_uninit) {     /* (local patch 0129) */
+         g450_mem_decay((svga_t *) svga, (mystique_t *) svga->priv);
+         if ((addr & 7) < 2)
+@@ -3744,8 +3764,11 @@ mystique_readw_linear(uint32_t addr, void *priv)
+     cycles -= svga->monitor->mon_video_timing_read_w;
+ 
+     addr &= svga->decode_mask;
+-    if (addr >= svga->vram_max)
++    if (addr >= svga->vram_max) {
++        if (((mystique_t *) svga->priv)->type == MGA_G100)   /* (local patch 0130) */
++            return (uint16_t) (((mystique_t *) svga->priv)->g100_bus >> ((addr & 2) * 8));
+         return 0xffff;
++    }
+     if (((mystique_t *) svga->priv)->g450_uninit) {     /* (local patch 0129) */
+         g450_mem_decay(svga, (mystique_t *) svga->priv);
+         if ((addr & 7) == 0)
+@@ -3763,8 +3786,11 @@ mystique_readl_linear(uint32_t addr, void *priv)
+     cycles -= svga->monitor->mon_video_timing_read_l;
+ 
+     addr &= svga->decode_mask;
+-    if (addr >= svga->vram_max)
++    if (addr >= svga->vram_max) {
++        if (((mystique_t *) svga->priv)->type == MGA_G100)   /* (local patch 0130) */
++            return ((mystique_t *) svga->priv)->g100_bus;
+         return 0xffffffff;
++    }
+     if (((mystique_t *) svga->priv)->g450_uninit) {     /* (local patch 0129) */
+         g450_mem_decay(svga, (mystique_t *) svga->priv);
+         if ((addr & 7) == 0)
+@@ -3789,6 +3815,8 @@ mystique_writeb_linear(uint32_t addr, uint8_t val, void *priv)
+     }
+ 
+     addr &= svga->decode_mask;
++    if (((mystique_t *) svga->priv)->type == MGA_G100)   /* (local patch 0130: what the bus carried) */
++        g100_bus_lane((mystique_t *) svga->priv, addr, val, 1);
+     if (addr >= svga->vram_max)
+         return;
+     addr &= svga->vram_mask;
+@@ -3806,6 +3834,8 @@ mystique_writew_linear(uint32_t addr, uint16_t val, void *priv)
+     cycles -= svga->monitor->mon_video_timing_write_w;
+ 
+     addr &= svga->decode_mask;
++    if (((mystique_t *) svga->priv)->type == MGA_G100)   /* (local patch 0130) */
++        g100_bus_lane((mystique_t *) svga->priv, addr, val, 2);
+     if (addr >= svga->vram_max)
+         return;
+     addr &= svga->vram_mask;
+@@ -3823,6 +3853,8 @@ mystique_writel_linear(uint32_t addr, uint32_t val, void *priv)
+     cycles -= svga->monitor->mon_video_timing_write_l;
+ 
+     addr &= svga->decode_mask;
++    if (((mystique_t *) svga->priv)->type == MGA_G100)   /* (local patch 0130) */
++        ((mystique_t *) svga->priv)->g100_bus = val;
+     if (addr >= svga->vram_max)
+         return;
+     addr &= svga->vram_mask;

@@ -85,6 +85,7 @@ DJ_SRC_MODETEST := tests/hal/modetest.c
 DJ_SRC_RSTTEST := tests/hal/rsttest.c
 DJ_SRC_G450MEM := tests/hal/g450mem.c
 DJ_SRC_ROMDUMP := tests/hal/romdump.c
+DJ_SRC_VRAMBUS := tests/hal/vrambus.c
 DJ_SRC_CLOCKMON := tests/hal/clockmon.c
 # The S3 ViRGE/DX (docs/virge.md): its register layer as a library of its own (hal/src/virge, not part of the
 # Matrox HAL's), VPROBE (PCI, IDs, the BIOS's modes, the linear window) and VTWOD (its 2D against sw2d.c).
@@ -118,6 +119,7 @@ build/djgpp/MODETEST.EXE: tests/hal/modetest.c
 build/djgpp/RSTTEST.EXE: tests/hal/rsttest.c
 build/djgpp/G450MEM.EXE: tests/hal/g450mem.c
 build/djgpp/ROMDUMP.EXE: tests/hal/romdump.c
+build/djgpp/VRAMBUS.EXE: tests/hal/vrambus.c
 build/djgpp/CLOCKMON.EXE: tests/hal/clockmon.c
 build/djgpp/VPROBE.EXE: tests/virge/vprobe.c
 build/djgpp/VTWOD.EXE: tests/virge/vtwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libvirge.a
@@ -187,6 +189,7 @@ loopa-cfgcheck:
 # The harness's machine options: 486 profiles, the VBE card, and more
 # (tools/loopa/selftest_ext.py; CHECKS="486 vbe" runs some).
 loopa-selftest-ext: dostests build/djgpp/STACKPG.EXE build/djgpp/PROBE.EXE build/djgpp/WARPTRI.EXE build/djgpp/MODETEST.EXE \
+                    build/djgpp/VRAMBUS.EXE \
                     build/djgpp/CLOCKMON.EXE v86test
 	$(DEV) $(PYTHON) tools/loopa/selftest_ext.py $(CHECKS)
 
