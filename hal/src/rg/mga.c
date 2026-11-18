@@ -684,7 +684,9 @@ static void close_dev(void)
                (unsigned long)engine_resets, (unsigned long)engine_timeouts, (unsigned long)engine_fence_stuck,
                (unsigned long)warp_seqs, (unsigned long)warp_seqs_t2, (unsigned long)sys_time_backs,
                (unsigned long)warp_uc_switches, (unsigned long)warp_diag[5]);
-    }
+    } else if (engine_timeouts)                 /* (a stalled engine, reset: say so) */
+        RG_ERR("DGL-ENGINE resets=%lu timeouts=%lu status=%08lx", (unsigned long)engine_resets,
+               (unsigned long)engine_timeouts, (unsigned long)engine_timeout_diag[0]);
     if (rg_lock.on) {                           /* a GLOS window: GLOS has the screen and the engine's state */
         if (*rg_lock.held)
             engine_sync(100000);

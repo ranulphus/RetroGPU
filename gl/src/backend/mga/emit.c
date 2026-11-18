@@ -224,6 +224,11 @@ static uint32_t fogcol_for(void)
 static struct { int ok; dgl_texture *tex, *tex1; } idle;
 static float guard_vp[4] = { -1, -1, -1, -1 };     /* the viewport the guard band is for */
 
+/* DGL_NOFOG=1 (diagnosis): GL fog's draws as with fog (textured, white for
+ * untextured ones), the engine's fog left off. A real G100 hung its PC on
+ * a stall with fog on, and only reset its engine without it. */
+static int no_fog;
+
 static void validate_state(void)
 {
     int depth, unit0 = 0;
@@ -439,7 +444,7 @@ static void validate_state(void)
         }
         if (dgl_gl.blend || dgl_gl.alpha_test)
             tctx.flags |= MGA_S_ALPHA;
-        if (dgl_gl.fog && textured)
+        if (dgl_gl.fog && textured && !no_fog)
             tctx.flags |= MGA_S_FOG;
         engine_set_maccess_flags(((tctx.flags & MGA_S_FOG) ? MACCESS_FOGEN : 0) |
                                  (dgl_gl.dither ? 0 : MACCESS_NODITHER));
@@ -616,6 +621,10 @@ static void warp_wrap(mga_wvtx *w, int map1, const mga_texstate *t)
 
 /* flat: the provoking vertex when its colour is to replace the projected
  * ones (GL_FLAT on the fast path: the same product project() makes). */
+static int tri_log;                     /* DGL_TRILOG=1: each triangle to the log before its setup (diagnosis) */
+static int tri_sync;                    /* DGL_TRISYNC=1: an engine sync after each, naming one that stalls (diagnosis) */
+static unsigned long tri_n;             /* (their count, for both) */
+
 static void draw_projected(const proj *p0, const proj *p1, const proj *p2, const dgl_cvtx *flat)
 {
     if (dgl_ablate & 1)
@@ -657,7 +666,23 @@ static void draw_projected(const proj *p0, const proj *p1, const proj *p2, const
         setup_invalidate();                     /* the WARP wrote the registers setup_triangle shadows */
         warp_since_cpu = 0;
     }
+    tri_n++;
+    if (tri_log) {                              /* (DGL_TRILOG=1, diagnosis: what reaches the setup, before it) */
+        DGL_ERR("DGL-TRI %lu dw=%08lx fl=%03lx tw=%d th=%d %ld,%ld %ld,%ld %ld,%ld z=%.0f,%.0f,%.0f f=%.0f,%.0f,%.0f "
+                "q=%.4g,%.4g,%.4g s=%.4g,%.4g,%.4g t=%.4g,%.4g,%.4g", tri_n, (unsigned long)tctx.dwgctl,
+                (unsigned long)tctx.flags, tctx.tex_tw, tctx.tex_th, (long)a.X16, (long)a.Y16, (long)b.X16, (long)b.Y16,
+                (long)c.X16, (long)c.Y16, a.z, b.z, c.z, a.fog, b.fog, c.fog, a.q, b.q, c.q, a.s, b.s, c.s, a.t, b.t,
+                c.t);
+    }
     setup_triangle(&a, &b, &c, &tctx);
+    if (tri_sync && engine_sync(100000) != 0) {  /* (DGL_TRISYNC=1: the engine was reset; its state written again) */
+        DGL_ERR("DGL-STALL tri %lu dw=%08lx fl=%03lx %ld,%ld %ld,%ld %ld,%ld q=%.4g,%.4g,%.4g", tri_n,
+                (unsigned long)tctx.dwgctl, (unsigned long)tctx.flags, (long)a.X16, (long)a.Y16, (long)b.X16,
+                (long)b.Y16, (long)c.X16, (long)c.Y16, a.q, b.q, c.q);
+        dgl_gl.dirty |= DGL_DIRTY_REGS;
+        regs_forget();
+        validate_state();
+    }
 }
 
 /* ---- Fog subdivision -------------------------------------------------------
@@ -1537,6 +1562,12 @@ void dgl_emit_install(void)
     warp_on = !(e && *e == '0') && warp_available() && !rg_lock.on;  /* (not in a GLOS window) */
     e = getenv("DGL_WARPDMA");
     warp_use_dma = !(e && *e == '0');          /* DGL_WARPDMA=0: vertices by the CPU, no DMA stream */
+    e = getenv("DGL_TRILOG");
+    tri_log = e && *e == '1';
+    e = getenv("DGL_TRISYNC");
+    tri_sync = e && *e == '1';
+    e = getenv("DGL_NOFOG");
+    no_fog = e && *e == '1';
     e = getenv("DGL_WARPCACHE");
     warp_ucode_cache = !(e && *e == '0');       /* the G400's pipes from memory (no reloads); DGL_WARPCACHE=0: loaded */
     e = getenv("DGL_AGP");
