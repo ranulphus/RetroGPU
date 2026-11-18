@@ -322,7 +322,8 @@ void engine_resync(void)
     pitch_reg = -1;
     fifo_reserve(1);
     MGA_WR32(MGAREG_PLNWT, 0xFFFFFFFFu);    /* (every HAL path writes all planes) */
-    engine_set_target(&cur);
+    if (cur.bpp)                            /* (none yet: a GLOS window's first lock, before engine_init) */
+        engine_set_target(&cur);
     emit_clip();
 }
 
@@ -349,7 +350,8 @@ void engine_reset(void)
 
 static void write_origin(uint32_t color_off, int bpp, uint32_t z_off, int zbits)
 {
-    uint32_t bpp_bytes = (uint32_t)bpp / 8, zbytes = (uint32_t)zbits / 8;
+    uint32_t bpp_bytes = bpp >= 8 ? (uint32_t)bpp / 8 : 2u, zbytes = (uint32_t)zbits / 8;   /* (no depth known: 16 bits,
+                                                                 never a divide by zero on the G100: GLOS, 2026-11-18) */
     if (mga.has_dstorg) {
         fifo_reserve(2);
         MGA_WR32(MGAREG_DSTORG, color_off);
