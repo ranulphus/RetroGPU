@@ -16,6 +16,13 @@ void mga_chip_caps(mga_chip *c)
          * real G100 drew DOS-GL's t07 half a texel off with the shift for
          * texel corners (bench-g400's PC, 2026-11-18; 86Box patch 0131). */
         c->texel_centre = 1;
+        /* A textured trapezoid that draws nothing, clipped on the left,
+         * stalls the real G100's engine (with fog the whole PC hangs):
+         * DOS-GL's t10 sent such pieces of triangles reaching off the
+         * screen's left edge. Untextured, wholly right, or an empty sliver
+         * on the screen do not stall it, nor does one drawing a pixel with
+         * other rows clipped (FOGPROBE, bench-g400 2026-11-18). */
+        c->textrap_empty_stall = 1;
         break;
     case MGA_FAMILY_G200:
     case MGA_FAMILY_G200E:

@@ -38,8 +38,10 @@ typedef struct {
                has_specular:1, has_decalblend:1, fog_textrap_only:1,
                alphasel_tex_always:1, blk_clear_ok:1, g400_clip_quirk:1,
                has_dual_tex:1,  /* G400: two texture maps, TDUALSTAGE combiner */
-               texel_centre:1;  /* bilinear filtering samples at texel centres itself (G100, G200, G400: their
+               texel_centre:1,  /* bilinear filtering samples at texel centres itself (G100, G200, G400: their
                                    silicon); otherwise from texel corners, and tex_adjust_coords shifts half a texel */
+               textrap_empty_stall:1;  /* a TEXTURE_TRAP that draws no pixel, its spans left of the clip, stalls
+                                   the engine (G100; with fog the PC hangs): the setup leaves such trapezoids out */
 } mga_chip;
 
 extern mga_chip mga;                 /* the device in use */
@@ -164,6 +166,7 @@ extern uint32_t mga_opmode;
 void     engine_set_target(const mga_target *t);
 void     engine_set_maccess_flags(uint32_t flags);     /* MACCESS_NODITHER / MACCESS_FOGEN */
 void     engine_set_clip(int x0, int y0, int x1, int y1);   /* inclusive-exclusive */
+void     engine_get_clip(int *x0, int *y0, int *x1, int *y1);  /* the clip engine_set_clip (or a restore) set */
 void     engine_fill(int x, int y, int w, int h, uint32_t value);
 uint32_t engine_colour(uint32_t value);                /* a pixel value repeated to 32 bits, at the target's depth */
 void     engine_fill_depth(int x, int y, int w, int h, uint32_t zvalue);

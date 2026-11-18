@@ -22,6 +22,11 @@ void fifo_reserve(int n) { (void)n; }
 unsigned setup_valid;               /* (engine.c's: no shadow holds at the start) */
 int setup_stale, setup_wrote_texsize;   /* (engine.c's) */
 uint32_t mga_warp_dwgctl;          /* (engine.c's) */
+static int stub_cx0 = 0, stub_cx1 = W;
+void engine_get_clip(int *x0, int *y0, int *x1, int *y1)  /* (engine.c's: the clip test_empty_textrap sets) */
+{
+    *x0 = stub_cx0; *y0 = 0; *x1 = stub_cx1; *y1 = H;
+}
 
 /* Exact coverage test: centre (16x+8, 16y+8) against edge functions with
  * the top-left rule (edges are half-open towards bottom-right). */
@@ -247,6 +252,74 @@ static void test_voodoo_edges(void)
     CHECK_EQ(bad, 0);
 }
 
+/* mga.textrap_empty_stall (the real G100 stalls on a textured trapezoid
+ * that draws nothing, clipped on the left): a TEXTURE_TRAP piece is left
+ * out exactly when it covers no pixel inside the engine's clip columns.
+ * Triangles across and beyond the clip's left and right edges, slivers
+ * between pixel centres, both edge rules. */
+static void test_empty_textrap(void)
+{
+    int n, bad = 0, kept = 0, culled = 0, cases = 0;
+    mga_tri_ctx c = ctx_flat();
+    c.dwgctl = DWG_OPCOD_TEXTURE_TRAP | DWG_ATYPE_I;
+    c.tex_tw = c.tex_th = 3;
+    mga.textrap_empty_stall = 1;
+    stub_cx0 = 40; stub_cx1 = 200;
+    for (n = 0; n < 4000; n++) {
+        mga_svtx p[3];
+        const mga_svtx *v[3], *t;
+        int i, part, y, x, want[2] = { 0, 0 }, rows[3], voodoo = n % 5 == 4;
+        for (i = 0; i < 3; i++) {
+            rnd_vtx(&p[i]);
+            p[i].q = 1;
+            p[i].X16 = rand() % (3 * W * 16) - W * 16;              /* -W to 2W */
+            if (n % 3 == 2)
+                p[i].X16 = stub_cx0 * 16 + rand() % (48 * 16) - 40 * 16;   /* about the left edge */
+        }
+        if (n % 4 == 1) {                                         /* a sliver: x within 3/4 pixel */
+            p[1].X16 = p[0].X16 + rand() % 12;
+            p[2].X16 = p[0].X16 + rand() % 12;
+        }
+        if ((int64_t)(p[1].X16 - p[0].X16) * (p[2].Y16 - p[0].Y16) ==
+            (int64_t)(p[2].X16 - p[0].X16) * (p[1].Y16 - p[0].Y16))
+            continue;                                             /* (no area: the setup drops it first) */
+        v[0] = &p[0]; v[1] = &p[1]; v[2] = &p[2];
+#define LESS(a, b) ((a)->Y16 < (b)->Y16 || ((a)->Y16 == (b)->Y16 && (a)->X16 < (b)->X16))
+        if (LESS(v[1], v[0])) { t = v[0]; v[0] = v[1]; v[1] = t; }
+        if (LESS(v[2], v[1])) { t = v[1]; v[1] = v[2]; v[2] = t; }
+        if (LESS(v[1], v[0])) { t = v[0]; v[0] = v[1]; v[1] = t; }
+#undef LESS
+        if (voodoo && (v[0]->Y16 == v[1]->Y16 || v[1]->Y16 == v[2]->Y16))
+            continue;                                             /* (voodoo_span's formula wants both) */
+        c.flags = MGA_S_TEX | MGA_S_AFFINE | (voodoo ? MGA_S_VOODOO_EDGES : 0);
+        for (i = 0; i < 3; i++)
+            rows[i] = (v[i]->Y16 + 7) >> 4;
+        for (part = 0; part < 2; part++)
+            for (y = rows[part] < 0 ? 0 : rows[part]; y < rows[part + 1] && y < H && !want[part]; y++) {
+                int xl = 0, xr = 0;
+                if (voodoo)
+                    voodoo_span(v, y, &xl, &xr);
+                for (x = stub_cx0; x < stub_cx1 && !want[part]; x++)
+                    want[part] = voodoo ? x >= xl && x < xr : inside(v, x, y);
+            }
+        memset(&setup_stats, 0, sizeof setup_stats);
+        setup_triangle(&p[0], &p[1], &p[2], &c);
+        cases++;
+        kept += (int)setup_stats.traps;
+        culled += (int)setup_stats.culled_empty;
+        if ((int)setup_stats.traps != want[0] + want[1] && bad++ < 5)
+            fprintf(stderr, "textrap %d%s: %u pieces drawn, want %d+%d  (%d,%d)(%d,%d)(%d,%d)\n", n,
+                    voodoo ? " voodoo" : "", setup_stats.traps, want[0], want[1], p[0].X16, p[0].Y16, p[1].X16,
+                    p[1].Y16, p[2].X16, p[2].Y16);
+    }
+    mga.textrap_empty_stall = 0;
+    stub_cx0 = 0; stub_cx1 = W;
+    printf("empty textrap: %d triangles, %d pieces drawn, %d left out\n", cases, kept, culled);
+    CHECK_EQ(bad, 0);
+    CHECK(kept > 1000);
+    CHECK(culled > 1000);
+}
+
 int unit_main(void)
 {
     srand(1234);
@@ -257,6 +330,7 @@ int unit_main(void)
     test_gouraud();
     test_z();
     test_voodoo_edges();
+    test_empty_textrap();
     printf("setup: tris=%u traps=%u empty=%u\n", setup_stats.tris, setup_stats.traps, setup_stats.culled_empty);
     return 0;
 }

@@ -280,9 +280,25 @@ def check_g100vram():
         probe.group(1) if probe else "?", "; ".join("%s now=%s after=%s" % (r[0], r[2], r[3]) for r in past) or "no rows"))
 
 
+def check_g100stall():
+    """Local patch 0132: a real G100's engine stalls on a textured trapezoid that draws nothing with its spans left of
+    the clip (bench-g400's PC, 2026-11-18; with fog the PC hung). 86Box's G100 reports it as the textrap-empty hazard.
+    FOGPROBE draws t10's fifth triangle (its top row an empty span on the screen, the rest wholly left of it): with the
+    HAL's cull (mga.textrap_empty_stall) nothing is sent and nothing reported; with nocull the hazard."""
+    out = {}
+    for name, args in (("cull", "t10only5"), ("nocull", "t10only5 nocull")):
+        st, serial = job("selftest-g100stall-" + name, "--card", "g100", "--exe", "build/djgpp/FOGPROBE.EXE",
+                         "--args", args)
+        m = re.search(r"fogprobe step=t10only5 status=.* traps=(\d+) culled=(\d+)", serial)
+        out[name] = (st, m.group(1) if m else "?", m.group(2) if m else "?", sorted(hazards_of("selftest-g100stall-" + name) or {}))
+    good = out["cull"] == ("PASS", "0", "1", []) and out["nocull"] == ("PASS", "1", "0", ["textrap-empty"])
+    return report("g100-stall", good, "culled: %s traps=%s culled=%s hazards %s; nocull: %s traps=%s culled=%s hazards %s" % (
+        out["cull"] + out["nocull"]))
+
+
 CHECKS = {"486": check_486, "vbe": check_vbe, "net": check_net, "com2": check_com2, "himemx": check_himemx,
           "cpu": check_cpu, "pci": check_pci, "rtc": check_rtc, "hazards": check_hazards, "clock": check_clock,
-          "umbpci": check_umbpci, "g450mem": check_g450mem, "g100vram": check_g100vram}
+          "umbpci": check_umbpci, "g450mem": check_g450mem, "g100vram": check_g100vram, "g100stall": check_g100stall}
 
 
 def main():

@@ -421,6 +421,11 @@ void engine_set_clip(int x0, int y0, int x1, int y1)
     emit_clip();
 }
 
+void engine_get_clip(int *x0, int *y0, int *x1, int *y1)
+{
+    *x0 = clip_x0; *y0 = clip_y0; *x1 = clip_x1; *y1 = clip_y1;
+}
+
 /* Before a draw the host starts (fills, blits, loads), and before the state
  * it writes for one, while WARP triangles may still be in flight: two
  * DWGSYNC writes, as Linux's mga DRM puts before its clears, blits and

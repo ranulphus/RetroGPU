@@ -178,6 +178,57 @@ static void edge_from_line(int64_t N0, int64_t S, int64_t D, mga_edge *e)
     edge_set(x0, r0, S, D, e);
 }
 
+/* An edge's covered column on row k, from its AR terms (as edge_reduce
+ * recovers them): x_k = x + floor((r0 + S*k) / D). */
+static void edge_terms(const mga_edge *e, int64_t *s, int64_t *d, int64_t *r)
+{
+    *d = e->ar_step;
+    *s = e->neg ? e->ar_dec : -e->ar_dec;
+    *r = e->neg ? e->ar_err - e->ar_dec : *d - 1 - (e->ar_err - e->ar_dec);
+}
+
+static int64_t edge_x_at(const mga_edge *e, int32_t k)
+{
+    int64_t s, d, r;
+    edge_terms(e, &s, &d, &r);
+    return e->x + floordiv64(r + s * k, d);
+}
+
+/* Whether a trapezoid of n rows between edges l and r (columns [l, r) on
+ * each row, as the engine walks them) draws a pixel in columns [cx0, cx1):
+ * its first or last row does (the usual answer, at most two divisions);
+ * neither edge reaches inside (the right edge's furthest column left of
+ * cx0, or the left edge's right of cx1: both edges are monotonic) does
+ * not; otherwise row by row, as the engine steps. */
+static int trap_covers(const mga_edge *l, const mga_edge *r, int32_t n, int cx0, int cx1)
+{
+    int64_t xl = l->x, xr = r->x, ln, rn, sl, dl, rl, sr, dr, rr, ql, qr;
+    int32_t k;
+    if ((xl > cx0 ? xl : cx0) < (xr < cx1 ? xr : cx1))
+        return 1;
+    if (n <= 1)
+        return 0;
+    ln = edge_x_at(l, n - 1);
+    rn = edge_x_at(r, n - 1);
+    if ((ln > cx0 ? ln : cx0) < (rn < cx1 ? rn : cx1))
+        return 1;
+    if ((xr > rn ? xr : rn) <= cx0 || (xl < ln ? xl : ln) >= cx1)
+        return 0;
+    edge_terms(l, &sl, &dl, &rl);
+    edge_terms(r, &sr, &dr, &rr);
+    ql = floordiv64(sl, dl); sl -= ql * dl;        /* per row: q whole columns and s/D more */
+    qr = floordiv64(sr, dr); sr -= qr * dr;
+    for (k = 1; k < n - 1; k++) {
+        xl += ql; rl += sl;
+        if (rl >= dl) { rl -= dl; xl++; }
+        xr += qr; rr += sr;
+        if (rr >= dr) { rr -= dr; xr++; }
+        if ((xl > cx0 ? xl : cx0) < (xr < cx1 ? xr : cx1))
+            return 1;
+    }
+    return 0;
+}
+
 /* Exact mode: column covered when its centre is inside (top-left rule). */
 static void edge_exact(int32_t Xa, int32_t Ya, int32_t Xb, int32_t Yb, int32_t ys, mga_edge *e)
 {
@@ -352,7 +403,7 @@ SETUP_TRI(const mga_svtx *a, const mga_svtx *b, const mga_svtx *c, const mga_tri
     double K = 1.0;
     int map1_sizes = 1;
     int32_t y_top, y_mid, y_bot, part;
-    int reduce;
+    int reduce, stall_test = 0, cx0 = 0, cx1 = 0;
     uint32_t flags = ctx->flags;
 
     area2 = (int64_t)(b->X16 - a->X16) * (c->Y16 - a->Y16) - (int64_t)(c->X16 - a->X16) * (b->Y16 - a->Y16);
@@ -610,6 +661,11 @@ SETUP_TRI(const mga_svtx *a, const mga_svtx *b, const mga_svtx *c, const mga_tri
     if (flags & MGA_S_VOODOO_EDGES)
         d_long = voodoo_slope(v[0]->X16, v[0]->Y16, v[2]->X16, v[2]->Y16);   /* both trapezoids' long edge */
 
+    if (mga.textrap_empty_stall && (ctx->dwgctl & 0xF) == DWG_OPCOD_TEXTURE_TRAP) {
+        int cy0, cy1;
+        engine_get_clip(&cx0, &cy0, &cx1, &cy1);
+        stall_test = 1;
+    }
     for (part = 0; part < 2; part++) {
         int32_t ys = part ? y_mid : y_top, ye = part ? y_bot : y_mid;
         const mga_svtx *sa = part ? v[1] : v[0], *sb = part ? v[2] : v[1];
@@ -652,6 +708,10 @@ SETUP_TRI(const mga_svtx *a, const mga_svtx *b, const mga_svtx *c, const mga_tri
             }
         }
         if (mid_right) { el = lng; er = sht; } else { el = sht; er = lng; }
+        if (stall_test && !trap_covers(&el, &er, ye - ys, cx0, cx1)) {
+            setup_stats.culled_empty++;     /* (mga.textrap_empty_stall) */
+            continue;
+        }
         setup_stats.traps++;
         ex = (el.x + 0.5) - g.x0;          /* exact: multiples of 1/16 */
         ey = (ys + 0.5) - g.y0;
