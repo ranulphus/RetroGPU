@@ -624,6 +624,14 @@ static void warp_wrap(mga_wvtx *w, int map1, const mga_texstate *t)
 static int tri_log;                     /* DGL_TRILOG=1: each triangle to the log before its setup (diagnosis) */
 static int tri_sync;                    /* DGL_TRISYNC=1: an engine sync after each, naming one that stalls (diagnosis) */
 static unsigned long tri_n;             /* (their count, for both) */
+#ifdef MGA_TRACE_MMIO
+static unsigned long state_dump_at;     /* DGL_STATEDUMP=N (REGCRC=1 builds): every register's last value after the Nth */
+
+static void state_line(const char *line)
+{
+    DGL_ERR("%s", line);
+}
+#endif
 
 static void draw_projected(const proj *p0, const proj *p1, const proj *p2, const dgl_cvtx *flat)
 {
@@ -683,6 +691,12 @@ static void draw_projected(const proj *p0, const proj *p1, const proj *p2, const
         regs_forget();
         validate_state();
     }
+#ifdef MGA_TRACE_MMIO
+    if (state_dump_at && tri_n == state_dump_at) {
+        DGL_ERR("DGL-STATE after triangle %lu", tri_n);
+        mga_trace_state_dump(state_line);
+    }
+#endif
 }
 
 /* ---- Fog subdivision -------------------------------------------------------
@@ -1564,6 +1578,10 @@ void dgl_emit_install(void)
     warp_use_dma = !(e && *e == '0');          /* DGL_WARPDMA=0: vertices by the CPU, no DMA stream */
     e = getenv("DGL_TRILOG");
     tri_log = e && *e == '1';
+#ifdef MGA_TRACE_MMIO
+    e = getenv("DGL_STATEDUMP");
+    state_dump_at = e ? strtoul(e, NULL, 10) : 0;
+#endif
     e = getenv("DGL_TRISYNC");
     tri_sync = e && *e == '1';
     e = getenv("DGL_NOFOG");

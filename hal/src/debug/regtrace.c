@@ -12,6 +12,16 @@
 static struct { uint32_t seq, off, v; const char *file; int line; } ring[TRACE_LEN];
 static uint32_t trace_seq;
 
+/* The last value written to each register of the 16 KB MMIO window, and
+ * whether one was: mga_trace_state_dump prints them (the engine's state as
+ * the host set it, to compare two programs' at the same draw). Only trace
+ * builds record writes, so only they keep the 20 KB table. */
+#if defined(MG_DEBUG) || defined(MGA_TRACE_MMIO)
+#  define STATE_REGS (0x4000 / 4)
+static uint32_t state_v[STATE_REGS];
+static uint8_t state_set[STATE_REGS];
+#endif
+
 /* A running CRC-32 of everything recorded (DOS-GL's REGCRC=1 build prints
  * it at each swap: B1's check that moving code changed no register write,
  * gl/docs/b1.md). The DMA lists' own pointers are left out: they hold
@@ -52,6 +62,12 @@ void mga_trace_record_at(uint32_t off, uint32_t v, const char *file, int line)
         crc_word(v);
         crc_n++;
     }
+#ifdef STATE_REGS
+    if (off < 0x4000u) {
+        state_v[off >> 2] = v;
+        state_set[off >> 2] = 1;
+    }
+#endif
     ring[i].seq = ++trace_seq;
     ring[i].off = off;
     ring[i].v = v;
@@ -116,3 +132,21 @@ void mga_trace_dump(void (*out)(const char *line), int max)
         out(buf);
     }
 }
+
+#ifdef STATE_REGS
+void mga_trace_state_dump(void (*out)(const char *line))
+{
+    char buf[40], *p;
+    uint32_t i;
+    for (i = 0; i < STATE_REGS; i++) {
+        if (!state_set[i])
+            continue;
+        p = put_str(buf, "MGA-REG ");
+        p = put_hex(p, i * 4, 4);
+        *p++ = '=';
+        p = put_hex(p, state_v[i], 8);
+        *p = 0;
+        out(buf);
+    }
+}
+#endif

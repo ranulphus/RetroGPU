@@ -15,6 +15,7 @@ extern volatile uint8_t *mga_mmio;
 void     mga_trace_record(uint32_t off, uint32_t v);
 void     mga_trace_record_at(uint32_t off, uint32_t v, const char *file, int line);
 void     mga_trace_dump(void (*out)(const char *line), int max);   /* oldest first; max 0 = all */
+void     mga_trace_state_dump(void (*out)(const char *line));       /* each register's last value written (trace builds) */
 uint32_t mga_trace_count(void);
 void     mga_trace_clear(void);
 /* ... and a running CRC of the writes recorded, and of data the engine is

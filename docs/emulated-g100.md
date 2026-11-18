@@ -93,3 +93,16 @@ So the engine stalls on a textured trapezoid that draws no pixel, with spans lef
     buffer when they use one), without fog, syncing after each (`each`): a stall names its triangle.
   - `DGL_TRISYNC=1` makes DOS-GL sync after each triangle and log one that stalls (`DGL-STALL`); the device's close
     logs `DGL-ENGINE` when the engine timed out at all.
+  - What the two tests do that the card has not yet run cleanly, from the engine's state at their first drawn
+    triangle on the emulated G100 (a `REGCRC=1` build with `DGL_STATEDUMP=N`: every register's last value), against
+    t04 to t07, which ran on the card:
+
+    | | t10, fog off | t13 |
+    |---|---|---|
+    | A textured trapezoid with ALPHACTRL's alpha from the iterated colour (`01000054`; t06 and t07 `02000054`; the G100's `engine_init` writes no ALPHACTRL, so FOGPROBE drew with whatever was there) | yes | no |
+    | A textured trapezoid with depth (DWGCTL `000c0536`; t04's depth was untextured) | no | yes |
+    | Fog with a 64x64 texture (FOGPROBE's fogged shapes used 8x8) | no | yes |
+    | The alpha stipple (its translucent quad) | no | yes |
+
+    Point sampling (TEXFILTER 0) is not among them: t06 ran with it. `FOGPROBE ... alphactrl HEX` sets ALPHACTRL for
+    the replay.

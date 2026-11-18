@@ -29,8 +29,9 @@
  *
  * Options after the step (and tri's six numbers): `notex` draws untextured (TRAP); `affine` maps the texture
  * affinely; `nocull` sends textured trapezoids that draw nothing, as the HAL did before mga.textrap_empty_stall
- * (on a real G100 a stall; on 86Box's, the textrap-empty hazard of local patch 0132). The screen's columns are the
- * engine's clip (0 to 640), which the setup reads.
+ * (on a real G100 a stall; on 86Box's, the textrap-empty hazard of local patch 0132); `alphactrl HEX` writes
+ * ALPHACTRL (the G100's engine_init leaves it as it was: DOS-GL's t10 drew with 01000054, iterated alpha, t06 and
+ * t07 with 02000054). The screen's columns are the engine's clip (0 to 640), which the setup reads.
  *
  * HX-STAT fogprobe lines: STATUS before and after, the engine's sync result, pixels inside and outside. */
 #include "hx.h"
@@ -87,7 +88,8 @@ int main(int argc, char **argv)
     mga_svtx v[3];
     mga_tri_ctx ctx;
     int pitch = 0, i, ok, sync, fog = 0, fogen = 0, tex = 0, persp = 0, t10 = 0, t10dx = 0, t10first = 0, t10n = 5;
-    int custom = 0, opt = 2, notex = 0, affine = 0, replay = 0, nrt = 0, every = 0, stalls = 0, rfog = 0;
+    int custom = 0, opt = 2, notex = 0, affine = 0, replay = 0, nrt = 0, every = 0, stalls = 0, rfog = 0, set_ac = 0;
+    uint32_t alphactrl = 0;
     rtri *rt = NULL;
     float cv[6] = { 0, 0, 0, 0, 0, 0 };
     uint16_t inside, outside;
@@ -136,6 +138,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "each")) every = 1;
         else if (!strcmp(argv[i], "every") && i + 1 < argc) every = atoi(argv[++i]);
         else if (!strcmp(argv[i], "fog")) rfog = 1;
+        else if (!strcmp(argv[i], "alphactrl") && i + 1 < argc) set_ac = 1, alphactrl = (uint32_t)strtoul(argv[++i], NULL, 16);
         else if (!strcmp(argv[i], "affine")) affine = 1;
         else {
             hx_test("args", 0, "unknown option %s", argv[i]);
@@ -173,6 +176,11 @@ int main(int argc, char **argv)
         ts.hwfmt = TEXCTL_TW16;
         ts.modulate = 1;
         tex_emit(&ts);
+    }
+    if (set_ac) {
+        fifo_reserve(1);
+        MGA_WR32(MGAREG_ALPHACTRL, alphactrl);
+        hx_log("HX-STAT fogprobe alphactrl=%08lx", (unsigned long)alphactrl);
     }
     if (strcmp(step, "base")) {
         fifo_reserve(1);
