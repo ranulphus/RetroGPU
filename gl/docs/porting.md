@@ -45,6 +45,11 @@ dglShutdown();
   4 MB), and DOS-GL takes GLOS's GPU lock before each piece of work with the
   engine. `DGL_FULLSCREEN=1` takes the screen instead (a GLOS session);
   `dglGetGlosWindow()` gives the window's GLOS id; `DGL_TITLE` its title.
+  `dglGlosHints(flags)` (`DGL_API_VERSION` 0x0106), before `dglInit`, sets how
+  that window starts: `DGL_GLOS_HIDDEN` leaves it unshown (the program shows
+  it itself, full-screen for a screensaver, or it is embedded, as in the
+  Control Panel's preview); `DGL_GLOS_BARE` gives it no title bar or border.
+  `DGL_GLOS_HINTS=n` sets the same bits from the environment.
 - `dglSetWaitHook(fn, arg)` (0.3, `DGL_API_VERSION` 0x0103) runs `fn(arg)`
   about once a millisecond while `dglSwapBuffers` waits for the drawing
   engine to finish the frame, and once before it waits for the retrace

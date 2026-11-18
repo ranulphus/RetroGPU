@@ -197,7 +197,7 @@ int rg_mga_glos_open(const rg_open *o, rg_opened *out)
     w.kind = GLOS_WK_NORMAL;
     w.w = o->width;
     w.h = o->height;
-    w.flags = GLOS_WF_FIXED | GLOS_WF_ANYWHERE;
+    w.flags = GLOS_WF_FIXED | GLOS_WF_ANYWHERE | ((o->glos_flags & RG_GLOS_BARE) ? GLOS_WF_BARE : 0);
     for (i = 0; i < sizeof w.title - 1 && name[i] && name[i] != '.'; i++)
         w.title[i] = name[i];
     if ((r = rg_glos_call(GLOS_WIN_CREATE, &w)) != 0) {
@@ -254,7 +254,8 @@ int rg_mga_glos_open(const rg_open *o, rg_opened *out)
     rg_mga.active = 1;
     rg_mga_clear_all();
     rg_mga_glos_show(rg_mga.front_off);
-    visible();
+    if (!(o->glos_flags & RG_GLOS_HIDDEN))
+        visible();                              /* (hidden: the program shows it, or it is embedded) */
     memset(out, 0, sizeof *out);
     out->width = rg_mga.width;
     out->height = rg_mga.height;

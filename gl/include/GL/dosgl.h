@@ -59,8 +59,8 @@ typedef struct {
 
 /* The API's version: 0x0103 is 1.3 (DOS-GL 0.3), which added dglSetWaitHook;
    0x0104 the window on a GLOS desktop and dglGetGlosWindow; 0x0105
-   dglSetPresentLag. */
-#define DGL_API_VERSION 0x0105
+   dglSetPresentLag; 0x0106 dglGlosHints. */
+#define DGL_API_VERSION 0x0106
 
 /* The library's version string, e.g. "DOS-GL 0.3 (<build>)". */
 const char *dglVersion(void);
@@ -104,6 +104,17 @@ void *dglGetProcAddress(const char *name);
    program becomes a GLOS app. The window's GLOS id (for GLOS's own calls: its
    title, its events), or 0 when the context is full-screen or there is none. */
 unsigned int dglGetGlosWindow(void);
+
+/* v1.6, before dglInit: how the GLOS window of v1.4 starts. DGL_GLOS_HIDDEN:
+   not shown: the program shows it itself (GLOS_WIN_SHOW on
+   dglGetGlosWindow(), full-screen for a screensaver) or leaves it to be
+   embedded (a preview), so it never appears framed on the desktop first.
+   DGL_GLOS_BARE: no title bar or border (GLOS_WF_BARE). Other bits are
+   ignored; full-screen contexts ignore both. DGL_GLOS_HINTS=n in the
+   environment sets them too (n the bits, for tests). */
+#define DGL_GLOS_HIDDEN 0x1u
+#define DGL_GLOS_BARE   0x2u
+void dglGlosHints(unsigned int flags);
 
 /* Write the buffer being drawn (the next frame, when double-buffered) to
    path as a binary PPM; 0 on success. For tests and bug reports. (v1.1) */

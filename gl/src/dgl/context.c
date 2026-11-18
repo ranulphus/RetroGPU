@@ -39,6 +39,7 @@ static void prof_report(uint32_t tris);
 static unsigned long present0_us;       /* stats.present_us at the last DGL-STAT */
 static uint32_t lag0_us, lag0_n;        /* the device's present_lag figures at the last DGL-STAT */
 static int present_lag;                 /* dglSetPresentLag */
+static unsigned glos_hints;             /* dglGlosHints */
 
 /* The first GL errors, with the address inside the GL function that raised
  * them (look it up in the program's link map). */
@@ -153,6 +154,8 @@ static void open_args(rg_open *o, const DGLConfig *c)
      * card's memory on a bigger one). */
     e = getenv("DGL_TEXHEAP_KB");
     o->heap_kb = e && *e ? (uint32_t)strtoul(e, NULL, 10) : 0;
+    e = getenv("DGL_GLOS_HINTS");                       /* (or dglGlosHints before dglInit) */
+    o->glos_flags = (glos_hints | (e && *e ? (unsigned)strtoul(e, NULL, 0) : 0u)) & (RG_GLOS_HIDDEN | RG_GLOS_BARE);
     o->wait = dev_wait;
     o->yield = dev_yield;
     o->on_sync = dev_synced;
@@ -432,6 +435,7 @@ static void prof_report(uint32_t tris)
 /* v1.5: the scaled modes' swap without waiting for the card (rg_open's
  * present_lag; gl/docs/fe.md), for the next dglInit. */
 void dglSetPresentLag(int on) { present_lag = on != 0; }
+void dglGlosHints(unsigned int flags) { glos_hints = flags & (DGL_GLOS_HIDDEN | DGL_GLOS_BARE); }
 
 void dglSetWaitHook(void (*fn)(void *arg), void *arg)
 {
