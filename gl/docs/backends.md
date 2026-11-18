@@ -91,6 +91,14 @@ include the WARP, AGP, dual texture, the HAL's 2D engine and GLOS's GPU lock. Th
   - **Full screen:** VBE 2.0 linear framebuffers, or banked ones.
   - **A GLOS window:** the window's pixels (GLOS API 2.0's call for them), so windowed DOS-GL needs no Matrox card.
   - `dglInit` no longer refuses a PC without a Matrox card: it takes the software renderer.
+  - **Done first, the GLOS window (2026-11-18, the owner: "B3 first", for GLOS's screensavers):** the memory device
+    (`hal/src/rg/mem.c`) is the window device of any GLOS desktop the Matrox device can't draw in (another card,
+    or 8 or 32 bits a pixel). The program becomes a GLOS app with a window of the context's size. The software
+    renderer draws into system memory, and each swap copies the front buffer into the window with
+    `GLOS_DRAW_BLIT`, which converts it to the screen's format. 8-bit contexts give their RGB 3-3-2 palette. The
+    Matrox window keeps its place on a Matrox card's 16-bit desktop. `DGL_DEVICE=mem` asks for the software
+    window there too, for tests. A program GLOS doesn't take as an app (a session's) still goes full-screen on the
+    hardware. `dglGlosHints` (API 1.6) applies to both windows. Full-screen VBE comes next.
 - **B4, tests, in three tiers** (the owner's choice, 2026-11-06: 86Box's speed must not make suites hours long):
   - **Tier 1, the host, on every change:**
     - DOS-GL's GL layer and the software renderer built for Linux (32-bit, its MMX loops included), drawing into

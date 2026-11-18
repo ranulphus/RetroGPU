@@ -4,6 +4,7 @@
 #include "rg/device.h"
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 
@@ -76,10 +77,19 @@ const rg_device *rg_choose_from(const rg_device *const *list, int n, const char 
 
 const rg_device *rg_choose(const char *want) { return rg_choose_from(devices, NDEV, want); }
 
-/* The device GLOS can give a window to (its window_ok), or NULL. */
+/* The device GLOS can give a window to (its window_ok), or NULL: the one
+   DGL_DEVICE names if it can (DGL_DEVICE=mem: the software renderer's window
+   on a desktop the Matrox device could draw in too), else the first that can
+   (the Matrox device on a Matrox card's 16-bit desktop; the memory device,
+   the software renderer, on any other: gl/docs/backends.md B3). */
 const rg_device *rg_window_device(void)
 {
+    const char *want = getenv("DGL_DEVICE");
     int i;
+    if (want && *want)
+        for (i = 0; i < NDEV; i++)
+            if (!strcmp(devices[i]->name, want) && devices[i]->window_ok && devices[i]->window_ok())
+                return devices[i];
     for (i = 0; i < NDEV; i++)
         if (devices[i]->window_ok && devices[i]->window_ok())
             return devices[i];

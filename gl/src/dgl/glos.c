@@ -33,4 +33,4 @@ int dgl_glos_modes(DGLMode *out, int max)
     return n;
 }
 
-unsigned int dglGetGlosWindow(void) { return rg_lock.on ? dgl_ctx.window : 0; }
+unsigned int dglGetGlosWindow(void) { return dgl_ctx.window; }   /* (0 full-screen: no window was opened) */

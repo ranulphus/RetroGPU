@@ -50,6 +50,10 @@ dglShutdown();
   it itself, full-screen for a screensaver, or it is embedded, as in the
   Control Panel's preview); `DGL_GLOS_BARE` gives it no title bar or border.
   `DGL_GLOS_HINTS=n` sets the same bits from the environment.
+  On a desktop the Matrox engine can't draw a window in (another card, or 8
+  or 32 bits a pixel), the window is the software renderer's: each swap
+  copies the frame into it (backends.md, B3). `DGL_DEVICE=mem` asks for that
+  window on a Matrox desktop too.
 - `dglSetWaitHook(fn, arg)` (0.3, `DGL_API_VERSION` 0x0103) runs `fn(arg)`
   about once a millisecond while `dglSwapBuffers` waits for the drawing
   engine to finish the frame, and once before it waits for the retrace
