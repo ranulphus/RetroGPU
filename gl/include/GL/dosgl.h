@@ -59,8 +59,9 @@ typedef struct {
 
 /* The API's version: 0x0103 is 1.3 (DOS-GL 0.3), which added dglSetWaitHook;
    0x0104 the window on a GLOS desktop and dglGetGlosWindow; 0x0105
-   dglSetPresentLag; 0x0106 dglGlosHints. */
-#define DGL_API_VERSION 0x0106
+   dglSetPresentLag; 0x0106 dglGlosHints; 0x0107 a GLOS window on any desktop
+   (the software renderer's where the Matrox engine can't draw one: B3). */
+#define DGL_API_VERSION 0x0107
 
 /* The library's version string, e.g. "DOS-GL 0.3 (<build>)". */
 const char *dglVersion(void);
@@ -101,7 +102,8 @@ void *dglGetProcAddress(const char *name);
 /* v1.4: under GLOS, on a desktop that can show GL in a window (a Matrox card
    at 16 bits a pixel; DGL_FULLSCREEN=1 asks for the screen instead), dglInit
    opens a window of the context's size rather than setting a mode, and the
-   program becomes a GLOS app. The window's GLOS id (for GLOS's own calls: its
+   program becomes a GLOS app. v1.7: on any GLOS desktop: where the Matrox
+   engine can't draw the window, the software renderer draws it. The window's GLOS id (for GLOS's own calls: its
    title, its events), or 0 when the context is full-screen or there is none. */
 unsigned int dglGetGlosWindow(void);
 
