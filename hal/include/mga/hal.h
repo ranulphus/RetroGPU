@@ -38,8 +38,8 @@ typedef struct {
                has_specular:1, has_decalblend:1, fog_textrap_only:1,
                alphasel_tex_always:1, blk_clear_ok:1, g400_clip_quirk:1,
                has_dual_tex:1,  /* G400: two texture maps, TDUALSTAGE combiner */
-               texel_centre:1;  /* bilinear filtering samples at texel centres itself (G200, G400: bench-g400);
-                                   otherwise from texel corners, and tex_adjust_coords shifts half a texel */
+               texel_centre:1;  /* bilinear filtering samples at texel centres itself (G100, G200, G400: their
+                                   silicon); otherwise from texel corners, and tex_adjust_coords shifts half a texel */
 } mga_chip;
 
 extern mga_chip mga;                 /* the device in use */

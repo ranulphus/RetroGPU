@@ -1,0 +1,22 @@
+diff --git a/src/video/vid_mga.c b/src/video/vid_mga.c
+index 1f5b491..f982702 100644
+--- a/src/video/vid_mga.c
++++ b/src/video/vid_mga.c
+@@ -6404,12 +6404,12 @@ texture_read_level(mystique_t *mystique, int *tex_r, int *tex_g, int *tex_b, int
+         persp_correct(mystique, &s, &t, &q, &s_frac, &t_frac);
+     }
+ 
+-    /* MGA-Glide local patch: the G200, G400 and G450 filter bilinearly
++    /* MGA-Glide local patch: the G100, G200, G400 and G450 filter bilinearly
+      * around texel centres, texel i at full weight at i + 1/2 (bench-g400,
+-     * 2026-10-26, and its PC with a G200, 2026-11-03: DOS-GL's frames match
+-     * Mesa's only so). The G100 model, unchecked, filters from texel corners
+-     * (the runtimes shift its coordinates). Point sampling is the same. */
+-    if (mystique->type >= MGA_G200 && (mystique->dwgreg.texfilter & 3) != 0 && (mystique->dwgreg.texfilter & 3) != 3) {
++     * 2026-10-26, and its PC with a G200, 2026-11-03, and with a G100,
++     * 2026-11-18 (local patch 0131): DOS-GL's frames match Mesa's only so).
++     * Point sampling is the same. */
++    if (mystique->type >= MGA_G100 && (mystique->dwgreg.texfilter & 3) != 0 && (mystique->dwgreg.texfilter & 3) != 3) {
+         const double sc = s + s_frac - 0.5, tc = t + t_frac - 0.5;
+         s      = (int) floor(sc);
+         t      = (int) floor(tc);

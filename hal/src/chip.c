@@ -12,6 +12,10 @@ void mga_chip_caps(mga_chip *c)
         c->ar_bits = 18;
         c->has_ydstorg = 1; c->zorg_ydst_relative = 1;
         c->fog_textrap_only = 1; c->alphasel_tex_always = 1;
+        /* Bilinear filtering at texel centres, as the G200's and G400's: a
+         * real G100 drew DOS-GL's t07 half a texel off with the shift for
+         * texel corners (bench-g400's PC, 2026-11-18; 86Box patch 0131). */
+        c->texel_centre = 1;
         break;
     case MGA_FAMILY_G200:
     case MGA_FAMILY_G200E:
