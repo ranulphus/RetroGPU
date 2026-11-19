@@ -1,0 +1,21 @@
+diff --git a/src/video/vid_mga.c b/src/video/vid_mga.c
+index d234ca5..cd4cc06 100644
+--- a/src/video/vid_mga.c
++++ b/src/video/vid_mga.c
+@@ -6945,8 +6945,15 @@ blit_texture_trap(mystique_t *mystique)
+                             if (mystique->type >= MGA_G200 && !(mystique->dwgreg.alphactrl & ALPHACTRL_ASTIPPLE)) {
+                                 if (!g200_blend(mystique, x_l, &tex_r, &tex_g, &tex_b, final_a, dest32))
+                                     goto skip_pixel;
+-                            } else if (final_a != 255)
++                            } else if (final_a != 255 && (mystique->type != MGA_G100 || (mystique->dwgreg.alphactrl & ALPHACTRL_ASTIPPLE)))
+                             {
++                                /* MGA-Glide local patch 0134: a real G100 stipples
++                                 * by alpha only when ALPHACTRL asks (astipple);
++                                 * otherwise its texels are drawn whatever their
++                                 * alpha (bench-g400, 2026-11-19: DOS-GL's t19,
++                                 * a 1555 texture drawn without astipple, its
++                                 * alpha-0 texels all drawn). The Mystique,
++                                 * unmeasured, stays as it was. */
+                                 {
+                                     double threshold = bayer_mat[mystique->dwgreg.selline & 3][x_l & 3];
+                                     double final_a_frac = (final_a) / 255.;

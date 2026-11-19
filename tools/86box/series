@@ -46,3 +46,4 @@ local/0130-mga-g100-bus-past-memory.patch
 local/0131-mga-g100-texel-centres.patch
 local/0132-mga-g100-empty-textrap-hazard.patch
 local/0133-mga-g100-empty-row-left-hazard.patch
+local/0134-mga-g100-stipple-only-when-asked.patch

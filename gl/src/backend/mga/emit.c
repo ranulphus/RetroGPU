@@ -229,6 +229,21 @@ static float guard_vp[4] = { -1, -1, -1, -1 };     /* the viewport the guard ban
  * a stall with fog on, and only reset its engine without it. */
 static int no_fog;
 
+/* Whether GL's alpha test func/ref passes alpha a. */
+static int alpha_passes(GLenum func, float ref, float a)
+{
+    switch (func) {
+    case GL_LESS:     return a < ref;
+    case GL_LEQUAL:   return a <= ref;
+    case GL_GREATER:  return a > ref;
+    case GL_GEQUAL:   return a >= ref;
+    case GL_EQUAL:    return a == ref;
+    case GL_NOTEQUAL: return a != ref;
+    case GL_NEVER:    return 0;
+    default:          return 1;
+    }
+}
+
 static void validate_state(void)
 {
     int depth, unit0 = 0;
@@ -338,6 +353,23 @@ static void validate_state(void)
                 if (env == GL_DECAL && dgl_env_needs_combiner(env, tex) && mga.has_decalblend)
                     tstate.texctl2 |= TEXCTL2_DECALBLEND;   /* G200: blend by texel alpha */
                 asel = tstate.modulate ? ALPHASEL_MODULATED : ALPHASEL_TEXTURE;
+            }
+            if (!mga.has_alpha_test && dgl_gl.alpha_test && dgl_gl.alpha_func != GL_ALWAYS &&
+                dgl_gl.alpha_func != GL_NEVER) {
+                /* The G100 has no alpha test. For a texture whose alpha is
+                 * only 0 or 1 (1555) and a test that passes alpha 1 and fails
+                 * 0 (the usual cut-out), the texture unit's alpha key does it
+                 * exactly: alpha-0 texels transparent. The texel's alpha
+                 * alone decides (a modulating vertex alpha is not tested). */
+                static int warned;
+                int p1 = alpha_passes(dgl_gl.alpha_func, dgl_gl.alpha_ref, 1.0f),
+                    p0 = alpha_passes(dgl_gl.alpha_func, dgl_gl.alpha_ref, 0.0f);
+                int all_pass = p1 && (p0 || tstate.hwfmt == DGL_TW16);   /* (an opaque texture: alpha 1 only) */
+                if (tstate.hwfmt == DGL_TW15 && p1 && !p0)
+                    tstate.key_alpha0 = 1;
+                else if (!all_pass && !warned++)
+                    DGL_WARN("DGL-WARN no alpha test on this card: only 1-bit alpha textures are cut out (func %04x)",
+                             (unsigned)dgl_gl.alpha_func);
             }
         } else if (dgl_gl.fog && dgl_white_texture(&white) == 0) {
             /* The engine fogs only textured trapezoids (in 86Box, and on the

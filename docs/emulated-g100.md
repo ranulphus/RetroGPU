@@ -87,15 +87,33 @@ DOS-GL's conformance t10 and t13 (both with fog) hung the PC with the real G100.
   on. `make loopa-selftest-ext CHECKS=g100stall` draws t10's fifth and eighth triangles with the HAL's test (no hazard;
   the eighth's 52 pixels drawn) and without it (`nocull`: the hazard).
 
+## Alpha: stippled only when asked, and the alpha test by the texture key (local patch 0134)
+
+DOS-GL's t19 (paletted textures) passed on the emulated G100 and failed on the real one (2.9% of its pixels): its
+texture B, a 1555 texture whose transparent entries an alpha test (`GL_GREATER 0.5`) cuts out, drew those texels on
+the card, and the background in 86Box and Mesa.
+- **The real G100** has no alpha test (`mga.has_alpha_test` is clear), and DOS-GL drew B without ALPHACTRL's
+  astipple (it sets it on the G100 only for GL blending), so the card drew every texel.
+- **86Box's G100** stippled every texel whose alpha is below 255, astipple or not (its G200 path asks for astipple).
+  Local patch 0134: the G100 stipples only with astipple, as the card does; the emulated t19 then failed by exactly
+  the card's 2.9%.
+- **DOS-GL:** on a card without an alpha test, a 1555 texture (alpha 0 or 1) with a test that passes alpha 1 and fails
+  alpha 0 is cut out by the texture unit's alpha key (`mga_texstate.key_alpha0`: TEXCTL's strans and tamask): exact for
+  such a texture. Other cases (graded alpha, untextured, a test failing alpha 1) log `DGL-WARN no alpha test` once.
+  On the real G100 t19 now passes (0.0000), and t13 fails by less (0.24 to 0.18).
+
+On the real G100 and the emulated one, DOS-GL's conformance now passes and fails the same tests: 24 pass; the 12 that
+fail (t08 t09 t13 t17 t20 t21 t22 t24 t25 t26 t28 t30) need what the G100 lacks, GL blending (PRD D13), an alpha test
+on vertex alpha, or two textures, and fail by about the same share of pixels in both (t17: 0.34 emulated, 0.41 real).
+
 ## Still open
 
 - **The BIOS's `TotalMemory`:** the real BIOS reports 4 MB. The emulated BIOS reports 8 MB for a 4 MB card, with or
   without 0130: it probably reads the size from a register 86Box sets for 8 MB.
 - **2D on silicon:** TWODTEST passes on the real G100 at 16 and 8 bits (every primitive byte for byte against its
   software copy). Its surfaces lie below 1.2 MB, so they say nothing about the memory size.
-- **DOS-GL's conformance:** 12 of 35 tests fail on the emulated G100 (t08 t09 t13 t17 t20 t21 t22 t24 t25 t26 t28
-  t30), the same before and after these changes. On the real card t01 to t09 run (t07 passes now; t08 and t09 fail
-  as in 86Box).
+- **DOS-GL's conformance:** the same 12 tests fail on the real and the emulated G100 (above). Their shares differ
+  most on t17 (internal formats, blended); the one-step differences elsewhere are the dither.
 - **t10 and t13 on the real card with `trap_rows`:** to be run (2026-11-19). Until then, the tools used:
   - `FOGPROBE replay` draws DOS-GL's own triangles from a `DGL_TRILOG=1` log (t10's 816, t13's 22, with a depth
     buffer when they use one), without fog, syncing after each (`each`): a stall names its triangle.
