@@ -18,11 +18,14 @@
 #include "../mga/vram.h"
 #include "rg/tnt2_dev.h"
 #include "tnt2/tnt2.h"
+#include "mga/prof.h"
+#include "mga/fp.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define GUARD 2.0f                      /* NDC units either side: the clipper's planes beyond the viewport */
+#define GUARD 4.0f                      /* NDC units either side: the clipper's planes beyond the viewport (x and y
+                                           stay within +-2048 at 640 wide) */
 
 /* The chip's words (docs/tnt2.md). */
 #define F_DMA_A      0x00000001u
@@ -97,29 +100,15 @@ static uint32_t chip_format(const dgl_level *l, int *cpp, int *has_alpha)
     }
 }
 
-static void pack(uint32_t fmt, const unsigned char *rgba, unsigned char *out, int n)
-{
-    int i;
-    for (i = 0; i < n; i++, rgba += 4) {
-        unsigned r = rgba[0], g = rgba[1], b = rgba[2], a = rgba[3];
-        if (fmt == F_A8R8G8B8) {
-            uint32_t v = a << 24 | r << 16 | g << 8 | b;
-            memcpy(out + 4 * i, &v, 4);
-        } else {
-            uint16_t v = fmt == F_R5G6B5 ? (uint16_t)((r >> 3) << 11 | (g >> 2) << 5 | (b >> 3))
-                       : fmt == F_A1R5G5B5 ? (uint16_t)((a >= 128) << 15 | (r >> 3) << 10 | (g >> 3) << 5 | (b >> 3))
-                       : (uint16_t)((a >> 4) << 12 | (r >> 4) << 8 | (g >> 4) << 4 | (b >> 4));
-            memcpy(out + 2 * i, &v, 2);
-        }
-    }
-}
-
 static void tex_drop(dgl_texture *t)
 {
     ttex *x = (ttex *)t->be;
     if (x) {
-        tnt2_sync(1000000);             /* (drawing queued may still read it) */
-        dgl_vram_free(x->block);
+        if (dgl_vram_retire(x->block) != 0) {   /* (drawing queued may still read it: free after the next sync) */
+            tnt2_sync(1000000);
+            dgl_vram_sync_done();
+            dgl_vram_free(x->block);
+        }
         free(x);
         t->be = NULL;
     }
@@ -131,6 +120,11 @@ static int room(uint32_t size, uint32_t *block, const dgl_texture *keep)
     while (dgl_vram_alloc(size, block) != 0) {
         dgl_texture *old = NULL, *u;
         int i, n = dgl_texture_count();
+        if (dgl_vram_retired()) {               /* (blocks waiting for a sync first: then they are free) */
+            tnt2_sync(1000000);
+            dgl_vram_sync_done();
+            continue;
+        }
         for (i = 0; i < n; i++)
             if ((u = dgl_texture_nth(i)) && u->be && u != keep &&
                 (!old || ((ttex *)u->be)->stamp < ((ttex *)old->be)->stamp))
@@ -146,11 +140,9 @@ static int room(uint32_t size, uint32_t *block, const dgl_texture *keep)
 /* The texture's copy, made or made again when its levels changed. NULL: draw untextured. */
 static ttex *prepare(dgl_texture *t)
 {
+    PROF_SCOPE(PROF_D_TEX);
     ttex *x = (ttex *)t->be;
     const dgl_level *l0 = &t->level[0];
-    unsigned char *buf;
-    const void *lv[DGL_MAX_LEVELS];
-    unsigned char *lvbuf[DGL_MAX_LEVELS];
     uint32_t fmt, size = 0;
     int cpp, alpha, n, i, lw, lh;
     const dgl_palette *pal = l0->idx ? dgl_palette_for(t) : NULL;
@@ -181,44 +173,57 @@ static ttex *prepare(dgl_texture *t)
     }
     for (i = 0; i < n; i++)
         size += (uint32_t)(t->level[i].w * t->level[i].h * cpp);
-    tex_drop(t);
-    x = (ttex *)calloc(1, sizeof *x);
-    if (!x || room(size + 128u, &x->block, t) != 0) {
-        free(x);
-        warn_once(1, "out of texture memory: a texture drawn untextured");
-        return NULL;
+    {
+        /* Made again (its levels or palette changed: GLQuake's lightmaps every frame): into a new block, the old
+         * one retired until the next sync, so the chip need not drain first. */
+        ttex *old = (ttex *)t->be;
+        uint32_t oldblock = old ? old->block : 0;
+        t->be = NULL;
+        free(old);
+        x = (ttex *)calloc(1, sizeof *x);
+        if (!x || room(size + 128u, &x->block, t) != 0) {
+            free(x);
+            if (old) {
+                tnt2_sync(1000000);         /* (queued drawing may still read it) */
+                dgl_vram_free(oldblock);
+            }
+            warn_once(1, "out of texture memory: a texture drawn untextured");
+            return NULL;
+        }
+        if (old && dgl_vram_retire(oldblock) != 0) {
+            tnt2_sync(1000000);
+            dgl_vram_sync_done();
+            dgl_vram_free(oldblock);
+        }
     }
     x->off = (x->block + 127u) & ~127u;
-    buf = (unsigned char *)malloc(size);
-    if (!buf) {
-        dgl_vram_free(x->block);
-        free(x);
-        return NULL;
-    }
     {
-        uint32_t o = 0;
+        /* GL's RGBA8 levels (colour indices through the palette first) converted and swizzled in one pass. */
+        const uint8_t *src[DGL_MAX_LEVELS];
+        int code = fmt == F_A8R8G8B8 ? TNT2_TEX_A8R8G8B8 : fmt == F_R5G6B5 ? TNT2_TEX_R5G6B5
+                 : fmt == F_A1R5G5B5 ? TNT2_TEX_A1R5G5B5 : TNT2_TEX_A4R4G4B4;
         for (i = 0; i < n; i++) {
             const dgl_level *l = &t->level[i];
-            const unsigned char *src = l->rgba;
             expanded[i] = NULL;
+            src[i] = l->rgba;
             if (pal) {
                 int k;
                 if (!(expanded[i] = (unsigned char *)malloc((size_t)l->w * l->h * 4)))
-                    break;
-                for (k = 0; k < l->w * l->h; k++)
-                    memcpy(expanded[i] + 4 * k, dgl_palette_texel(pal, l->idx[k]), 4);
-                src = expanded[i];
+                    src[i] = NULL;
+                else {
+                    for (k = 0; k < l->w * l->h; k++)
+                        memcpy(expanded[i] + 4 * k, dgl_palette_texel(pal, l->idx[k]), 4);
+                    src[i] = expanded[i];
+                }
             }
-            lvbuf[i] = buf + o;
-            pack(fmt, src, lvbuf[i], l->w * l->h);
-            free(expanded[i]);
-            lv[i] = lvbuf[i];
-            o += (uint32_t)(l->w * l->h * cpp);
         }
+        for (i = 0; i < n && src[i]; i++)
+            ;
+        if (i == n)
+            tnt2_tex_load_rgba8(x->off, code, lw, lh, n, src);   /* (a free block: nothing queued reads it) */
+        for (i = 0; i < n; i++)
+            free(expanded[i]);
     }
-    tnt2_sync(1000000);                 /* (the block may have been a texture still drawn from) */
-    tnt2_tex_load(x->off, cpp, lw, lh, n, lv);
-    free(buf);
     x->format = F_DMA_A | F_ORIGIN | fmt | (uint32_t)lh << 20 | (uint32_t)lw << 16;
     x->levels = n;
     x->has_alpha = alpha;
@@ -256,6 +261,9 @@ static uint32_t bfactor(GLenum f)
 }
 
 static int fogging;                     /* the fog factor goes in the vertices' specular alpha */
+static int valid_ok;                    /* the words sent are GL's state now (until a dirty bit or a texture change) */
+static const dgl_texture *valid_tex;
+static float vx_s, vx_o, vy_s, vy_o, vz_s, vz_o;    /* the viewport's scale and offset, from the last validate */
 static int shift_s, shift_t;            /* a repeating texture: coordinates shifted by whole periods per triangle */
 
 static void cut(int *c, int x0, int y0, int x1, int y1)
@@ -284,9 +292,19 @@ static void scissor(int draw, int *c)
 static void validate(void)
 {
     dgl_texture *t = dgl_gl.texture_2d ? dgl_unit_texture(0) : NULL;
-    ttex *x = t ? prepare(t) : NULL;
+    ttex *x;
     uint32_t off, format, filter, blend, control, fogc;
     int c[4];
+    /* Nothing GL draws with changed since (GLQuake: a thousand begins a frame, most with the state as it was): the
+     * words sent still hold (the layer sends them again itself after 2D). */
+    if (valid_ok && t == valid_tex && !(t && (t->dirty || t->level[0].idx)) &&
+        !(dgl_gl.dirty & (DGL_DIRTY_RASTER | DGL_DIRTY_TARGET | DGL_DIRTY_TEXTURE | DGL_DIRTY_FOG | DGL_DIRTY_CLIP)))
+        return;
+    x = t ? prepare(t) : NULL;
+    vx_s = dgl_gl.viewport[2] * 0.5f, vx_o = dgl_gl.viewport[0] + dgl_gl.viewport[2] * 0.5f;
+    vy_s = -dgl_gl.viewport[3] * 0.5f, vy_o = dgl_ctx.height - (dgl_gl.viewport[1] + dgl_gl.viewport[3] * 0.5f);
+    vz_s = (float)((dgl_gl.depth_far - dgl_gl.depth_near) * 0.5);
+    vz_o = (float)(dgl_gl.depth_near + (dgl_gl.depth_far - dgl_gl.depth_near) * 0.5);
     tnt2_3d_target(rg_tnt2_color_off(dgl_ctx.draw_front), rg_tnt2.z_off, rg_tnt2.pitch_bytes, rg_tnt2.bpp,
                    rg_tnt2.width, rg_tnt2.height);
     scissor(1, c);
@@ -359,6 +377,9 @@ static void validate(void)
     fogc = 0xFF000000u | (uint32_t)(dgl_gl.fog_color[0] * 255.0f + 0.5f) << 16 |
            (uint32_t)(dgl_gl.fog_color[1] * 255.0f + 0.5f) << 8 | (uint32_t)(dgl_gl.fog_color[2] * 255.0f + 0.5f);
     tnt2_3d_state(off, format, filter, blend, control, fogc);
+    dgl_gl.dirty &= ~(DGL_DIRTY_RASTER | DGL_DIRTY_TARGET | DGL_DIRTY_TEXTURE | DGL_DIRTY_FOG | DGL_DIRTY_CLIP);
+    valid_ok = 1;
+    valid_tex = t;
 }
 
 /* ---- Drawing ---------------------------------------------------------------- */
@@ -371,12 +392,14 @@ static int tb_begin(void)
     return 1;
 }
 
-static void tb_end(void) { tnt2_kick(); }
+static void tb_end(void) { }               /* (the layer tells the chip once 4 KB of commands wait) */
 
+/* 0..1 to a byte: one FISTP in the current (nearest) rounding, no control-word switches (mga/fp.h: a cast or
+ * floorf costs two FLDCWs each, which stall a P6; four a vertex were a third of the P3's projection time). */
 static uint32_t ub(float v)
 {
-    int i = (int)floorf(v * 255.0f + 0.5f);
-    return (uint32_t)(i < 0 ? 0 : i > 255 ? 255 : i);
+    int32_t i = v > 0.0f ? (v < 1.0f ? mga_irint(v * 255.0f) : 255) : 0;
+    return (uint32_t)i;
 }
 
 static float fog_factor(float d)
@@ -394,11 +417,11 @@ static float fog_factor(float d)
 
 static void project(const dgl_cvtx *c, tnt2_vertex *v, const dgl_cvtx *colour)
 {
-    double iw = 1.0 / c->w;
-    v->sx = (float)(dgl_gl.viewport[0] + (c->x * iw + 1.0) * 0.5 * dgl_gl.viewport[2]);
-    v->sy = (float)(dgl_ctx.height - (dgl_gl.viewport[1] + (c->y * iw + 1.0) * 0.5 * dgl_gl.viewport[3]));
-    v->sz = (float)(dgl_gl.depth_near + (c->z * iw + 1.0) * 0.5 * (dgl_gl.depth_far - dgl_gl.depth_near));
-    v->rhw = (float)iw;
+    float iw = 1.0f / c->w;             /* (single precision: the chip takes x and y in 1/16 pixel) */
+    v->sx = c->x * iw * vx_s + vx_o;
+    v->sy = c->y * iw * vy_s + vy_o;
+    v->sz = c->z * iw * vz_s + vz_o;
+    v->rhw = iw;
     v->color = ub(colour->a) << 24 | ub(colour->r) << 16 | ub(colour->g) << 8 | ub(colour->b);
     v->specular = (fogging ? ub(fog_factor(c->eye_d)) : 255u) << 24;
     v->tu = c->s, v->tv = c->t;
@@ -429,8 +452,8 @@ static void wrap_shift(tnt2_vertex *v, int n)
         if (v[i].tu < ms) ms = v[i].tu;
         if (v[i].tv < mt) mt = v[i].tv;
     }
-    ms = shift_s && ms > -1e9f && ms < 1e9f ? floorf(ms) : 0;
-    mt = shift_t && mt > -1e9f && mt < 1e9f ? floorf(mt) : 0;
+    ms = shift_s && ms > -1e9f && ms < 1e9f ? (float)mga_ifloor(ms) : 0;
+    mt = shift_t && mt > -1e9f && mt < 1e9f ? (float)mga_ifloor(mt) : 0;
     if (ms != 0 || mt != 0)
         for (i = 0; i < n; i++)
             v[i].tu -= ms, v[i].tv -= mt;
@@ -438,11 +461,16 @@ static void wrap_shift(tnt2_vertex *v, int n)
 
 static void draw_triangle(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *c, const dgl_cvtx *prov)
 {
+    PROF_SCOPE(PROF_D_PROJ);
     dgl_cvtx in[3], out[9];
     tnt2_vertex v[9];
     double area2;
     int n, i, flat = dgl_gl.shade_model == GL_FLAT;
     dgl_prims.tris_in++;
+    if (dgl_outcode(a, 1.0f, 1.0f) & dgl_outcode(b, 1.0f, 1.0f) & dgl_outcode(c, 1.0f, 1.0f)) {
+        dgl_prims.clipped++;            /* (wholly outside one of the view volume's planes: no clipping needed) */
+        return;
+    }
     if (!(dgl_outcode(a, GUARD, GUARD) | dgl_outcode(b, GUARD, GUARD) | dgl_outcode(c, GUARD, GUARD))) {
         n = 3;
         project(a, &v[0], flat ? prov : a), project(b, &v[1], flat ? prov : b), project(c, &v[2], flat ? prov : c);
@@ -452,7 +480,11 @@ static void draw_triangle(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *
             for (i = 0; i < 3; i++) {
                 in[i].r = prov->r; in[i].g = prov->g; in[i].b = prov->b; in[i].a = prov->a;
             }
-        n = dgl_clip_polygon(in, 3, out, GUARD, GUARD);
+        {
+            int o = PROF_SWITCH(PROF_D_CLIP);
+            n = dgl_clip_polygon(in, 3, out, GUARD, GUARD);
+            PROF_BACK(o);
+        }
         if (n < 3) {
             dgl_prims.clipped++;
             return;
@@ -484,6 +516,7 @@ static void draw_triangle(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *
     }
     if (shift_s || shift_t)
         wrap_shift(v, n);
+    PROF_SWITCH(PROF_D_SETUP);
     for (i = 1; i + 1 < n; i++) {
         tnt2_tri(&v[0], &v[i], &v[i + 1]);
         tris++;
@@ -528,6 +561,62 @@ static void tb_triangle(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *c,
         fog_split(a, b, c, prov, 0);
     else
         draw_triangle(a, b, c, prov);
+}
+
+/* A polygon (GL_POLYGON, a quad, a fan) wholly inside the guard band, unfogged, of up to 16 vertices: each vertex
+ * projected once and sent once (tnt2_poly: the chip's vertex slots and index words); else triangle by triangle. */
+static void tb_polygon(const dgl_cvtx *v, int n, const dgl_cvtx *prov)
+{
+    PROF_SCOPE(PROF_D_PROJ);
+    tnt2_vertex w[16];
+    unsigned oc = 0, out = ~0u;
+    double area2 = 0;
+    int i, flat = dgl_gl.shade_model == GL_FLAT;
+    if (n < 3)
+        return;
+    for (i = 0; i < n; i++)
+        out &= dgl_outcode(&v[i], 1.0f, 1.0f);
+    if (out) {
+        dgl_prims.clipped++;            /* (wholly outside one of the view volume's planes) */
+        return;
+    }
+    if (!fogging && n <= 16)
+        for (i = 0; i < n; i++)
+            oc |= dgl_outcode(&v[i], GUARD, GUARD);
+    if (fogging || n > 16 || oc) {
+        for (i = 1; i + 1 < n; i++)
+            tb_triangle(&v[0], &v[i], &v[i + 1], prov);
+        return;
+    }
+    dgl_prims.tris_in += (unsigned)(n - 2);
+    for (i = 0; i < n; i++)
+        project(&v[i], &w[i], flat ? prov : &v[i]);
+    for (i = 0; i < n; i++)
+        area2 += (double)w[i].sx * w[(i + 1) % n].sy - (double)w[(i + 1) % n].sx * w[i].sy;
+    if (area2 == 0) {
+        dgl_prims.zero_area++;
+        return;
+    }
+    if (dgl_gl.cull_face) {
+        int front = (dgl_gl.front_face == GL_CCW) ? area2 < 0 : area2 > 0;
+        if (dgl_gl.cull_mode == GL_FRONT_AND_BACK || (dgl_gl.cull_mode == GL_BACK) != front) {
+            dgl_prims.culled++;
+            return;
+        }
+    }
+    {
+        double off = offset_for(&w[0], &w[1], &w[2]);
+        if (off != 0)
+            for (i = 0; i < n; i++) {
+                double z = w[i].sz + off;
+                w[i].sz = (float)(z < 0 ? 0 : z > 1 ? 1 : z);
+            }
+    }
+    if (shift_s || shift_t)
+        wrap_shift(w, n);
+    PROF_SWITCH(PROF_D_SETUP);
+    tnt2_poly(w, n);
+    tris += (unsigned)(n - 2);
 }
 
 /* A line: a quad half the width either side, across its minor axis (OpenGL's wide lines' shape), b's colour when
@@ -580,10 +669,11 @@ static void tb_point(const dgl_cvtx *a)
 
 static void install(void)
 {
+    valid_ok = 0;
     dgl_sink.begin = tb_begin;
     dgl_sink.triangle = tb_triangle;
     dgl_sink.fast = NULL;                       /* (the general path only) */
-    dgl_sink.polygon = NULL;
+    dgl_sink.polygon = tb_polygon;
     dgl_sink.line = tb_line;
     dgl_sink.point = tb_point;
     dgl_sink.end = tb_end;
@@ -633,7 +723,7 @@ static void caps(dgl_caps *c)
     c->max_texture_size = 2048;
 }
 
-static void synced(void) { }
+static void synced(void) { dgl_vram_sync_done(); }   /* (the blocks retired before it are free) */
 
 static int tex_sub(dgl_texture *t, int level, int x, int y, int w, int h)
 {
@@ -658,6 +748,7 @@ static int tex_info(const dgl_texture *t, int rgba[4])
 
 static void tex_reset(uint32_t start, uint32_t end)
 {
+    valid_ok = 0;
     int i, n = dgl_texture_count();
     dgl_texture *t;
     for (i = 0; i < n; i++)

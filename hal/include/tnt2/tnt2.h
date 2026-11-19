@@ -76,6 +76,7 @@ void     tnt2_3d_clip(int x0, int y0, int x1, int y1);  /* inclusive-exclusive; 
 void     tnt2_3d_state(uint32_t tex_off, uint32_t format, uint32_t filter, uint32_t blend, uint32_t control,
                        uint32_t fogcolor);
 void     tnt2_tri(const tnt2_vertex *a, const tnt2_vertex *b, const tnt2_vertex *c);
+void     tnt2_poly(const tnt2_vertex *v, int n);     /* a fan of n (3-16) vertices, each sent once */
 uint32_t tnt2_tex_dummy_off(void);      /* a 1x1 white A8R8G8B8 texel in VRAM, for untextured triangles */
 uint32_t tnt2_3d_trap(uint32_t *addr, uint32_t *data);
 void     tnt2_3d_raw(int sub3d, uint32_t method, uint32_t value);  /* (bring-up: a method on the 3D surfaces' (1)
@@ -84,5 +85,8 @@ uint32_t tnt2_3d_handle(int sub3d);
 /* A texture's levels, each w x h texels of cpp bytes in rows from the CPU, stored swizzled from off (a multiple of
  * 128) one after another, as the chip reads them (the engine idle: tnt2_sync first). Returns the end. */
 uint32_t tnt2_tex_load(uint32_t off, int cpp, int log2w, int log2h, int levels, const void *const *level_texels);
+/* The same from RGBA8 levels (r, g, b, a bytes, rows of w), converted to the chip's format in the same pass. */
+enum { TNT2_TEX_A8R8G8B8, TNT2_TEX_R5G6B5, TNT2_TEX_A1R5G5B5, TNT2_TEX_A4R4G4B4 };
+uint32_t tnt2_tex_load_rgba8(uint32_t off, int fmt, int log2w, int log2h, int levels, const uint8_t *const *rgba);
 
 #endif

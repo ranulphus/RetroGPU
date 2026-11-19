@@ -195,8 +195,23 @@ RetroGPU is MIT, so code is written from documentation and from MIT-licensed dri
   shift (t14: 30,000 periods along), palettes (t19), the fog split (t10). **Then the whole suite passes: all 33 tests
   that apply**, most with no pixel out (the worst: t20, 0.11%). t33 (stencil) and t34 (lines and points) are the
   software renderer's only.
-- **Still T4's:** GLOS's screensavers, Fifth Wheel and the ports (GLQuake, PrBoom-plus) on the P3; the 0x55 object for
-  the gaps.
+- **GLQuake on the P3** (QDOSDGL, timedemo demo1, `-fixedtime`, vsync off; the P3 is a 451 MHz Pentium III). The
+  owner's Windows 98 numbers on the same card: 152.7 fps at 320x200x16, 100.7 at 640x480x16. The first back end:
+  21.8 fps at 640x480, frame 400 matching bench-g400's G400 frame but for 143 of 307,200 pixels (0.05%) more than 24
+  levels apart. Resolution hardly mattered (the CPU's work, not the chip's fill), and the stage timers (`PROF=1`,
+  `DGL_STATS=2`) showed where it went:
+
+  | Change | 640x480 | 320x200 |
+  |---|---|---|
+  | first back end | 21.8 | |
+  | the chip told of commands once 4 KB wait (a kick reads video memory); the 3D target and state not sent again unchanged; a polygon's vertices sent once (the chip's slots and index words) | 37.3 | 40.3 |
+  | a texture made again (GLQuake's lightmaps, ~74 a second) into a new block, the old one retired until a sync, not after a drain; the swizzle by tables; a guard band of 4 | 44.6 | 47.0 |
+  | colours to bytes and the period shift without `floorf` or casts (each switches the x87's control word twice: a third of the projection's time); textures converted and swizzled in one pass, then written in one sequential run (write-combining's bursts); triangles wholly outside the view volume dropped before clipping (a third of what GLQuake sends); validation skipped while GL's dirty bits are clear; projection in single precision from the viewport's scale and offset | **64.6** | **82.4** |
+
+  What is left, by the timers at 320x200: the game itself, GL's transform, and this back end's projection about
+  equal thirds; GLQuake's two passes (the lightmaps by a second draw of the world: Windows' driver has the 0x55
+  object's two textures in one) are the next to take.
+- **Still T4's:** GLOS's screensavers, Fifth Wheel and PrBoom-plus on the P3; the 0x55 object for the gaps.
 
 ## How it fits RetroGPU
 

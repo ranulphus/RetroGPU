@@ -31,6 +31,7 @@
 #include "tnt2/tnt2.h"
 #include "mga/hal.h"
 #include "mga/sys.h"
+#include <stdlib.h>
 #include <string.h>
 
 tnt2_chip tnt2;
@@ -171,6 +172,17 @@ static void ring_start(uint32_t method, int size)
 }
 
 #define NEXT(v) (ring[ring_cur++] = (uint32_t)(v))
+
+/* The chip told of the commands written once 4 KB of them wait (a kick reads video memory first: not after every
+ * small draw). */
+static void kick_soon(void)
+{
+    int pending = ring_cur - ring_put;
+    if (pending < 0)
+        pending += ring_max;
+    if (pending >= 1024)
+        tnt2_kick();
+}
 
 void tnt2_kick(void)
 {
@@ -612,6 +624,9 @@ static void send_state(void)
  * Mesa sends it before every run of triangles. So the layer keeps both and sends them again when 2D has run. */
 void tnt2_3d_target(uint32_t color_off, uint32_t zeta_off, int pitch_bytes, int bpp, int w, int h)
 {
+    if (t3d.set && !stale_3d && t3d.color == color_off && t3d.zeta == zeta_off && t3d.pitch == pitch_bytes &&
+        t3d.bpp == bpp && t3d.w == w && t3d.h == h)
+        return;                                         /* (the same, and nothing 2D since: nothing to send) */
     t3d.color = color_off, t3d.zeta = zeta_off, t3d.pitch = pitch_bytes, t3d.bpp = bpp, t3d.w = w, t3d.h = h;
     t3d.set = 1;
     send_target(1);
@@ -625,6 +640,9 @@ void tnt2_3d_target(uint32_t color_off, uint32_t zeta_off, int pitch_bytes, int 
 void tnt2_3d_state(uint32_t tex_off, uint32_t format, uint32_t filter, uint32_t blend, uint32_t control,
                    uint32_t fogcolor)
 {
+    if (st3d_set && !stale_3d && st3d[0] == tex_off && st3d[1] == format && st3d[2] == filter && st3d[3] == blend &&
+        st3d[4] == control && st3d[5] == fogcolor)
+        return;                                         /* (the same, and nothing 2D since) */
     st3d[0] = tex_off, st3d[1] = format, st3d[2] = filter, st3d[3] = blend, st3d[4] = control, st3d[5] = fogcolor;
     st3d_set = 1;
     if (stale_3d && t3d.set) {
@@ -661,38 +679,170 @@ void tnt2_tri(const tnt2_vertex *a, const tnt2_vertex *b, const tnt2_vertex *c)
     }
     ring_start(SUBCH(TRI, 0x600), 1);
     NEXT(0x102);
+    kick_soon();
+}
+
+/* A polygon's n vertices (3 to 16) into slots 0 to n-1 at once, then its fan's triangles (0, i, i+1), two to each
+ * DRAWPRIMITIVE word (indices 4 bits each; each triangle rotated as tnt2_tri's, so the winding is kept): each vertex
+ * goes over the bus once. */
+void tnt2_poly(const tnt2_vertex *v, int n)
+{
+    int i, words = (n - 1) / 2;
+    if (n < 3 || n > 16)
+        return;
+    if (stale_3d) {
+        if (t3d.set)
+            send_target(0);
+        if (st3d_set)
+            send_state();
+        stale_3d = 0;
+    }
+    ring_start(SUBCH(TRI, 0x400), 8 * n);
+    for (i = 0; i < n; i++) {
+        NEXT(fbits(v[i].sx)); NEXT(fbits(v[i].sy)); NEXT(fbits(v[i].sz)); NEXT(fbits(v[i].rhw));
+        NEXT(v[i].color); NEXT(v[i].specular); NEXT(fbits(v[i].tu)); NEXT(fbits(v[i].tv));
+    }
+    ring_start(SUBCH(TRI, 0x600), words);
+    for (i = 1; i + 1 < n; i += 2) {
+        uint32_t w = (uint32_t)(i + 1) | 0u << 4 | (uint32_t)i << 8;           /* (i+1, 0, i) */
+        if (i + 2 < n)
+            w |= (uint32_t)(i + 2) << 12 | 0u << 16 | (uint32_t)(i + 1) << 20;  /* (i+2, 0, i+1) */
+        NEXT(w);
+    }
+    kick_soon();
 }
 
 /* Textures are stored swizzled (Mesa's nv04_surface.c, get_swizzled_offset): in a level of w x h texels (powers
  * of two), with k = log2(min(w, h)), the low 2k bits of a texel's index interleave x and y (x's bit i at bit 2i, y's
  * at 2i + 1) and the longer side's higher bits sit above them. The levels follow one another from the base level,
  * each as large as it is (nouveau_texture.c: levels over 16 bytes start on 64 bytes, which powers of two do). */
-static uint32_t swizzle(int x, int y, int log2w, int log2h)
-{
-    int k = log2w < log2h ? log2w : log2h, i;
-    uint32_t idx = 0;
-    for (i = 0; i < k; i++)
-        idx |= (((uint32_t)x >> i) & 1u) << (2 * i) | (((uint32_t)y >> i) & 1u) << (2 * i + 1);
-    idx |= ((uint32_t)x >> k) << (2 * k);       /* (one of these two is 0: the longer side's high bits) */
-    idx |= ((uint32_t)y >> k) << (2 * k);
-    return idx;
-}
-
 uint32_t tnt2_tex_load(uint32_t off, int cpp, int log2w, int log2h, int levels, const void *const *level_texels)
 {
-    int n, x, y;
+    /* Each level put in its swizzled order in system memory (x's and y's bits from two tables: the longer side's
+     * high bits sit above the interleaved ones, so the two only add), then written to video memory in one
+     * sequential run, which write-combining turns into bursts (scattered 2-byte writes to it are slow). */
+    static uint32_t sxt[2048], syt[2048];
+    static uint8_t *tmp;
+    static uint32_t tmp_bytes;
+    int n, x, y, i;
     for (n = 0; n < levels; n++) {
         int lw = log2w > n ? log2w - n : 0, lh = log2h > n ? log2h - n : 0, w = 1 << lw, h = 1 << lh;
+        int k = lw < lh ? lw : lh;
+        uint32_t bytes = (uint32_t)(w * h * cpp);
         const uint8_t *src = (const uint8_t *)level_texels[n];
-        for (y = 0; y < h; y++)
-            for (x = 0; x < w; x++) {
-                volatile uint8_t *d = tnt2_fb + off + swizzle(x, y, lw, lh) * (uint32_t)cpp;
-                const uint8_t *s = src + ((long)y * w + x) * cpp;
-                int b;
-                for (b = 0; b < cpp; b++)
-                    d[b] = s[b];
+        volatile uint32_t *d32;
+        const uint32_t *s32;
+        if (bytes > tmp_bytes) {
+            uint8_t *t = (uint8_t *)realloc(tmp, bytes);
+            if (!t)
+                return off;
+            tmp = t, tmp_bytes = bytes;
+        }
+        for (x = 0; x < w; x++) {
+            uint32_t v = (uint32_t)(x >> k) << (2 * k);
+            for (i = 0; i < k; i++)
+                v |= (((uint32_t)x >> i) & 1u) << (2 * i);
+            sxt[x] = v;
+        }
+        for (y = 0; y < h; y++) {
+            uint32_t v = (uint32_t)(y >> k) << (2 * k);
+            for (i = 0; i < k; i++)
+                v |= (((uint32_t)y >> i) & 1u) << (2 * i + 1);
+            syt[y] = v;
+        }
+        if (cpp == 2) {
+            uint16_t *t16 = (uint16_t *)tmp;
+            const uint16_t *s16 = (const uint16_t *)src;
+            for (y = 0; y < h; y++, s16 += w)
+                for (x = 0; x < w; x++)
+                    t16[sxt[x] | syt[y]] = s16[x];
+        } else {
+            uint32_t *t32 = (uint32_t *)tmp;
+            const uint32_t *s = (const uint32_t *)src;
+            for (y = 0; y < h; y++, s += w)
+                for (x = 0; x < w; x++)
+                    t32[sxt[x] | syt[y]] = s[x];
+        }
+        d32 = (volatile uint32_t *)(tnt2_fb + off);
+        s32 = (const uint32_t *)tmp;
+        for (i = 0; i < (int)(bytes / 4); i++)
+            d32[i] = s32[i];
+        if (bytes & 2)                                  /* (a 1x1 level of 2 bytes) */
+            *(volatile uint16_t *)(tnt2_fb + off + bytes - 2) = *(const uint16_t *)(tmp + bytes - 2);
+        off += bytes;
+    }
+    return off;
+}
+
+/* tnt2_tex_load's tables and buffer, as a function: a level's x and y to its swizzled index. */
+static uint32_t sw_x[2048], sw_y[2048];
+
+static void swizzle_tables(int lw, int lh)
+{
+    int k = lw < lh ? lw : lh, w = 1 << lw, h = 1 << lh, x, y, i;
+    for (x = 0; x < w; x++) {
+        uint32_t v = (uint32_t)(x >> k) << (2 * k);
+        for (i = 0; i < k; i++)
+            v |= (((uint32_t)x >> i) & 1u) << (2 * i);
+        sw_x[x] = v;
+    }
+    for (y = 0; y < h; y++) {
+        uint32_t v = (uint32_t)(y >> k) << (2 * k);
+        for (i = 0; i < k; i++)
+            v |= (((uint32_t)y >> i) & 1u) << (2 * i + 1);
+        sw_y[y] = v;
+    }
+}
+
+/* As tnt2_tex_load, from RGBA8 levels (r, g, b, a bytes), converted to the chip's format on the way in one pass:
+ * TNT2_TEX_A8R8G8B8, _R5G6B5, _A1R5G5B5 (alpha from its top bit), _A4R4G4B4. */
+uint32_t tnt2_tex_load_rgba8(uint32_t off, int fmt, int log2w, int log2h, int levels, const uint8_t *const *rgba)
+{
+    static uint8_t *tmp;
+    static uint32_t tmp_bytes;
+    int cpp = fmt == TNT2_TEX_A8R8G8B8 ? 4 : 2, n, x, y, i;
+    for (n = 0; n < levels; n++) {
+        int lw = log2w > n ? log2w - n : 0, lh = log2h > n ? log2h - n : 0, w = 1 << lw, h = 1 << lh;
+        uint32_t bytes = (uint32_t)(w * h * cpp);
+        const uint8_t *s = rgba[n];
+        volatile uint32_t *d32;
+        const uint32_t *s32;
+        if (bytes > tmp_bytes) {
+            uint8_t *t = (uint8_t *)realloc(tmp, bytes);
+            if (!t)
+                return off;
+            tmp = t, tmp_bytes = bytes;
+        }
+        swizzle_tables(lw, lh);
+        if (cpp == 4) {
+            uint32_t *t32 = (uint32_t *)tmp;
+            for (y = 0; y < h; y++) {
+                uint32_t sy = sw_y[y];
+                for (x = 0; x < w; x++, s += 4)
+                    t32[sw_x[x] | sy] = (uint32_t)s[3] << 24 | (uint32_t)s[0] << 16 | (uint32_t)s[1] << 8 | s[2];
             }
-        off += (uint32_t)(w * h * cpp);
+        } else {
+            uint16_t *t16 = (uint16_t *)tmp;
+            for (y = 0; y < h; y++) {
+                uint32_t sy = sw_y[y];
+                if (fmt == TNT2_TEX_R5G6B5)
+                    for (x = 0; x < w; x++, s += 4)
+                        t16[sw_x[x] | sy] = (uint16_t)((s[0] >> 3) << 11 | (s[1] >> 2) << 5 | (s[2] >> 3));
+                else if (fmt == TNT2_TEX_A1R5G5B5)
+                    for (x = 0; x < w; x++, s += 4)
+                        t16[sw_x[x] | sy] = (uint16_t)((s[3] >> 7) << 15 | (s[0] >> 3) << 10 | (s[1] >> 3) << 5 | (s[2] >> 3));
+                else
+                    for (x = 0; x < w; x++, s += 4)
+                        t16[sw_x[x] | sy] = (uint16_t)((s[3] >> 4) << 12 | (s[0] >> 4) << 8 | (s[1] >> 4) << 4 | (s[2] >> 4));
+            }
+        }
+        d32 = (volatile uint32_t *)(tnt2_fb + off);
+        s32 = (const uint32_t *)tmp;
+        for (i = 0; i < (int)(bytes / 4); i++)
+            d32[i] = s32[i];
+        if (bytes & 2)
+            *(volatile uint16_t *)(tnt2_fb + off + bytes - 2) = *(const uint16_t *)(tmp + bytes - 2);
+        off += bytes;
     }
     return off;
 }
