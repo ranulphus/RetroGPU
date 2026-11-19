@@ -207,6 +207,7 @@ static void crash(void) { }
 extern char **__crt0_argv;
 
 static glos_handle window;
+static int full;                        /* shown full screen (GLOS_WS_FULL) */
 static uint32_t palette332[256];        /* an 8-bit context's colours (RGB 3-3-2) for GLOS_DRAW_BLIT */
 unsigned long rg_mem_blits;             /* frames copied into the window */
 
@@ -220,21 +221,17 @@ unsigned long rg_mem_blits;             /* frames copied into the window */
 #endif
 static int window_ok(void) { return (rg_glos_caps() & GLOS_MACHINE_DESKTOP) != 0; }
 
-/* The usual sizes that fit in the desktop's work area with a frame and a title bar; 8, 16 or 32 bits a pixel
+/* The usual sizes that fit in the desktop's work area with a frame and a title bar, then those up to the screen's
+   size (shown full screen); 8, 16 or 32 bits a pixel
    (the context's: GLOS converts each frame to the screen's format). */
 static int window_modes(rg_mode *out, int max)
 {
     static const int sizes[][2] = { { 320, 200 }, { 320, 240 }, { 400, 300 }, { 512, 384 }, { 640, 400 },
                                     { 640, 480 }, { 800, 600 }, { 1024, 768 }, { 1280, 1024 } };
-    struct glos_screen scr;
     unsigned i;
     int n = 0;
-    memset(&scr, 0, sizeof scr);
-    scr.size = sizeof scr;
-    if (rg_glos_caps() == 0 || rg_glos_call(GLOS_DRAW_SCREEN, &scr) != 0)
-        return 0;
     for (i = 0; i < sizeof sizes / sizeof sizes[0]; i++) {
-        if (sizes[i][0] > scr.work_w - 8 || sizes[i][1] > scr.work_h - 28)
+        if (!rg_glos_fits(sizes[i][0], sizes[i][1]))     /* (with a frame, or full screen up to the screen's size) */
             continue;
         if (out && n < max) {
             memset(&out[n], 0, sizeof out[n]);
@@ -321,7 +318,8 @@ static int open_glos(const rg_open *o, rg_opened *out)
     w.kind = GLOS_WK_NORMAL;
     w.w = o->width;
     w.h = o->height;
-    w.flags = GLOS_WF_FIXED | GLOS_WF_ANYWHERE | ((o->glos_flags & RG_GLOS_BARE) ? GLOS_WF_BARE : 0);
+    full = rg_glos_full(o->glos_flags, o->width, o->height);   /* (full screen: no frame either) */
+    w.flags = GLOS_WF_FIXED | GLOS_WF_ANYWHERE | ((o->glos_flags & RG_GLOS_BARE) || full ? GLOS_WF_BARE : 0);
     for (i = 0; i < sizeof w.title - 1 && name[i] && name[i] != '.'; i++)
         w.title[i] = name[i];
     if ((r = rg_glos_call(GLOS_WIN_CREATE, &w)) != 0) {
@@ -335,7 +333,7 @@ static int open_glos(const rg_open *o, rg_opened *out)
         struct glos_win_show v;
         v.size = sizeof v;
         v.handle = window;
-        v.state = GLOS_WS_NORMAL;
+        v.state = full ? GLOS_WS_FULL : GLOS_WS_NORMAL;
         v.flags = 0;
         rg_glos_call(GLOS_WIN_SHOW, &v);
     }

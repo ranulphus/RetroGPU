@@ -175,7 +175,11 @@ static void open_args(rg_open *o, const DGLConfig *c)
     e = getenv("DGL_TEXHEAP_KB");
     o->heap_kb = e && *e ? (uint32_t)strtoul(e, NULL, 10) : 0;
     e = getenv("DGL_GLOS_HINTS");                       /* (or dglGlosHints before dglInit) */
-    o->glos_flags = (glos_hints | (e && *e ? (unsigned)strtoul(e, NULL, 0) : 0u)) & (RG_GLOS_HIDDEN | RG_GLOS_BARE);
+    o->glos_flags = (glos_hints | (e && *e ? (unsigned)strtoul(e, NULL, 0) : 0u)) &
+                    (RG_GLOS_HIDDEN | RG_GLOS_BARE | RG_GLOS_FULL);
+    e = getenv("DGL_GLOS_FULL");
+    if (e && *e && *e != '0')
+        o->glos_flags |= RG_GLOS_FULL;
     o->wait = dev_wait;
     o->yield = dev_yield;
     o->on_sync = dev_synced;
@@ -457,7 +461,7 @@ static void prof_report(uint32_t tris)
 /* v1.5: the scaled modes' swap without waiting for the card (rg_open's
  * present_lag; gl/docs/fe.md), for the next dglInit. */
 void dglSetPresentLag(int on) { present_lag = on != 0; }
-void dglGlosHints(unsigned int flags) { glos_hints = flags & (DGL_GLOS_HIDDEN | DGL_GLOS_BARE); }
+void dglGlosHints(unsigned int flags) { glos_hints = flags & (DGL_GLOS_HIDDEN | DGL_GLOS_BARE | DGL_GLOS_FULL); }
 
 void dglSetWaitHook(void (*fn)(void *arg), void *arg)
 {

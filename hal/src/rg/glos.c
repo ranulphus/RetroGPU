@@ -53,6 +53,33 @@ unsigned rg_glos_caps(void)
     return v.machine;
 }
 
+int rg_glos_fits(int w, int h)
+{
+    struct glos_screen scr;
+    memset(&scr, 0, sizeof scr);
+    scr.size = sizeof scr;
+    if (rg_glos_caps() == 0 || rg_glos_call(GLOS_DRAW_SCREEN, &scr) != 0)
+        return 0;
+    if (w <= scr.work_w - 8 && h <= scr.work_h - 28)
+        return 1;
+    return w <= scr.w && h <= scr.h ? 2 : 0;
+}
+
+/* (Asked for, a context smaller than the screen stays framed: a GLOS window shown full screen keeps the screen's
+   size, so a smaller block of VRAM in it showed nothing (GLOS c0a5d0e, Loop A, 2026-11-19); GLOS's own mode for such
+   a window is still to come.) */
+int rg_glos_full(unsigned glos_flags, int w, int h)
+{
+    struct glos_screen scr;
+    if (rg_glos_fits(w, h) == 2)
+        return 1;
+    if (!(glos_flags & RG_GLOS_FULL))
+        return 0;
+    memset(&scr, 0, sizeof scr);
+    scr.size = sizeof scr;
+    return rg_glos_call(GLOS_DRAW_SCREEN, &scr) == 0 && w == scr.w && h == scr.h;
+}
+
 void *rg_glos_ptr(unsigned linear)      /* a linear address GLOS gave, as a near pointer */
 {
     if (!__djgpp_nearptr_enable())
@@ -64,6 +91,8 @@ void *rg_glos_ptr(unsigned linear)      /* a linear address GLOS gave, as a near
 
 int rg_glos_call(unsigned fn, void *s) { (void)fn; (void)s; return -1; }
 unsigned rg_glos_caps(void) { return 0; }
+int rg_glos_fits(int w, int h) { (void)w; (void)h; return 0; }
+int rg_glos_full(unsigned glos_flags, int w, int h) { (void)glos_flags; (void)w; (void)h; return 0; }
 void *rg_glos_ptr(unsigned linear) { (void)linear; return NULL; }
 
 #endif

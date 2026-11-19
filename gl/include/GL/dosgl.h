@@ -59,9 +59,9 @@ typedef struct {
 
 /* The API's version: 0x0103 is 1.3 (DOS-GL 0.3), which added dglSetWaitHook;
    0x0104 the window on a GLOS desktop and dglGetGlosWindow; 0x0105
-   dglSetPresentLag; 0x0106 dglGlosHints; 0x0107 a GLOS window on any desktop
+   dglSetPresentLag; 0x0106 dglGlosHints; 0x0107 a GLOS window on any desktop; 0x0108 DGL_GLOS_FULL
    (the software renderer's where the Matrox engine can't draw one: B3). */
-#define DGL_API_VERSION 0x0107
+#define DGL_API_VERSION 0x0108
 
 /* The library's version string, e.g. "DOS-GL 0.3 (<build>)". */
 const char *dglVersion(void);
@@ -111,11 +111,18 @@ unsigned int dglGetGlosWindow(void);
    not shown: the program shows it itself (GLOS_WIN_SHOW on
    dglGetGlosWindow(), full-screen for a screensaver) or leaves it to be
    embedded (a preview), so it never appears framed on the desktop first.
-   DGL_GLOS_BARE: no title bar or border (GLOS_WF_BARE). Other bits are
-   ignored; full-screen contexts ignore both. DGL_GLOS_HINTS=n in the
-   environment sets them too (n the bits, for tests). */
+   DGL_GLOS_BARE: no title bar or border (GLOS_WF_BARE). v1.8, DGL_GLOS_FULL:
+   full screen as a GLOS app (GLOS_WS_FULL: no frame, the task bar gone while
+   it has the focus, the desktop alive behind it and Alt+Tab working), for a
+   context of the desktop's size (GLOS can show it straight from its
+   buffers); a smaller one stays a framed window until GLOS can show a mode
+   of its own, and one too big for a frame is shown full screen anyway. Other bits are
+   ignored; full-screen contexts (sessions) ignore them all. DGL_GLOS_HINTS=n
+   in the environment sets them too (n the bits, for tests); DGL_GLOS_FULL=1
+   sets DGL_GLOS_FULL (ports that don't call this). */
 #define DGL_GLOS_HIDDEN 0x1u
 #define DGL_GLOS_BARE   0x2u
+#define DGL_GLOS_FULL   0x4u
 void dglGlosHints(unsigned int flags);
 
 /* Write the buffer being drawn (the next frame, when double-buffered) to

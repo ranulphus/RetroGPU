@@ -37,7 +37,7 @@ typedef struct {
     int present_lag;                /* scaled modes without vsync: don't wait for the upscale at the swap; flip once
                                        the card has done it (flip_poll), the screen that much behind (DGL_PRESENT_LAG) */
     uint32_t heap_kb;               /* the memory left after the buffers capped (DGL_TEXHEAP_KB), 0 none */
-    unsigned glos_flags;            /* a GLOS window's start: RG_GLOS_HIDDEN, RG_GLOS_BARE (dglGlosHints) */
+    unsigned glos_flags;            /* a GLOS window's start: RG_GLOS_HIDDEN, RG_GLOS_BARE, RG_GLOS_FULL (dglGlosHints) */
     /* The user's hooks (each may be NULL): */
     void (*wait)(void);             /* before a retrace wait (the program's wait hook) */
     void (*yield)(void);            /* in long CPU work, such as reading a frame back (at most every few ms) */
@@ -45,6 +45,7 @@ typedef struct {
 } rg_open;
 #define RG_GLOS_HIDDEN 0x1u         /* the window not shown at open: the program shows it, or it is embedded */
 #define RG_GLOS_BARE   0x2u         /* no title bar or border (GLOS_WF_BARE) */
+#define RG_GLOS_FULL   0x4u         /* full screen as a GLOS app (GLOS_WS_FULL): also any context too big for a frame */
 
 /* What the device gave. */
 typedef struct {

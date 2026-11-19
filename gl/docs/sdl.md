@@ -110,6 +110,10 @@ of the numbers and structures they use (`SDL_glos.h`):
   in pages shared with GLOS that the audio thread keeps full, yielding as
   the `soundblaster` driver does. Closing the device logs `GLOS: U of N
   chunks underran` (the mixer's periods), in patch 0005's form.
+- **A fullscreen window** (`SDL_WINDOW_FULLSCREEN`) asks DOS-GL for a full-screen GLOS app (patch 0011,
+  `DGL_GLOS_FULL`): no frame, the task bar gone while it has the focus, the desktop alive behind it and Alt+Tab
+  working. At the desktop's size it fills the screen (and GLOS can show it straight from DOS-GL's buffers); a smaller
+  one stays a framed window until GLOS can show a mode of its own for it.
 
 Elsewhere (plain DOS, an 8- or 32-bit desktop, GLOS without a Matrox card)
 the same program takes the screen as before; under GLOS it then runs as a
@@ -142,6 +146,7 @@ chains to SDL's.
 | `0008-dos-glos-windows` | the `glos` video driver: windows, events and OpenGL through DOS-GL's GLOS window on a GLOS desktop (above); `vesa` stays for plain DOS | new backend |
 | `0009-dos-glos-mixer` | the `glos` audio driver: a stream into GLOS's mixer; `soundblaster` stays for plain DOS | new backend |
 | `0010-dos-glos-audio-in-sessions` | the `glos` audio driver also for a program that has the screen under GLOS (API 2.5): not made an app; the rate probe's stream closed only after the real one opens | backend change |
+| `0011-dos-glos-fullscreen-apps` | a fullscreen OpenGL window under the `glos` video driver asks DOS-GL for a full-screen GLOS app (`DGL_GLOS_FULL`, DOS-GL API 1.8): no frame, the desktop alive behind it, Alt+Tab | backend change |
 | `0007-dos-audio-give-up-a-silent-card` | with BLASTER naming the wrong IRQ the card never asks for audio, the ring stays full and the program hung closing the device; once a full ring has not drained for a second, the driver logs why (an error: is the card on IRQ n?) and gives the device up, and the program carries on silent | bug fix |
 
 `tools/sdl/build.sh` applies them to a copy of the pinned source; the

@@ -84,6 +84,8 @@ void rg_mga_glos_show(uint32_t off)
     rg_glos_call(GLOS_DRAW_WINVRAM, &v);
 }
 
+static int full;                        /* shown full screen (GLOS_WS_FULL) */
+
 static void visible(void)
 {
     struct glos_win_show v;
@@ -91,7 +93,7 @@ static void visible(void)
         return;
     v.size = sizeof v;
     v.handle = window;
-    v.state = GLOS_WS_NORMAL;
+    v.state = full ? GLOS_WS_FULL : GLOS_WS_NORMAL;
     v.flags = 0;
     rg_glos_call(GLOS_WIN_SHOW, &v);
 }
@@ -197,7 +199,8 @@ int rg_mga_glos_open(const rg_open *o, rg_opened *out)
     w.kind = GLOS_WK_NORMAL;
     w.w = o->width;
     w.h = o->height;
-    w.flags = GLOS_WF_FIXED | GLOS_WF_ANYWHERE | ((o->glos_flags & RG_GLOS_BARE) ? GLOS_WF_BARE : 0);
+    full = rg_glos_full(o->glos_flags, o->width, o->height);   /* (full screen: no frame either) */
+    w.flags = GLOS_WF_FIXED | GLOS_WF_ANYWHERE | ((o->glos_flags & RG_GLOS_BARE) || full ? GLOS_WF_BARE : 0);
     for (i = 0; i < sizeof w.title - 1 && name[i] && name[i] != '.'; i++)
         w.title[i] = name[i];
     if ((r = rg_glos_call(GLOS_WIN_CREATE, &w)) != 0) {
@@ -274,21 +277,17 @@ int rg_mga_glos_open(const rg_open *o, rg_opened *out)
 }
 
 /* The sizes a window can have: the usual ones that fit in the desktop's work
-   area (the screen less the task bar) with a frame and a title bar. */
+   area (the screen less the task bar) with a frame and a title bar, then
+   those up to the screen's size, which are shown full screen. */
 int rg_mga_window_modes(rg_mode *out, int max)
 {
     static const int sizes[][2] = { { 320, 200 }, { 320, 240 }, { 400, 300 }, { 512, 384 }, { 640, 400 },
                                     { 640, 480 }, { 800, 600 }, { 1024, 768 }, { 1280, 1024 } };
-    struct glos_screen scr;
     unsigned i;
     int n = 0;
-    memset(&scr, 0, sizeof scr);
-    scr.size = sizeof scr;
-    if (rg_glos_caps() == 0 || rg_glos_call(GLOS_DRAW_SCREEN, &scr) != 0)
-        return 0;
     for (i = 0; i < sizeof sizes / sizeof sizes[0]; i++) {
         rg_mode d;
-        if (sizes[i][0] > scr.work_w - 8 || sizes[i][1] > scr.work_h - 28)
+        if (!rg_glos_fits(sizes[i][0], sizes[i][1]))
             continue;
         memset(&d, 0, sizeof d);
         d.width = d.display_width = sizes[i][0];

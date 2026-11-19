@@ -1,0 +1,16 @@
+--- a/src/video/dos/SDL_glosvideo.c
++++ b/src/video/dos/SDL_glosvideo.c
+@@ -512,6 +512,13 @@
+     cfg.depth_bits = device->gl_config.depth_size > 0 ? 16 : 0;
+     cfg.double_buffer = device->gl_config.double_buffer ? 1 : 0;
+     cfg.vsync = data->gl_swap_interval != 0;
++#if defined(DGL_API_VERSION) && DGL_API_VERSION >= 0x0108
++    // A fullscreen window: full screen as a GLOS app (GLOS_WS_FULL: the desktop alive behind it, Alt+Tab
++    // working, GLOS's sound and input), not a window with a frame.
++    if (window->flags & SDL_WINDOW_FULLSCREEN) {
++        dglGlosHints(DGL_GLOS_FULL);
++    }
++#endif
+     if (dglInit(&cfg) != 0) {
+         SDL_SetError("DOS-GL: %s", dglGetErrorString());
+         return NULL;
