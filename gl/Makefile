@@ -55,6 +55,7 @@ HAL_SRCS := $(addprefix $(MGAHAL)/hal/,src/debug/serial.c src/pci.c src/chip.c s
               src/blit.c src/cursor.c \
               src/rg/device.c src/rg/glos.c src/rg/mga.c src/rg/mga_glos.c \
               src/virge/chip.c src/virge/engine2d.c src/virge/cursor.c src/virge/tri.c src/rg/virge.c \
+              src/tnt2/tnt2.c src/rg/tnt2.c \
               src/rg/mem.c src/rg/vbe_soft.c src/soft/raster.c src/soft/texture.c port/djgpp.c)
 hal_objs = $(patsubst $(MGAHAL)/%.c,build/$(1)/mgahal/%.o,$(2))
 # Per-test build flags of the conformance tests: those that ask for stencil bits (t33; ct.h's CT_STENCIL).

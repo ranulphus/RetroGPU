@@ -179,6 +179,11 @@ void tnt2_kick(void)
     }
 }
 
+int tnt2_idle(void)
+{
+    return read_get() == ring_cur && ring_cur == ring_put && PGRAPH[0x0700 / 4] == 0;
+}
+
 int tnt2_sync(uint32_t timeout_us)
 {
     uint32_t t0 = sys_time_us();

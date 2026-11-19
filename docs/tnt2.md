@@ -148,7 +148,22 @@ RetroGPU is MIT, so code is written from documentation and from MIT-licensed dri
   with the colour's): coverage exact, the corners' colours, Z (0.3 stored as 0x4CCCCD in bits 31-8, the stencil byte
   below), alpha 128 over blue half of each. For 32-bit 2D the layer's surface format is Y32 (Mesa's), not the X
   driver's X8R8G8B8: that one leaves the top byte 0 on a fill, which in a Z24S8 buffer is Z's, so a Z clear failed.
-- **Next:** T3 (the device on B1's interface); the cursor and a page flip seen on the P3's screen are still owed.
+- **Next:** T3 (below); the cursor and a page flip seen on the P3's screen are still owed.
+
+## T3 so far (the P3, 2026-11-19)
+
+- **The TNT2 device** (`hal/src/rg/tnt2.c`, on the layer, as the ViRGE/DX's `rg/virge.c`): the BIOS's VBE modes
+  with a linear framebuffer in 16 (R5G6B5 only) and 32 bits; colour buffers A and B, the depth buffer at the
+  colour's width (Z16 with 16-bit colour, Z24S8 with 32) and pitch, each 4 KB aligned, the rest below the layer's top
+  128 KB for drawing; the engine set up after the mode set; swaps by the display start in the vertical blank; the
+  layer's 2D and cursor (the NV4's cursor lives in instance memory, so the table's VRAM offset is not used); reads to
+  RGBA8. In the table after the ViRGE/DX's, before the VBE device; DOS-GL draws on it only from T4, and until then
+  falls back to the VBE device's software renderer as before (TEXCUBE on the P3 passes that way with the TNT2 device
+  built in).
+- **`RGDEV`** through it on the P3: chosen as DOS-GL chooses, 16 modes listed (320x200 to 1600x1200), 640x480x16
+  double buffered with depth opened and cleared, 200 and 400 random 2D operations the same as the software model,
+  the swap shown, the cursor loaded, text mode back: all pass.
+- **Still T3's:** GLOS's desktop on the device (with GLOS's session).
 
 ## How it fits RetroGPU
 

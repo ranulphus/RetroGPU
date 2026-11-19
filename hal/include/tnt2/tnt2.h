@@ -30,6 +30,7 @@ void tnt2_unmap(void);
  * left as it is. 0, or -1 when the engine doesn't answer. */
 int  tnt2_accel_init(void);
 int  tnt2_sync(uint32_t timeout_us);    /* every command done: 0, or -1 on time-out */
+int  tnt2_idle(void);                   /* 1: every command written so far is done (no wait) */
 void tnt2_kick(void);                   /* the ring's written commands to the chip now */
 
 /* 2D. The target: a surface at byte offset off in video memory, pitch_bytes apart, 8, 16 or 32 bits a pixel

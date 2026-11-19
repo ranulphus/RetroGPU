@@ -103,12 +103,12 @@ build/djgpp/libtnt2.a: $(TNT2_SRCS:%.c=build/djgpp/%.o)
 # Matrox one on the HAL, the ViRGE/DX's on its layer and the memory one (gl/docs/b2.md); RGDEV drives them through
 # the table alone.
 RG_SRCS := hal/src/rg/device.c hal/src/rg/glos.c hal/src/rg/mga.c hal/src/rg/mga_glos.c hal/src/rg/virge.c hal/src/rg/mem.c \
-            hal/src/rg/vbe_soft.c
+            hal/src/rg/vbe_soft.c hal/src/rg/tnt2.c
 $(RG_SRCS:%.c=build/djgpp/%.o): DJ_CFLAGS += -I$(GLOS)/include
 build/djgpp/librg.a: $(RG_SRCS:%.c=build/djgpp/%.o)
 	@rm -f $@
 	$(DJAR) rcs $@ $^
-DJ_SRC_RGDEV := tests/rg/rgdev.c tests/hal/sw2d.c build/djgpp/librg.a build/djgpp/libvirge.a
+DJ_SRC_RGDEV := tests/rg/rgdev.c tests/hal/sw2d.c build/djgpp/librg.a build/djgpp/libvirge.a build/djgpp/libtnt2.a
 DJ_SRC_VPROBE := tests/virge/vprobe.c
 # The Riva TNT2 (docs/tnt2.md): NPROBE (T0: PCI, the chip's ID, memory and clock registers, the BIOS's modes; reads only).
 DJ_SRC_NPROBE := tests/tnt2/nprobe.c
@@ -147,7 +147,7 @@ build/djgpp/NTRI32.EXE: tests/tnt2/ntri32.c build/djgpp/libtnt2.a
 build/djgpp/VTWOD.EXE: tests/virge/vtwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libvirge.a
 build/djgpp/VTWOD.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/VTRI.EXE: tests/virge/vtri.c build/djgpp/libvirge.a
-build/djgpp/RGDEV.EXE: tests/rg/rgdev.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/librg.a build/djgpp/libvirge.a
+build/djgpp/RGDEV.EXE: tests/rg/rgdev.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/librg.a build/djgpp/libvirge.a build/djgpp/libtnt2.a
 build/djgpp/RGDEV.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/STACKPG.EXE: tests/shim/stackpg.c
 build/djgpp/MOUSETST.EXE: tests/shim/mousetst.c
