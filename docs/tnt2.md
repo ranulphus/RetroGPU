@@ -144,7 +144,11 @@ RetroGPU is MIT, so code is written from documentation and from MIT-licensed dri
 - **`NTRI` passes all 13 cases on the P3** (T2's exit), coverage exact in every one: random, mesh, Z, vertex alpha,
   LINEAR affine and perspective (colour-exact), NEAREST (under 1% of pixels pick a neighbouring texel at texel
   edges), mipmaps (0.2%), MODULATE, 32-bit and ARGB4444 textures, the texel's alpha, fog.
-- **Next:** the 32-bit target, then T3 (the device).
+- **The 32-bit target** (`NTRI32`): X8R8G8B8 colour with a Z24S8 buffer (the chip pairs the depth buffer's width
+  with the colour's): coverage exact, the corners' colours, Z (0.3 stored as 0x4CCCCD in bits 31-8, the stencil byte
+  below), alpha 128 over blue half of each. For 32-bit 2D the layer's surface format is Y32 (Mesa's), not the X
+  driver's X8R8G8B8: that one leaves the top byte 0 on a fill, which in a Z24S8 buffer is Z's, so a Z clear failed.
+- **Next:** T3 (the device on B1's interface); the cursor and a page flip seen on the P3's screen are still owed.
 
 ## How it fits RetroGPU
 

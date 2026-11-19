@@ -233,7 +233,9 @@ void tnt2_set_target(uint32_t off, int pitch_bytes, int bpp)
 {
     uint32_t surface, other;
     stale_3d = 1;
-    if (bpp == 32) surface = 0x00000006, other = 0x00000003;        /* (nv_dma.h's DEPTH24 formats) */
+    /* 32 bits: Y32 (0x0B, Mesa's surf2d_format for every 32-bit buffer), so fills write all 32 bits; the X
+     * driver's X8R8G8B8 (6) leaves the top byte 0, which in a Z24S8 buffer is Z's (the P3, 2026-11-19). */
+    if (bpp == 32) surface = 0x0000000B, other = 0x00000003;
     else if (bpp == 16) surface = 0x00000004, other = 0x00000001;
     else surface = 0x00000001, other = 0x00000003;
     ring_start(SURFACE_FORMAT, 4);
