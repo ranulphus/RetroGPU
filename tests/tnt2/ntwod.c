@@ -6,7 +6,12 @@
  *
  *   NTWOD [16] [8] [ops=N]
  *
- * HX-TEST lines: map, accel, mode-BPP, fill-BPP, clip-BPP, copy-BPP, copy-off-BPP, mixed-BPP. */
+ * Then copies from the off-screen surface to the screen, colour expansion (opaque and transparent, in random clips,
+ * starting anywhere) and images from the CPU, against the same model; and, as the P3 has no screen capture, the
+ * cursor's image in instance memory, its registers and the display start read back.
+ *
+ * HX-TEST lines: map, accel, mode-BPP, fill-BPP, clip-BPP, copy-BPP, copy-off-BPP, mixed-BPP, copy-from-BPP,
+ * mono-BPP, image-BPP, cursor, start. */
 #include "hx.h"
 #include "sw2d.h"
 #include "mga/hal.h"
@@ -32,6 +37,7 @@ static int bpp, bpp_b;
 static surface scr, off1;
 static unsigned seed = 1;
 static int nops = 200;
+static uint8_t monobuf[64 * 200], imgbuf[200 * 150 * 4];
 
 static unsigned rnd(unsigned n)
 {
@@ -189,6 +195,93 @@ static void depth(int b)
         else do_copy(t);
     }
     check("mixed");
+
+    target(&scr, 0, 0, SW, SH);                 /* from the surface off the screen */
+    for (i = 0; i < nops / 2; i++) {
+        int w = rint_(1, off1.w), h = rint_(1, off1.h), sx = rint_(0, off1.w - w), sy = rint_(0, off1.h - h);
+        int dx = rint_(-20, SW - 1), dy = rint_(-20, SH - 1);
+        tnt2_copy_from(off1.off, off1.pitch_b, sx, sy, dx, dy, w, h);
+        sw_copy(&scr.s, dx, dy, &off1.s, sx, sy, w, h);
+    }
+    check("copy-from");
+
+    {                                           /* colour expansion: opaque and transparent, in random clips */
+        int k;
+        for (k = 0; k < nops / 4; k++) {
+            int x0 = rint_(0, SW - 2), y0 = rint_(0, SH - 2), w = rint_(1, 200), h = rint_(1, 120);
+            int x = rint_(-40, SW - 1), y = rint_(-40, SH - 1), stride = (w + 7) / 8 + (int)rnd(3), t = (int)rnd(2);
+            uint32_t fg = rpix(), bg = rpix();
+            for (i = 0; i < stride * h; i++)
+                monobuf[i] = (uint8_t)rnd(256);
+            if (rnd(2))
+                target(&scr, 0, 0, SW, SH);
+            else
+                target(&scr, x0, y0, rint_(x0 + 1, SW), rint_(y0 + 1, SH));
+            tnt2_mono(x, y, w, h, monobuf, stride, fg, bg, t ? TNT2_MONO_TRANSPARENT : 0);
+            sw_mono(&scr.s, x, y, w, h, monobuf, stride, fg, bg, t);
+        }
+        check("mono");
+    }
+
+    {                                           /* images from the CPU */
+        int k;
+        target(&scr, 0, 0, SW, SH);
+        for (k = 0; k < nops / 4; k++) {
+            int w = rint_(1, 200), h = rint_(1, 150), x = rint_(-30, SW - 1), y = rint_(-30, SH - 1);
+            int stride = w * bpp_b + (int)rnd(8);
+            for (i = 0; i < stride * h; i++)
+                imgbuf[i] = (uint8_t)rnd(256);
+            tnt2_image(x, y, w, h, imgbuf, stride);
+            sw_image(&scr.s, x, y, w, h, imgbuf, stride);
+        }
+        check("image");
+    }
+}
+
+/* The cursor and the display start, read back (no screen capture on the P3): the image in instance memory as the
+ * masks and colours say, CR31's shown bit, the position register, the start register. */
+static void cursor_and_start(void)
+{
+    static uint8_t and_m[512], xor_m[512];
+    volatile uint32_t *img = tnt2_regs + 0x710000 / 4 + 0x1E00;
+    volatile uint8_t *pcio = (volatile uint8_t *)tnt2_regs + 0x601000;
+    int i, bad = -1, x, y;
+    uint8_t cr31;
+    uint32_t pos, start0 = tnt2_regs[0x600800 / 4];
+    for (i = 0; i < 512; i++)
+        and_m[i] = (uint8_t)rnd(256), xor_m[i] = (uint8_t)rnd(256);
+    tnt2_cursor_load(and_m, xor_m);
+    tnt2_cursor_colours(0x000000, 0xFFFFFF);
+    tnt2_cursor_move(-5, 100);
+    tnt2_cursor_show(1);
+    for (y = 0; y < 32 && bad < 0; y++)
+        for (x = 0; x < 32 && bad < 0; x++) {
+            int k = y * 8 + x / 8, s = 7 - (x & 7), a = (and_m[k] >> s) & 1, xo = (xor_m[k] >> s) & 1;
+            uint32_t want = !a ? (xo ? 0xFFFFu : 0x8000u) : xo ? 0xFFFFu : 0u;
+            uint32_t got = (img[(y * 32 + x) / 2] >> (16 * (x & 1))) & 0xFFFFu;
+            if (got != want)
+                bad = y * 32 + x;
+        }
+    pcio[0x3D4] = 0x31;
+    cr31 = pcio[0x3D5];
+    pos = tnt2_regs[0x680300 / 4];
+    /* (The position register keeps 12 bits of each, signed: -5 reads 0xFFB; the P3, 2026-11-19.) */
+    hx_test("cursor", bad < 0 && (cr31 & 0xFD) == 0xBD && (pos & 0x0FFF0FFFu) == ((100u << 16) | 0x0FFBu),
+            "image %s, CR31 %02x, position %08lx", bad < 0 ? "as built" : "differs", cr31, (unsigned long)pos);
+    tnt2_cursor_show(0);
+    pcio[0x3D4] = 0x31;
+    cr31 = pcio[0x3D5];
+    if (cr31 & 1)
+        hx_test("cursor-hide", 0, "CR31 %02x after hiding", cr31);
+    {
+        uint32_t want = 640u * 2u * 8u, got;
+        int r = tnt2_set_start(want);
+        tnt2_vsync_wait(100000);
+        got = tnt2_regs[0x600800 / 4];
+        tnt2_set_start(start0);
+        hx_test("start", r == 0 && got == want, "set %lu, read %lu (was %lu)", (unsigned long)want,
+                (unsigned long)got, (unsigned long)start0);
+    }
 }
 
 int main(int argc, char **argv)
@@ -228,6 +321,7 @@ int main(int argc, char **argv)
         depth(16);
     if (want8)
         depth(8);
+    cursor_and_start();
     tnt2_sync(1000000);
     vbe_set_text_mode();
     hx_done(0);

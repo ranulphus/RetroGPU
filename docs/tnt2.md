@@ -2,7 +2,8 @@
 
 **Status (2026-11-19): v1, the owner's answers in (below). The card is in the P3 (bench B): a TNT2 M64 (NV5,
 64-bit memory). T0 done (below); before it, DOS-GL's software renderer through the card's VBE BIOS passed all 35
-conformance tests there (B3's bench tier).**
+conformance tests there (B3's bench tier). T1's 2D is byte for byte the software model's on the card, and its
+cursor and display start read back as written; seeing them on the screen is still owed.**
 
 The owner's order of 2026-11-12 (`gl/docs/backends.md`): the S3 ViRGE/DX first (`docs/virge.md`), then the Riva
 TNT2, then ATI's Rage 128 Pro, then perhaps the Radeon 7000 VE. Each card gets a plan of its own before its work
@@ -77,8 +78,27 @@ RetroGPU is MIT, so code is written from documentation and from MIT-licensed dri
 - **`NTWOD`** (`tests/tnt2/ntwod.c`, against `tests/hal/sw2d.c`): at 16 and 8 bits (BIOS modes 111h and 101h), clear,
   fills, fills in random clips, copies (overlapping too), copies on a surface off the screen of another pitch, and a
   mixed run: all byte for byte the same as the software model on the P3's M64.
-- **Still T1's:** colour expansion (text, the mono bitmaps), image upload, the cursor, the display start, and
-  coordinates outside the surface (the methods' 16-bit x and y).
+- **Then the rest of the 2D** (as `nv_xaa.c`):
+  - **Copies from another surface:** the surfaces object's source pitch and offset, then the blit.
+  - **Colour expansion** through the GDI object's one- and two-colour expansion: the bits in the ring, rows padded
+    to 32 pixels, the leftmost pixel in a dword's bit 0 (the layer turns the callers' bit-7-first rows round),
+    the command's own clip trimming the padding; colours with ones above the depth, as the driver's. Only each
+    row's visible part is sent, so a rectangle may start anywhere.
+  - **Images from the CPU:** a band of rows at a time into a 64 KB scratch area after the ring, then a blit from
+    there.
+  - **Coordinates outside the surface:** every operation is trimmed to the clip in software first (as on the
+    ViRGE), so the methods' 16-bit x and y only ever see the visible part; NTWOD's cases start up to 40 pixels
+    off the top and left.
+- **The cursor** (`nv_cursor.c`, `nv_hw.c`): the NV4's is 32 x 32 pixels of A1R5G5B5 in instance memory (dword
+  0x1E00; CR30, CR31 and CR2F point there, CR31 bit 0 shows it), so of the HAL's 64 x 64 AND/XOR image the top
+  left quarter shows, and the pixels the Matrox and ViRGE cursors invert take colour 1. Its position register
+  keeps 12 bits of each coordinate, signed (-5 reads back as 0xFFB).
+- **The display start:** PCRTC 0x600800, in bytes (a multiple of 4), and the vertical retrace from port 3DAh.
+- **`NTWOD`** also covers copies from the surface off the screen, colour expansion (opaque and transparent, in
+  random clips) and images, against the same model, all byte for byte on the P3 at 16 and 8 bits; with no screen
+  capture there, the cursor's image in instance memory, CR31 and the position, and the display start are read back
+  (all as written).
+- **Still T1's:** the cursor and a page flip seen on the P3's screen (the owner's eyes, as the ViRGE's mode test).
 
 ## How it fits RetroGPU
 
