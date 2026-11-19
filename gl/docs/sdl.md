@@ -113,7 +113,12 @@ of the numbers and structures they use (`SDL_glos.h`):
 
 Elsewhere (plain DOS, an 8- or 32-bit desktop, GLOS without a Matrox card)
 the same program takes the screen as before; under GLOS it then runs as a
-session. `SDL_VIDEO_DRIVER=vesa` forces that.
+session. `SDL_VIDEO_DRIVER=vesa` forces that. From GLOS's API 2.5 on
+(patch 0010), its sound still goes into GLOS's mixer: the program is not
+made a GLOS app, and the mixer keeps the card for it while it has a stream
+open, so it plays on every card GLOS drives (its Crystal chips' WSS side, and
+the virtual Sound Blaster's cards to come). Before 2.5, and on plain DOS, the
+`soundblaster` driver has the card itself.
 
 ## Leaving the machine usable
 
@@ -136,6 +141,7 @@ chains to SDL's.
 | `0006-dos-audio-fill-the-ring-before-yielding` | the audio thread yielded on every wait, so it mixed one chunk per turn and a game yielding once per 37 ms frame underran; it now fills the ring and yields when full, or after 10 ms without a yield (slow mixing must not starve the main thread) | bug fix |
 | `0008-dos-glos-windows` | the `glos` video driver: windows, events and OpenGL through DOS-GL's GLOS window on a GLOS desktop (above); `vesa` stays for plain DOS | new backend |
 | `0009-dos-glos-mixer` | the `glos` audio driver: a stream into GLOS's mixer; `soundblaster` stays for plain DOS | new backend |
+| `0010-dos-glos-audio-in-sessions` | the `glos` audio driver also for a program that has the screen under GLOS (API 2.5): not made an app; the rate probe's stream closed only after the real one opens | backend change |
 | `0007-dos-audio-give-up-a-silent-card` | with BLASTER naming the wrong IRQ the card never asks for audio, the ring stays full and the program hung closing the device; once a full ring has not drained for a second, the driver logs why (an error: is the card on IRQ n?) and gives the device up, and the program carries on silent | bug fix |
 
 `tools/sdl/build.sh` applies them to a copy of the pinned source; the

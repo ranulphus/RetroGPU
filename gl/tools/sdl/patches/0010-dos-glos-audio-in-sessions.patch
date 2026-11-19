@@ -1,0 +1,198 @@
+--- a/src/audio/dos/SDL_glosaudio.c
++++ b/src/audio/dos/SDL_glosaudio.c
+@@ -21,10 +21,16 @@
+ 
+ // The "glos" audio driver: a stream into GLOS's mixer (GLOS's PRD §10.5).
+ //
+-// Under GLOS, when the program has its windows from GLOS (the glos video
+-// driver's condition, GLOS_MACHINE_GLWIN) and GLOS mixes the Sound Blaster
+-// itself (GLOS_MACHINE_AUDIO), sound goes through GLOS: the card is the
+-// desktop's, shared by every app. A stream is a ring of signed 16-bit
++// Under GLOS, when GLOS mixes the sound card itself (GLOS_MACHINE_AUDIO),
++// sound goes through GLOS's mixer:
++// - when the program has its windows from GLOS (the glos video driver's
++//   condition), as the GLOS app it then is: the card is the desktop's,
++//   shared by every app;
++// - otherwise, from API 2.5 on, as the program that has the screen (a
++//   session): it is not made an app, and the mixer keeps the card for it
++//   (or takes it back) while it has a stream open, with every card GLOS
++//   drives; before 2.5 the Sound Blaster driver has the card itself.
++// A stream is a ring of signed 16-bit
+ // samples in pages GLOS shares with the program; SDL's audio thread writes
+ // chunks into it and GLOS's mixer takes them from the card's interrupt.
+ // Threads switch only at yields here, as with the Sound Blaster driver: the
+@@ -40,6 +46,8 @@
+ #include "../../core/dos/SDL_dos_scheduler.h"
+ #include "../SDL_sysaudio.h"
+ 
++static bool glos_app_audio; // (the program's windows are GLOS's: it is a GLOS app; else a session's stream)
++
+ struct SDL_PrivateAudioData
+ {
+     unsigned id;
+@@ -53,8 +61,9 @@
+ {
+     struct SDL_PrivateAudioData *hidden;
+     GLOS_AudioOut q;
+-    unsigned bytes;
+-    if (!GLOS_BecomeApp()) {
++    unsigned bytes, probe_handle = 0;
++    bool probed = false;
++    if (glos_app_audio && !GLOS_BecomeApp()) {
+         return SDL_SetError("GLOS: the program can't be a GLOS app here");
+     }
+     device->spec.format = SDL_AUDIO_S16LE;
+@@ -71,7 +80,8 @@
+         if (probe && probe->mixer_rate >= 4000 && probe->mixer_rate <= 48000) {
+             device->spec.freq = (int)probe->mixer_rate;
+         }
+-        GLOS_Close_(q.handle);
++        probe_handle = q.handle, probed = true; // (closed once the real stream is open: in a session the card
++                                                // would go back to it between the two)
+     }
+     if (device->spec.freq < 4000 || device->spec.freq > 48000) {
+         device->spec.freq = 22050;
+@@ -81,32 +91,43 @@
+     for (bytes = 4096; bytes < (unsigned)device->buffer_size * 8 && bytes < 65536; bytes *= 2) {
+     }
+     if ((unsigned)device->buffer_size * 2 > bytes) {
++        if (probed) {
++            GLOS_Close_(probe_handle);
++        }
+         return SDL_SetError("GLOS: chunks of %d bytes are too big for a stream", device->buffer_size);
+     }
+     hidden = (struct SDL_PrivateAudioData *)SDL_calloc(1, sizeof(*hidden));
+-    if (!hidden) {
+-        return false;
++    if (hidden) {
++        hidden->staging = (Uint8 *)SDL_calloc(1, device->buffer_size);
+     }
+-    hidden->staging = (Uint8 *)SDL_calloc(1, device->buffer_size);
+-    if (!hidden->staging) {
++    if (!hidden || !hidden->staging) {
+         SDL_free(hidden);
++        if (probed) {
++            GLOS_Close_(probe_handle);
++        }
+         return false;
+     }
+     SDL_zero(q);
+     q.size = sizeof(q);
+     q.rate = (unsigned)device->spec.freq, q.channels = (unsigned)device->spec.channels, q.bytes = bytes;
+     if (GLOS_Call(GLOS_AUDIO_OUT, &q) != 0 || !(hidden->stream = (GLOS_Stream *)GLOS_Pointer(q.ring))) {
++        if (probed) {
++            GLOS_Close_(probe_handle);
++        }
+         SDL_free(hidden->staging);
+         SDL_free(hidden);
+         return SDL_SetError("GLOS: no stream from the mixer");
+     }
++    if (probed) {
++        GLOS_Close_(probe_handle);
++    }
+     hidden->id = q.handle; // (the stream's handle: closed with it)
+     hidden->ring = (Uint8 *)hidden->stream + hidden->stream->ring;
+     hidden->chunk_size = device->buffer_size;
+     device->hidden = hidden;
+-    SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "GLOS: stream %u, %d Hz, %d channels, %d-byte chunks, a ring of %u (mixer %u Hz)",
++    SDL_LogDebug(SDL_LOG_CATEGORY_AUDIO, "GLOS: stream %u, %d Hz, %d channels, %d-byte chunks, a ring of %u (mixer %u Hz), %s",
+                  hidden->id, device->spec.freq, device->spec.channels, device->buffer_size, bytes,
+-                 hidden->stream->mixer_rate);
++                 hidden->stream->mixer_rate, glos_app_audio ? "a GLOS app" : "the program that has the screen");
+     return true;
+ }
+ 
+@@ -161,9 +182,15 @@
+ 
+ static bool GLOSAUDIO_Init(SDL_AudioDriverImpl *impl)
+ {
+-    const unsigned need = GLOS_MACHINE_GLWIN | GLOS_MACHINE_AUDIO;
+-    if ((GLOS_Caps() & need) != need) {
+-        return false; // plain DOS, or no windows or no mixer from GLOS: the Sound Blaster driver's card
++    if (!(GLOS_Caps() & GLOS_MACHINE_AUDIO)) {
++        return false; // plain DOS, or no mixer from GLOS: the Sound Blaster driver's card
++    }
++    if (GLOS_WindowsFromGlos()) {
++        glos_app_audio = true;
++    } else if (GLOS_Minor() >= GLOS_MINOR_SESSION_AUDIO) {
++        glos_app_audio = false; // (a program with the screen: the mixer keeps the card for its streams)
++    } else {
++        return false; // (before API 2.5 only apps have streams: the Sound Blaster driver's card)
+     }
+     impl->OpenDevice = GLOSAUDIO_OpenDevice;
+     impl->WaitDevice = GLOSAUDIO_WaitDevice;
+--- a/src/core/dos/SDL_glos.c
++++ b/src/core/dos/SDL_glos.c
+@@ -33,6 +33,7 @@
+     unsigned short sel;
+ } glos_entry;
+ static int glos_found; // 1 GLOS, -1 none
++static unsigned glos_minor; // (the API's minor version GLOS speaks)
+ 
+ int GLOS_Call(unsigned fn, void *s)
+ {
+@@ -69,9 +70,24 @@
+     if (GLOS_Call(GLOS_CORE_VERSION, &v) != 0 || v.major != 2) {
+         return 0;
+     }
++    glos_minor = v.minor;
+     return v.machine;
+ }
+ 
++unsigned GLOS_Minor(void)
++{
++    return GLOS_Caps() ? glos_minor : 0;
++}
++
++bool GLOS_WindowsFromGlos(void)
++{
++    const char *want = SDL_GetHint(SDL_HINT_VIDEO_DRIVER);
++    if (want && SDL_strcasecmp(want, "glos") != 0) {
++        return false; // (asked for another by name)
++    }
++    return (GLOS_Caps() & GLOS_MACHINE_GLWIN) != 0;
++}
++
+ bool GLOS_BecomeApp(void)
+ {
+     static GLOS_Init in;
+--- a/src/core/dos/SDL_glos.h
++++ b/src/core/dos/SDL_glos.h
+@@ -56,6 +56,8 @@
+ #define GLOS_MACHINE_GLWIN 2
+ #define GLOS_MACHINE_AUDIO 4
+ 
++#define GLOS_MINOR_SESSION_AUDIO 5 // (API 2.5: a program that is not an app may have audio streams)
++
+ #define GLOS_EV(area, n) ((unsigned short)(((unsigned)(area) << 8) | (unsigned)(n)))
+ #define GLOS_EV_END GLOS_EV(0, 3)
+ #define GLOS_EV_FOCUS GLOS_EV(1, 1)
+@@ -217,6 +219,11 @@
+ 
+ // What the machine can do (GLOS_MACHINE_), 0 without a GLOS that speaks API 2.0.
+ extern unsigned GLOS_Caps(void);
++// The minor version of the API 2 that GLOS speaks (0 without GLOS).
++extern unsigned GLOS_Minor(void);
++// Whether the program's windows come from GLOS (the glos video driver's condition: a desktop that can show it,
++// GLOS_MACHINE_GLWIN, and no other video driver asked for by name).
++extern bool GLOS_WindowsFromGlos(void);
+ // Function fn with its structure (NULL for a call that has none): 0, or
+ // GLOS's error code.
+ extern int GLOS_Call(unsigned fn, void *s);
+--- a/src/video/dos/SDL_glosvideo.c
++++ b/src/video/dos/SDL_glosvideo.c
+@@ -583,12 +583,8 @@
+ static SDL_VideoDevice *GLOS_CreateDevice(void)
+ {
+     SDL_VideoDevice *device;
+-    const char *want = SDL_GetHint(SDL_HINT_VIDEO_DRIVER);
+-    if (want && SDL_strcasecmp(want, "glos") != 0) {
+-        return NULL; // (asked for another by name)
+-    }
+-    if (!(GLOS_Caps() & GLOS_MACHINE_GLWIN)) {
+-        return NULL; // plain DOS, or a desktop that can't show this program: the vesa driver's screen
++    if (!GLOS_WindowsFromGlos()) {
++        return NULL; // plain DOS, a desktop that can't show this program, or another driver asked for: vesa's screen
+     }
+     device = (SDL_VideoDevice *)SDL_calloc(1, sizeof(SDL_VideoDevice));
+     if (!device) {
