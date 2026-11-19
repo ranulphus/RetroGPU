@@ -4,7 +4,8 @@
 64-bit memory). T0 done (below); before it, DOS-GL's software renderer through the card's VBE BIOS passed all 35
 conformance tests there (B3's bench tier). T1's 2D is byte for byte the software model's on the card, and its
 cursor and display start read back as written and look right on the screen (T1 done). T2 done: NTRI's 13 cases
-pass on the card at 16 bits, NTRI32 at 32. T3's device passes RGDEV.**
+pass on the card at 16 bits, NTRI32 at 32. T3's device passes RGDEV. T4: DOS-GL draws on the TNT2 and passes its whole
+conformance suite on the P3.**
 
 The owner's order of 2026-11-12 (`gl/docs/backends.md`): the S3 ViRGE/DX first (`docs/virge.md`), then the Riva
 TNT2, then ATI's Rage 128 Pro, then perhaps the Radeon 7000 VE. Each card gets a plan of its own before its work
@@ -167,6 +168,35 @@ RetroGPU is MIT, so code is written from documentation and from MIT-licensed dri
   double buffered with depth opened and cleared, 200 and 400 random 2D operations the same as the software model,
   the swap shown, the cursor loaded, text mode back: all pass.
 - **Still T3's:** GLOS's desktop on the device (with GLOS's session).
+
+## T4 so far (the P3, 2026-11-19)
+
+- **DOS-GL's TNT2 drawing back end** (`gl/src/backend/tnt2/backend.c`): on the P3 DOS-GL now draws on the TNT2
+  device instead of the VBE device's software renderer. GL's clip-space vertices are clipped (the shared clipper,
+  a guard band of 2), projected, culled and offset as the software back end does, then handed to the chip as
+  TLVERTEX (it sets triangles up itself); flat shading gives every vertex the provoking one's colour.
+- **State to the triangle object's words:** OpenGL's blend factors, alpha and depth tests to Direct3D 5's codes;
+  the texture environments MODULATE as MODULATEALPHA, REPLACE as DECAL (textures with alpha) or DECALALPHA
+  (without: the fragment's alpha kept), DECAL as DECALALPHA, ADD as ADD; the mipmap level's half-level bias (T2);
+  scissor cut to the viewport as the 3D clip, written only when it changes.
+- **Textures:** GL's RGBA8 levels converted (A8R8G8B8, R5G6B5 for RGB, A1R5G5B5, A4R4G4B4 when GL asks for 4 bits),
+  colour indices through their palette (made again when it changes), stored swizzled in the device's heap (the
+  Matrox back end's allocator, each base on 128 bytes) with the least recently drawn given up when it is full.
+  Repeating textures' coordinates are shifted by whole periods per triangle (the chip's interpolation is a float's).
+- **Fog** is the chip's factor per vertex (Mesa's way too); a fogged triangle whose factor changes by more than a
+  tenth across it is split in four in clip space, up to three times, to follow OpenGL's per-pixel fog.
+- **Clears** by the 2D engine in the scissor; a Z24S8 clear carries the stencil byte. **Lines and points** as
+  quads (the chip has neither).
+- **Not yet, approximated and said once (DGL-WARN):** GL_BLEND's environment, colour masks, the stencil test, the
+  second texture unit (the 0x55 object has all four).
+- **Conformance on the P3** (`CARD=tnt2 make conform-bench PC=bench-p3`, OSMesa's references, the default
+  tolerances): the first run passed 31 of 35; then four fixes: a clipped polygon's area over all its vertices (t35:
+  a quad clipped to the guard band had its first three vertices on one line and was dropped), the whole-period
+  shift (t14: 30,000 periods along), palettes (t19), the fog split (t10). **Then the whole suite passes: all 33 tests
+  that apply**, most with no pixel out (the worst: t20, 0.11%). t33 (stencil) and t34 (lines and points) are the
+  software renderer's only.
+- **Still T4's:** GLOS's screensavers, Fifth Wheel and the ports (GLQuake, PrBoom-plus) on the P3; the 0x55 object for
+  the gaps.
 
 ## How it fits RetroGPU
 

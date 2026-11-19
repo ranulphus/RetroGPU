@@ -72,6 +72,7 @@ typedef struct {
 } tnt2_vertex;
 int      tnt2_3d_init(void);
 void     tnt2_3d_target(uint32_t color_off, uint32_t zeta_off, int pitch_bytes, int bpp, int w, int h);
+void     tnt2_3d_clip(int x0, int y0, int x1, int y1);  /* inclusive-exclusive; a change waits for the engine */
 void     tnt2_3d_state(uint32_t tex_off, uint32_t format, uint32_t filter, uint32_t blend, uint32_t control,
                        uint32_t fogcolor);
 void     tnt2_tri(const tnt2_vertex *a, const tnt2_vertex *b, const tnt2_vertex *c);

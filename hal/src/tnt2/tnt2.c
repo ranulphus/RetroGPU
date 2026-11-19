@@ -31,6 +31,7 @@
 #include "tnt2/tnt2.h"
 #include "mga/hal.h"
 #include "mga/sys.h"
+#include <string.h>
 
 tnt2_chip tnt2;
 volatile uint32_t *tnt2_regs;
@@ -518,6 +519,7 @@ int tnt2_vsync_wait(uint32_t timeout_us)
  * stall the engine; the 3D clip is written into PGRAPH instead (0x40053C-0x400548, as nouveau does). ---- */
 
 #define SUBCH(s, m) (((uint32_t)(s) << 13) | (uint32_t)(m))
+static uint32_t clip_now[4];                    /* (the 3D clip PGRAPH has: tnt2_3d_clip) */
 #define S3D 4                                   /* subchannel 4: the 3D surfaces (the line object's before) */
 #define TRI 7                                   /* subchannel 7: the textured triangle (the scaled image's before) */
 #define H_SURF3D 0x80000018u                    /* (RAMHT slots 8 and 9: the X driver's handles hash 0x80000010+i to i) */
@@ -543,6 +545,7 @@ uint32_t tnt2_3d_trap(uint32_t *addr, uint32_t *data)
 
 int tnt2_3d_init(void)
 {
+    clip_now[0] = ~0u;                                  /* (the engine was set up again: PGRAPH's clip unknown) */
     /* The objects: 0x53 at instance 0x120A (PRAMIN dwords 0x828-0x82B), 0x54 at 0x120B (0x82C-0x82F). */
     PRAMIN[0x0828] = 0x01000053; PRAMIN[0x0829] = 0; PRAMIN[0x082A] = 0x12001200; PRAMIN[0x082B] = 0;
     PRAMIN[0x082C] = 0x01000054; PRAMIN[0x082D] = 0; PRAMIN[0x082E] = 0x12001200; PRAMIN[0x082F] = 0;
@@ -573,13 +576,26 @@ static void send_target(int clip)
     NEXT(t3d.bpp == 32 ? 0x105u : 0x103u);
     ring_start(SUBCH(S3D, 0x308), 1);                   /* PITCH: zeta high, colour low */
     NEXT(((uint32_t)t3d.pitch << 16) | (uint32_t)t3d.pitch);
-    if (!clip)
+    if (clip)
+        tnt2_3d_clip(0, 0, t3d.w, t3d.h);
+}
+
+/* The 3D clip (inclusive-exclusive), straight into PGRAPH with the engine idle (as nouveau emulates the surfaces'
+ * clip methods), and only when it changes: a change costs a sync. */
+static uint32_t clip_now[4] = { ~0u, ~0u, ~0u, ~0u };
+
+void tnt2_3d_clip(int x0, int y0, int x1, int y1)
+{
+    uint32_t c[4];
+    c[0] = (uint32_t)x0 & 0x3FFFF, c[1] = (uint32_t)y0 & 0x3FFFF, c[2] = (uint32_t)x1 & 0x3FFFF, c[3] = (uint32_t)y1 & 0x3FFFF;
+    if (!memcmp(c, clip_now, sizeof c))
         return;
-    tnt2_sync(1000000);                                 /* (the clip straight into PGRAPH, the engine idle) */
-    PGRAPH[0x053C / 4] = 0;
-    PGRAPH[0x0540 / 4] = 0;
-    PGRAPH[0x0544 / 4] = (uint32_t)t3d.w & 0x3FFFF;
-    PGRAPH[0x0548 / 4] = (uint32_t)t3d.h & 0x3FFFF;
+    tnt2_sync(1000000);
+    PGRAPH[0x053C / 4] = c[0];
+    PGRAPH[0x0540 / 4] = c[1];
+    PGRAPH[0x0544 / 4] = c[2];
+    PGRAPH[0x0548 / 4] = c[3];
+    memcpy(clip_now, c, sizeof c);
 }
 
 static void send_state(void)

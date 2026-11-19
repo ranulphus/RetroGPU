@@ -9,6 +9,7 @@
  * after the BIOS's mode set. A swap shows the hidden buffer by the display start (PCRTC), in the vertical blank when
  * vsync is on. No GLOS window (B3's software path shows a window's pixels for cards other than Matrox ones). */
 #include "rg/device.h"
+#include "rg/tnt2_dev.h"
 #include "tnt2/tnt2.h"
 #include "mga/hal.h"
 #include "mga/sys.h"
@@ -19,15 +20,10 @@
 #define MAX_MODES 32
 #define TEXTURE_RESERVE (1024u * 1024u)  /* kept for textures when judging fit */
 
-static struct {
-    int      active;
-    int      width, height, pitch_bytes, bpp;
-    int      double_buffer, depth_bits;
-    uint32_t front_off, back_off, z_off, heap_off, heap_end;
-    int      front_is_a, draw_front;
-    mga_vbe_mode mode;
-    rg_open  hooks;
-} st;
+rg_tnt2_ctx rg_tnt2;                    /* (the open context: rg/tnt2_dev.h, for the drawing back end) */
+#define st rg_tnt2
+static mga_vbe_mode st_mode;
+static rg_open st_hooks;
 static int found;                       /* 0 not yet, 1 found, -1 none */
 static int mapped, graphics;
 static rg_info info;
@@ -123,7 +119,7 @@ static int list_modes(rg_mode *out, int max)
 
 /* ---- Buffers and showing ------------------------------------------------- */
 
-static uint32_t color_off(int front)
+uint32_t rg_tnt2_color_off(int front)
 {
     if (!st.double_buffer)
         return st.front_off;
@@ -134,7 +130,7 @@ static int surface(int which, rg_surface *s)
 {
     if (!st.active)
         return -1;
-    s->off = color_off(which == RG_SURF_FRONT);
+    s->off = rg_tnt2_color_off(which == RG_SURF_FRONT);
     s->pitch_bytes = st.pitch_bytes;
     s->bpp = st.bpp;
     s->width = st.width;
@@ -150,8 +146,8 @@ static int sync(void)
 {
     if (tnt2_sync(500000) != 0)
         return -1;
-    if (st.hooks.on_sync)
-        st.hooks.on_sync();
+    if (st_hooks.on_sync)
+        st_hooks.on_sync();
     return 0;
 }
 
@@ -164,8 +160,8 @@ static int swap(int vsync)
     tnt2_kick();
     if (vsync) {
         uint32_t t0 = sys_time_us();
-        if (st.hooks.wait)
-            st.hooks.wait();
+        if (st_hooks.wait)
+            st_hooks.wait();
         tnt2_vsync_wait(50000);
         retrace_us += sys_time_us() - t0;
     }
@@ -219,21 +215,26 @@ static int open_screen(const rg_open *o, rg_opened *out)
         return -1;
     }
     memset(&st, 0, sizeof st);
-    st.hooks = *o;
-    st.mode = vmodes[i];
+    memset(&st_hooks, 0, sizeof st_hooks);
+    st_hooks = *o;
+    st_mode = vmodes[i];
     st.width = o->width;
     st.height = o->height;
     st.bpp = bpp;
     st.double_buffer = o->double_buffer != 0;
     st.depth_bits = o->depth_bits ? (bpp == 32 ? 24 : 16) : 0;
     graphics = 1;                               /* (about to leave text mode) */
-    if (vbe_set_mode(&st.mode, 0, &pitch_px) != 0) {
-        rg_set_error("VBE mode %03x failed", st.mode.mode);
+    if (vbe_set_mode(&st_mode, 0, &pitch_px) != 0) {
+        rg_set_error("VBE mode %03x failed", st_mode.mode);
         return -1;                              /* (the caller closes: the screen goes back) */
     }
     st.pitch_bytes = pitch_px * bytes_of(bpp);
     if (tnt2_accel_init() != 0) {
         rg_set_error("the %s's engine didn't start (its command ring was never read)", tnt2.name);
+        return -1;
+    }
+    if (tnt2_3d_init() != 0) {              /* (the 3D objects, for the drawing back end) */
+        rg_set_error("the %s's 3D objects didn't start", tnt2.name);
         return -1;
     }
     colour = (uint32_t)st.pitch_bytes * (uint32_t)st.height;
@@ -307,12 +308,12 @@ static int read_px(int front, int x, int y, int w, int h, uint8_t *rgba, int str
     if (!st.active)
         return -1;
     tnt2_sync(500000);
-    fb = tnt2_fb + color_off(front);
+    fb = tnt2_fb + rg_tnt2_color_off(front);
     for (j = 0; j < h; j++, rgba += stride) {
         int sy = y + j;
         uint8_t *p = rgba;
-        if ((j & 15) == 15 && st.hooks.yield)
-            st.hooks.yield();
+        if ((j & 15) == 15 && st_hooks.yield)
+            st_hooks.yield();
         for (i = 0; i < w; i++, p += 4) {
             int sx = x + i;
             unsigned r = 0, g = 0, b = 0;
