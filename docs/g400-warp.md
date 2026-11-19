@@ -370,6 +370,12 @@ it lasts for the rest of the program.
   `-mtex`, 4 snapshots each) and `-mtex` kept its gain (1 reset and 3,685 switches in the stream a run). That
   step from loaded to memory sometimes fails (WARPTRI `switch=200`: 2 failures, both recovered). The onset of the
   corrupt state is still unexplained.
+- **The onset is the 440BX's AGP at 2x (2026-11-19):** the corrupt state follows the PC, not the card. The G400
+  corrupted about 1 GLQuake run in 18 in bench-g400's IBM 300PL (Intel 440BX) and none in 83 in the P3 (an ALi
+  Aladdin Pro II); an AGP G450 in the 300PL corrupted too (1 in 60). In the 300PL, 60 runs of the G400 with AGP
+  off (`DGL_AGP=0`, PCI fetches) were all clean and bit-exact (52.6-53.1 fps), and 60 at 1x (`DGL_AGP=1`) too
+  (54.0-54.1 fps: 2% faster than PCI). So on an Intel 440BX host bridge (8086:7190) AGP runs at 1x unless
+  `warp_agp_rate` (DOS-GL's `DGL_AGP=2`) asks for 2x; `DGL-WARP`'s `agp=` says the rate used (`0x`: none).
 
 ## In 86Box (local patch 0122)
 

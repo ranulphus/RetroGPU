@@ -93,9 +93,11 @@ extern int warp_use_dma;
  * G200 keeps cached rings and PCI unless warp_agp_rate is set (its AGP drew
  * nothing on the real card: docs/g200-warp.md). */
 extern int warp_use_agp;
-/* With AGP: 0 (default) the fastest rate the card and the bridge both have;
- * 1 or 2 at most 1x or 2x. */
-extern int warp_agp_rate;
+/* With AGP: 0 (default) the fastest rate the card and the bridge both have,
+ * but 1x on an Intel 440BX (its 2x corrupted the WARPs' state on bench-g400's
+ * IBM 300PL); 1 or 2 at most 1x or 2x. warp_agp_rate_on: the rate AGP last
+ * ran at (0: it was never on). */
+extern int warp_agp_rate, warp_agp_rate_on;
 extern uint32_t warp_ring_bytes;        /* the rings' size at most (256 KB) */
 extern uint32_t warp_kick_bytes;        /* vertex bytes between kicks (6 KB) */
 extern int warp_list_div;               /* the list's share of the rings' block: 1/warp_list_div (8) */

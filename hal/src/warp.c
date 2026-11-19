@@ -32,7 +32,8 @@ uint32_t warp_ring_bytes = 262144;     /* the rings' size at most: halved until 
 uint32_t warp_kick_bytes = 6144;       /* vertex bytes between kicks */
 int warp_list_div = 8;                 /* the list's share of the block: 1/warp_list_div */
 int warp_use_agp = 1;
-int warp_agp_rate;                  /* 0: the fastest the card and the bridge both have; 1 or 2: at most 1x or 2x */
+int warp_agp_rate;                  /* 0: the fastest the card and the bridge both have (1x on a 440BX); 1 or 2: at most 1x or 2x */
+int warp_agp_rate_on;               /* the rate AGP last ran at: 1 or 2 (0: never on) */
 int warp_ring_mode;                 /* 0 none, 1 cached rings (PCI), 2 write-combining (PCI), 3 write-combining by AGP */
 int warp_wc_status;                 /* write-combining rings: 0 not asked, 1 given, -1 no DOS memory for them, -2 refused */
 uint32_t warp_ring_kb;
@@ -570,7 +571,7 @@ static void pll_set(uint32_t v)
 static int agp_enable(void)
 {
     uint32_t hsts, csts, both, rate, cmd;
-    int k;
+    int k, max;
     if (!agp_hcap) {
         int cap = (int)(mga_pci_read32(0, 0, 0, 0x34) & 0xFC);
         for (k = 0; k < 16 && cap && (mga_pci_read32(0, 0, 0, (uint8_t)cap) & 0xFF) != 2; k++)
@@ -585,7 +586,11 @@ static int agp_enable(void)
     hsts = mga_pci_read32(0, 0, 0, (uint8_t)(agp_hcap + 4));
     csts = mga_pci_read32(mga.bus, mga.dev, mga.fn, 0xF4);
     both = hsts & csts;
-    rate = (both & 2u) && warp_agp_rate != 1 ? 2u : (both & 1u) ? 1u : 0;
+    /* An Intel 440BX host bridge (8086:7190): 1x unless warp_agp_rate asks for 2x. At 2x bench-g400's IBM 300PL
+       corrupted the WARPs' state about one GLQuake run in 18 (a G400 and a G450 alike); at 1x 60 of 60 runs
+       were clean and bit-exact, 2% faster than PCI (2026-11-19, docs/g400-warp.md). */
+    max = warp_agp_rate ? warp_agp_rate : mga_pci_read32(0, 0, 0, 0) == 0x71908086u ? 1 : 2;
+    rate = (both & 2u) && max != 1 ? 2u : (both & 1u) ? 1u : 0;
     if (!rate)
         return -1;
     if (g200() && !(both & (1u << 9)))
@@ -599,6 +604,7 @@ static int agp_enable(void)
         pll_set(rate == 2u ? 1u : 0u);
     }
     agp_on = 1;
+    warp_agp_rate_on = (int)rate;
     return 0;
 }
 
