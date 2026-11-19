@@ -134,12 +134,17 @@ RetroGPU is MIT, so code is written from documentation and from MIT-licensed dri
 - **`NTRI`** (`tests/tnt2/ntri.c`): VTRI's scenes and OpenGL reference, at R5G6B5 with Direct3D's texture
   environments (DECAL: the texel's colour and alpha; MODULATEALPHA: the products). **The chip sets triangles up
   from x and y in 1/16 pixel:** with vertices rounded to 1/16 (or coarser) for both, coverage and colours are exact;
-  at 1/32 the edges differ (the reference rounds them so, `snap=4`, the default). On the P3, 12 of the 13 cases
-  pass with coverage exact in every one: random, mesh, Z, vertex alpha, LINEAR (affine and perspective,
-  colour-exact), NEAREST (under 1% of pixels pick a neighbouring texel at texel edges), MODULATE, 32-bit and
-  ARGB4444 textures, the texel's alpha, fog. **`tex-mip` fails:** the chip chooses its mipmap level otherwise than
-  OpenGL's per-pixel rule (35% of pixels from another level); next to find.
-- **Next in T2:** the mipmap level, the 32-bit target; then T3 (the device).
+  at 1/32 the edges differ (the reference rounds them so, `snap=4`, the default).
+- **The mipmap level** (`NTRI0`'s mipsweep: a texture whose every level is one colour, squares at known texels a
+  pixel): the chip measures the footprint by sums of absolute derivatives (|du/dx| + |dv/dx| against the same in y:
+  at 45 degrees a square's level changes at sqrt(2) less than at 0 degrees, at 30 degrees by cos + sin) and takes
+  log2 rounded down, after adding FILTER's LOD bias (bits 23-16, eighths of a level). So a bias of +4 (half a
+  level) gives OpenGL's nearest level; the sum measure is within what OpenGL allows. DOS-GL's back end adds +4 to
+  the program's bias.
+- **`NTRI` passes all 13 cases on the P3** (T2's exit), coverage exact in every one: random, mesh, Z, vertex alpha,
+  LINEAR affine and perspective (colour-exact), NEAREST (under 1% of pixels pick a neighbouring texel at texel
+  edges), mipmaps (0.2%), MODULATE, 32-bit and ARGB4444 textures, the texel's alpha, fog.
+- **Next:** the 32-bit target, then T3 (the device).
 
 ## How it fits RetroGPU
 

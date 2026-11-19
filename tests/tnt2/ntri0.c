@@ -20,6 +20,7 @@
 #include "tnt2/tnt2.h"
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 #define W 640
 #define H 480
@@ -314,6 +315,65 @@ int main(int argc, char **argv)
                 break;
         }
         hx_test("resend", 1, "%s", buf);
+    }
+    {                                           /* mipsweep: which level the chip uses at k texels a pixel */
+        static const uint16_t lc[8] = { 0xF800, 0x07E0, 0x001F, 0xFFE0, 0xF81F, 0x07FF, 0xFFFF, 0x8410 };
+        static uint16_t lvl[8][128 * 128];
+        const void *lv[8];
+        const uint32_t toff = 0x200000u;
+        static const float aniso[5][3] = { { 1, 1, 0 }, { 1, 0.25f, 0 }, { 0.25f, 1, 0 }, { 1, 1, 45 }, { 1, 1, 30 } };
+        int n, a2;
+        for (n = 0; n < 8; n++) {
+            int sz = 128 >> n, i;
+            for (i = 0; i < sz * sz; i++)
+                lvl[n][i] = lc[n];
+            lv[n] = lvl[n];
+        }
+        tnt2_sync(1000000);
+        tnt2_tex_load(toff, 2, 7, 7, 8, lv);
+        for (a2 = 0; a2 < 5; a2++) {
+            char buf[400] = "";
+            int last = -1, i;
+            tnt2_fill(0, 0, W, H, 0);
+            /* FORMAT: R5G6B5, 8 levels, 128x128; FILTER: NEAREST_MIPMAP_NEAREST, NEAREST; BLEND: DECAL. */
+            tnt2_3d_state(toff, 0x117785A1u, 0x13001010u, 0x120001A1u, 0x40182800u, 0);
+            for (i = 0; i < 64; i++) {
+                double k = 0.5 * pow(2.0, i / 8.0);
+                float x0 = (float)(16 + (i % 32) * 18), y0 = (float)(16 + (i / 32) * 18 + a2 * 40);
+                double th = aniso[a2][2] * 3.14159265 / 180, ku = k * aniso[a2][0] / 128, kv = k * aniso[a2][1] / 128;
+                tnt2_vertex q[4];
+                int j;
+                static const int cx[4] = { 0, 16, 16, 0 }, cy[4] = { 0, 0, 16, 16 };
+                memset(q, 0, sizeof q);
+                for (j = 0; j < 4; j++) {               /* (u, v) = the screen offset rotated by th, scaled */
+                    double dx = cx[j], dy = cy[j];
+                    q[j].sx = x0 + cx[j], q[j].sy = y0 + cy[j];
+                    q[j].tu = (float)(ku * (dx * cos(th) - dy * sin(th)));
+                    q[j].tv = (float)(kv * (dx * sin(th) + dy * cos(th)));
+                }
+                for (j = 0; j < 4; j++)
+                    q[j].sz = 0.5f, q[j].rhw = 1, q[j].color = 0xFFFFFFFFu, q[j].specular = 0xFF000000u;
+                tnt2_tri(&q[0], &q[1], &q[2]);
+                tnt2_tri(&q[0], &q[2], &q[3]);
+            }
+            tnt2_sync(1000000);
+            for (i = 0; i < 64; i++) {
+                double k = 0.5 * pow(2.0, i / 8.0);
+                int x0 = 16 + (i % 32) * 18, y0 = 16 + (i / 32) * 18 + a2 * 40, j, l = -2;
+                (void)k;
+                uint16_t p = fb[(y0 + 8) * pitch_px + x0 + 8];
+                for (j = 0; j < 8; j++)
+                    if (p == lc[j])
+                        l = j;
+                if (l != last) {
+                    sprintf(buf + strlen(buf), "k%.3f:L%d ", k, l);
+                    last = l;
+                }
+            }
+            hx_log("NTRI0-MIP %s %s", a2 == 0 ? "iso" : a2 == 1 ? "u-long" : a2 == 2 ? "v-long" : a2 == 3 ? "rot45" : "rot30",
+                   buf);
+        }
+        hx_test("mipsweep", trap_ok("mipsweep"), "levels logged (NTRI0-MIP)");
     }
 out:
     tnt2_sync(200000);

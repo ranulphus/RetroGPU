@@ -33,6 +33,14 @@ static unsigned seed = 7;
 static int ntri = 60;
 static const char *only;
 static float kover[2];              /* k=MIN,MAX: texels a pixel, for every textured case */
+/* The mipmap level (the P3, 2026-11-19, NTRI0's mipsweep): the chip measures the footprint by sums of absolute
+ * derivatives (lodmode 4: |du/dx| + |dv/dx| against the same in y, within what OpenGL allows; at 45 degrees it is
+ * sqrt(2) times the longest derivative) and takes log2 rounded down; its LOD bias (FILTER bits 23-16, eighths of a
+ * level) is added first, so +4 gives OpenGL's nearest level (lodsel 0). The defaults: that. For experiments: lodmode
+ * 0-3, lodsel 1 (rounded down), lodlin (log2 linear between powers of two), lodbias (the reference's), chipbias. */
+static int lodmode = 4, lodsel, lodlin;
+static double lodbias;
+static int chipbias = 4;
 static int snap = 4;                /* snap=N: vertices rounded to 1/2^N pixel for both: the chip sets triangles up from
                                        x and y in 1/16 pixel (the P3, 2026-11-19: exact at 4 bits, not at 5); -1 none */
 
@@ -178,9 +186,22 @@ static void ref_tri(const gl_vertex *a, const gl_vertex *b, const gl_vertex *c, 
                     ux = (Ax - u * Qx) / Q, uy = (Ay - u * Qy) / Q;
                     vx = (Bx - vv * Qx) / Q, vy = (By - vv * Qy) / Q;
                     if (tx.levels > 1) {
-                        double rho2 = dmax(ux * ux + vx * vx, uy * uy + vy * vy);
-                        double lod = rho2 > 0 ? 0.5 * log(rho2) / log(2.0) : -16;
-                        n = lod <= 0 ? 0 : (int)ceil(lod + 0.5) - 1;
+                        /* OpenGL's: the longer of the footprint's two screen-axis derivatives (lodmode 0); for
+                         * the chip's rule: the footprint's area (1), the texture axes' lengths (2), the largest
+                         * single derivative (3); the nearest level (lodsel 0) or rounded down (1). */
+                        double rho2 = lodmode == 1 ? fabs(ux * vy - uy * vx)
+                                    : lodmode == 2 ? dmax(ux * ux + uy * uy, vx * vx + vy * vy)
+                                    : lodmode == 3 ? dmax(dmax(ux * ux, uy * uy), dmax(vx * vx, vy * vy))
+                                    : lodmode == 4 ? pow(dmax(fabs(ux) + fabs(vx), fabs(uy) + fabs(vy)), 2)
+                                    : lodmode == 5 ? pow(dmax(fabs(ux) + fabs(uy), fabs(vx) + fabs(vy)), 2)
+                                    : dmax(ux * ux + vx * vx, uy * uy + vy * vy);
+                        double lod = (rho2 > 0 ? 0.5 * log(rho2) / log(2.0) : -16) + lodbias;
+                        if (lodlin && rho2 > 0) {
+                            int e;
+                            double m = frexp(sqrt(rho2), &e);           /* (m in [0.5, 1)) */
+                            lod = (e - 1) + (2 * m - 1) + lodbias;
+                        }
+                        n = lod <= 0 ? 0 : lodsel ? (int)floor(lod) : (int)ceil(lod + 0.5) - 1;
                         if (n > tx.levels - 1) n = tx.levels - 1;
                         if (n < 0) n = 0;
                     }
@@ -253,7 +274,7 @@ static void send_state(void)
         off = TOFF;
         format = 0x11000000u | (uint32_t)tx.log2size << 20 | (uint32_t)tx.log2size << 16 | (uint32_t)tx.levels << 12 |
                  cfmt[tx.fmt] | 0xA0 | 1;
-        filter = mag << 28 | min << 24 | 0x1010;
+        filter = mag << 28 | min << 24 | ((uint32_t)chipbias & 0xFF) << 16 | 0x1010;
         bl = (uint32_t)tx.env;
     } else {
         off = tnt2_tex_dummy_off(), format = 0x110016A1u, filter = 0x11001010u, bl = ENV_MODULATE;
@@ -485,6 +506,16 @@ int main(int argc, char **argv)
             sscanf(argv[i] + 2, "%f,%f", &kover[0], &kover[1]);
         else if (!strncmp(argv[i], "snap=", 5))
             snap = atoi(argv[i] + 5);
+        else if (!strncmp(argv[i], "lodmode=", 8))
+            lodmode = atoi(argv[i] + 8);
+        else if (!strncmp(argv[i], "lodsel=", 7))
+            lodsel = atoi(argv[i] + 7);
+        else if (!strncmp(argv[i], "chipbias=", 9))
+            chipbias = atoi(argv[i] + 9);
+        else if (!strncmp(argv[i], "lodlin=", 7))
+            lodlin = atoi(argv[i] + 7);
+        else if (!strncmp(argv[i], "lodbias=", 8))
+            lodbias = atof(argv[i] + 8);
     hx_init(1, argv, "ntri");                   /* (its own arguments only) */
     if (tnt2_find() != 0 || tnt2_map() != 0) {
         hx_test("map", 0, "no NV4-family chip");
