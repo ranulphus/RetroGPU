@@ -120,10 +120,10 @@ def check(test, card, pc=None):
     out = os.path.join(ROOT, "out", "conform", pc or card, test)
     ref = os.path.join(ROOT, "out", "conform", "ref", test)
     only = MANIFEST.get(test, {}).get("only")
-    rend = card                                 # (whose tolerances: the software renderer's on SOFT_DOS cards)
-    if card in SOFT_DOS and not pc:
+    rend = card                                 # (whose tolerances: the software renderer's on SOFT_DOS cards,
+    if card in SOFT_DOS:                        # in Loop A and on a bench PC: CARD=vbe for the P3's TNT2)
         rend = "soft" if SOFT_BPP == 16 else "soft%d" % SOFT_BPP
-    who = "soft" if (card.startswith("soft") or card in SOFT_DOS) and not pc else (pc or card)  # (soft8, soft32 too)
+    who = "soft" if card.startswith("soft") or card in SOFT_DOS else (pc or card)  # (soft8, soft32 too)
     if only and who not in only:                # (a test for some renderers only: t33's stencil)
         return {"test": test, "card": pc or card, "run": "SKIPPED", "frames": {}, "ok": True}
     if card.startswith("soft") and not pc:

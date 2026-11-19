@@ -105,6 +105,8 @@ build/djgpp/librg.a: $(RG_SRCS:%.c=build/djgpp/%.o)
 	$(DJAR) rcs $@ $^
 DJ_SRC_RGDEV := tests/rg/rgdev.c tests/hal/sw2d.c build/djgpp/librg.a build/djgpp/libvirge.a
 DJ_SRC_VPROBE := tests/virge/vprobe.c
+# The Riva TNT2 (docs/tnt2.md): NPROBE (T0: PCI, the chip's ID, memory and clock registers, the BIOS's modes; reads only).
+DJ_SRC_NPROBE := tests/tnt2/nprobe.c
 DJ_SRC_VTWOD := tests/virge/vtwod.c tests/hal/sw2d.c build/djgpp/libvirge.a
 DJ_SRC_VTRI := tests/virge/vtri.c build/djgpp/libvirge.a
 build/djgpp/HOOKS.EXE: tests/hal/hooks.c
@@ -124,6 +126,7 @@ build/djgpp/VRAMBUS.EXE: tests/hal/vrambus.c
 build/djgpp/FOGPROBE.EXE: tests/hal/fogprobe.c
 build/djgpp/CLOCKMON.EXE: tests/hal/clockmon.c
 build/djgpp/VPROBE.EXE: tests/virge/vprobe.c
+build/djgpp/NPROBE.EXE: tests/tnt2/nprobe.c
 build/djgpp/VTWOD.EXE: tests/virge/vtwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libvirge.a
 build/djgpp/VTWOD.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/VTRI.EXE: tests/virge/vtri.c build/djgpp/libvirge.a
