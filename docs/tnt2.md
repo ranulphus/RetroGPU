@@ -33,9 +33,15 @@ The TNT2 family is NVIDIA's NV5 (1999), the TNT's (NV4) successor with the same 
 ## The references and their licences
 
 RetroGPU is MIT, so code is written from documentation and from MIT-licensed drivers, never copied from GPL ones:
-- **X.org's `xf86-video-nv`** (`riva_hw.c`, `riva_xaa.c`: the NV4/NV5 FIFO, PGRAPH and instance-memory set-up and
-  the 2D objects). MIT/X11 with NVIDIA's notice: usable, its notice kept where code follows it. T0 checks the exact
-  terms of the files used.
+- **X.org's `xf86-video-nv`** (release 2.1.23, read 2026-11-19): every file used carries NVIDIA's own notice
+  ("Copyright (c) 1993-1999 NVIDIA, Corporation", 1993-2003 for `nv_hw.c`), an MIT-style permission: usable, the
+  notice kept in any file whose code follows it.
+  - `nv_hw.c`'s `NVLoadStateExt`: the chip's set-up for every architecture, NV4 (the TNT and TNT2) included:
+    PGRAPH, PFIFO, instance memory (RAMHT, RAMFC, RAMRO) and the objects; `nv4CalcArbitration` for the FIFO's
+    arbitration from the memory and core clocks.
+  - `riva_hw.c`, `riva_hw.h`, `riva_xaa.c`: the older driver's NV4 path by programmed I/O (the owner's choice for
+    T1): the FIFO's subchannels as structures (`RivaRop`, `RivaPattern`, `RivaClip`, `RivaBitmap`, `RivaBlt`) and the
+    2D operations on them. The newer `nv_xaa.c` drives the same objects through a DMA command buffer instead.
 - **nouveau:** the DRM's NV04 code (MIT) and Mesa's old classic NV04 driver (MIT), for the 3D triangle classes'
   methods; envytools' register database (`rnndb`, MIT) for the register names.
 - **Not used:** Linux's `rivafb` (GPL); NVIDIA's binary drivers; anything whose licence isn't stated.
