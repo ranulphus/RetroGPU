@@ -259,6 +259,36 @@ RetroGPU is MIT, so code is written from documentation and from MIT-licensed dri
 - **Still T4's:** GLOS's screensavers on the TNT2 device need GLOS's desktop there (T3's item, GLOS's); under GLOS's
   VBE desktop they draw through DOS-GL's software window (checked 2026-11-19).
 
+## T5 so far (the P3, 2026-11-19)
+
+- **The seam first** (`glide/docs/backend.md`): the Glide runtime's Matrox code moved behind a back-end table
+  (`glide/src/backend`), checked by register CRCs and frames identical on four Matrox cards and both replays.
+- **The TNT2's Glide back end** (`glide/src/backend/tnt2/tnt2.c`), in the same `GLIDE2X.OVL` (the TNT2 device and
+  layer now build with Open Watcom too: `HAL_OW_RG`):
+  - The window through the TNT2 device at a **1024-pixel pitch**, the Voodoo's 2048-byte stride that Glide games
+    assume (`rg_open.pitch_px`: VBE 4F06, else the CRTC's offset CR13/CR19); double buffered, Z16.
+  - **Triangles through the multitexture object's two-stage combiner**, untextured ones with the white texel.
+    Stage 0 is TMU0's texture combine, stage 1 Glide's colour and alpha combines: iterated values in the vertex
+    colour, the constant in COMBINE_FACTOR, the texture through stage 0. The lerp and the one-minus forms exact,
+    inverted forms rewritten over inverted inputs; the subtracting forms approximated (said once).
+  - **Edges:** x a 64th of a pixel left: the Voodoo's fill rule exactly (t04: 237 pixels out, then none).
+  - **Depth:** as the Matrox cards keep it (Z: ooz; W: a linear 1/w, compares reversed) in Z16. The chip's float Z
+    format (CONTROL bits 31-30, with or without Z_PERSPECTIVE) was worse for W-buffering (21-56% of t07 out,
+    against 6.9%).
+  - **Textures:** the runtime's records and conversion; the back end swizzles each level into place and sends the
+    state again (the texture cache), blocks 128-byte aligned; a 565 texture's alpha read as one. **The level** as
+    the Voodoo chooses it (the larger gradient along x and y, quarter levels, the bias), triangles split in screen
+    space up to five times where their vertices want different levels or table fog's factors differ (the Matrox's
+    bands' job); chroma key by keyed variants and the alpha test; s and t held at zero until a texture combine is
+    set; the TMU's 1/w for perspective under the STW hint.
+- **Conformance on the P3** (`glide/tools/conform/run.py check --bench bench-p3`, against the emulated Voodoo's
+  references): **24 of 27 pass**, most with no pixel out. Left: t07 (W-buffering across w 1-56,701: linear 1/w in
+  16 bits is coarse far away, 6.9%), t13 (2 of 24 cells: TEXTURE_SUB_ITRGB, a subtraction;
+  CCRGB_BLEND_ITRGB_ON_TEXALPHA, where the retail Voodoo's isn't the documented blend: approximate on the Matrox
+  too), t22 (gamma: the display captured, not possible on a bench; the RAMDAC's ramp not applied yet).
+- **Still T5's:** gamma; the GTA and Screamer Rally replays on the P3 (GLPLAY through `tools/bench/run.py
+  --replay`) and the retail games.
+
 ## How it fits RetroGPU
 
 As for the ViRGE: a **register layer** in `hal/` (the FIFO, the objects, 2D and 3D), a **device** on B1's interface
