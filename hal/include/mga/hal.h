@@ -40,8 +40,8 @@ typedef struct {
                has_dual_tex:1,  /* G400: two texture maps, TDUALSTAGE combiner */
                texel_centre:1,  /* bilinear filtering samples at texel centres itself (G100, G200, G400: their
                                    silicon); otherwise from texel corners, and tex_adjust_coords shifts half a texel */
-               textrap_empty_stall:1;  /* a TEXTURE_TRAP that draws no pixel, its spans left of the clip, stalls
-                                   the engine (G100; with fog the PC hangs): the setup leaves such trapezoids out */
+               textrap_empty_stall:1;  /* a TEXTURE_TRAP with a row whose span is empty and left of the clip stalls
+                                   the engine (G100): the setup sends only rows that draw (trap_rows) */
 } mga_chip;
 
 extern mga_chip mga;                 /* the device in use */

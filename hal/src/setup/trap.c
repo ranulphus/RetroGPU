@@ -194,39 +194,54 @@ static int64_t edge_x_at(const mga_edge *e, int32_t k)
     return e->x + floordiv64(r + s * k, d);
 }
 
-/* Whether a trapezoid of n rows between edges l and r (columns [l, r) on
- * each row, as the engine walks them) draws a pixel in columns [cx0, cx1):
- * its first or last row does (the usual answer, at most two divisions);
- * neither edge reaches inside (the right edge's furthest column left of
- * cx0, or the left edge's right of cx1: both edges are monotonic) does
- * not; otherwise row by row, as the engine steps. */
-static int trap_covers(const mga_edge *l, const mga_edge *r, int32_t n, int cx0, int cx1)
+/* Which of a trapezoid's n rows, between edges l and r (columns [l, r)
+ * on each row, as the engine walks them), may go to a real G100
+ * (mga.textrap_empty_stall): a textured trapezoid with a row whose span is
+ * empty and left of the clip (columns [cx0, cx1)) stalls its engine, as at a
+ * triangle's tip off the screen's left edge. Such a row draws nothing, and
+ * the edges move one way each, so it lies before or after every row that
+ * draws: the trapezoid is sent from its first row that draws when one lies
+ * before it, and up to the first after. Returns 0 when no row draws (no
+ * trapezoid sent, as for one wholly off the screen); else, when rows before
+ * the first that draws must go, *skip = their count; else how many rows to
+ * send from row 0 (n unless such a row follows). A trapezoid with no such
+ * row is sent whole, as before (its rows' texture values unchanged). */
+static int32_t trap_rows(const mga_edge *l, const mga_edge *r, int32_t n, int cx0, int cx1, int32_t *skip)
 {
     int64_t xl = l->x, xr = r->x, ln, rn, sl, dl, rl, sr, dr, rr, ql, qr;
-    int32_t k;
-    if ((xl > cx0 ? xl : cx0) < (xr < cx1 ? xr : cx1))
-        return 1;
-    if (n <= 1)
-        return 0;
-    ln = edge_x_at(l, n - 1);
-    rn = edge_x_at(r, n - 1);
-    if ((ln > cx0 ? ln : cx0) < (rn < cx1 ? rn : cx1))
-        return 1;
+    int32_t k, drawn = 0, empty_left = 0;
+#define DRAWS(a, b) (((a) > cx0 ? (a) : cx0) < ((b) < cx1 ? (b) : cx1))
+    *skip = 0;
+    ln = n > 1 ? edge_x_at(l, n - 1) : xl;
+    rn = n > 1 ? edge_x_at(r, n - 1) : xr;
+    if (xl >= cx0 && ln >= cx0 && (DRAWS(xl, xr) || DRAWS(ln, rn)))
+        return n;                                   /* (the usual case: no span starts left of the clip) */
     if ((xr > rn ? xr : rn) <= cx0 || (xl < ln ? xl : ln) >= cx1)
-        return 0;
+        return 0;                                   /* (wholly left or right of the clip) */
     edge_terms(l, &sl, &dl, &rl);
     edge_terms(r, &sr, &dr, &rr);
     ql = floordiv64(sl, dl); sl -= ql * dl;        /* per row: q whole columns and s/D more */
     qr = floordiv64(sr, dr); sr -= qr * dr;
-    for (k = 1; k < n - 1; k++) {
-        xl += ql; rl += sl;
-        if (rl >= dl) { rl -= dl; xl++; }
-        xr += qr; rr += sr;
-        if (rr >= dr) { rr -= dr; xr++; }
-        if ((xl > cx0 ? xl : cx0) < (xr < cx1 ? xr : cx1))
-            return 1;
+    for (k = 0; k < n; k++) {
+        if (k) {
+            xl += ql; rl += sl;
+            if (rl >= dl) { rl -= dl; xl++; }
+            xr += qr; rr += sr;
+            if (rr >= dr) { rr -= dr; xr++; }
+        }
+        if (DRAWS(xl, xr)) {
+            if (!drawn++ && empty_left) {
+                *skip = k;
+                return 1;
+            }
+        } else if (xl >= xr && xl < cx0) {
+            if (drawn)
+                return k;                           /* (rows from here draw nothing, an empty one left of the clip) */
+            empty_left = 1;
+        }
     }
-    return 0;
+#undef DRAWS
+    return drawn ? n : 0;
 }
 
 /* Exact mode: column covered when its centre is inside (top-left rule). */
@@ -667,141 +682,152 @@ SETUP_TRI(const mga_svtx *a, const mga_svtx *b, const mga_svtx *c, const mga_tri
         stall_test = 1;
     }
     for (part = 0; part < 2; part++) {
-        int32_t ys = part ? y_mid : y_top, ye = part ? y_bot : y_mid;
+        int32_t ys = part ? y_mid : y_top, ye = part ? y_bot : y_mid, rows_end;
         const mga_svtx *sa = part ? v[1] : v[0], *sb = part ? v[2] : v[1];
-        mga_edge el, er, lng, sht;
-        double ex, ey;
         if (ys < ctx->clip_y0) ys = ctx->clip_y0;
         if (ye > ctx->clip_y1) ye = ctx->clip_y1;
-        if (ye <= ys)
-            continue;
-        if (flags & MGA_S_VOODOO_EDGES) {
-            /* An edge whose Voodoo slope does not fit, even reduced (flatter
-             * than 2 pixels a row on the G100/G200, 32 on the G400), takes
-             * the exact centre rule, which always does. The choice is the
-             * edge's own, so a triangle sharing it chooses alike: no cracks. */
-            int32_t vl = ar_lim();
-            edge_voodoo(v[0]->X16, v[0]->Y16, d_long, ys, &lng);
-            if (!edge_fits(&lng, vl)) {
-                edge_reduce(&lng, vl);
+        /* The piece's rows as one trapezoid; on a real G100 (stall_test)
+         * perhaps as several, or fewer rows, by trap_rows. */
+        for (rows_end = ye; ys < rows_end; ys = ye) {
+            mga_edge el, er, lng, sht;
+            double ex, ey;
+            ye = rows_end;
+            if (flags & MGA_S_VOODOO_EDGES) {
+                /* An edge whose Voodoo slope does not fit, even reduced (flatter
+                 * than 2 pixels a row on the G100/G200, 32 on the G400), takes
+                 * the exact centre rule, which always does. The choice is the
+                 * edge's own, so a triangle sharing it chooses alike: no cracks. */
+                int32_t vl = ar_lim();
+                edge_voodoo(v[0]->X16, v[0]->Y16, d_long, ys, &lng);
                 if (!edge_fits(&lng, vl)) {
-                    edge_exact(v[0]->X16, v[0]->Y16, v[2]->X16, v[2]->Y16, ys, &lng);
                     edge_reduce(&lng, vl);
-                    setup_stats.vfallback++;
+                    if (!edge_fits(&lng, vl)) {
+                        edge_exact(v[0]->X16, v[0]->Y16, v[2]->X16, v[2]->Y16, ys, &lng);
+                        edge_reduce(&lng, vl);
+                        setup_stats.vfallback++;
+                    }
                 }
-            }
-            edge_voodoo(sa->X16, sa->Y16, voodoo_slope(sa->X16, sa->Y16, sb->X16, sb->Y16), ys, &sht);
-            if (!edge_fits(&sht, vl)) {
-                edge_reduce(&sht, vl);
+                edge_voodoo(sa->X16, sa->Y16, voodoo_slope(sa->X16, sa->Y16, sb->X16, sb->Y16), ys, &sht);
                 if (!edge_fits(&sht, vl)) {
-                    edge_exact(sa->X16, sa->Y16, sb->X16, sb->Y16, ys, &sht);
                     edge_reduce(&sht, vl);
-                    setup_stats.vfallback++;
+                    if (!edge_fits(&sht, vl)) {
+                        edge_exact(sa->X16, sa->Y16, sb->X16, sb->Y16, ys, &sht);
+                        edge_reduce(&sht, vl);
+                        setup_stats.vfallback++;
+                    }
                 }
-            }
-        } else {
-            edge_exact(v[0]->X16, v[0]->Y16, v[2]->X16, v[2]->Y16, ys, &lng);
-            edge_exact(sa->X16, sa->Y16, sb->X16, sb->Y16, ys, &sht);
-            if (reduce) {
-                edge_reduce(&lng, ar_lim());
-                edge_reduce(&sht, ar_lim());
-            }
-        }
-        if (mid_right) { el = lng; er = sht; } else { el = sht; er = lng; }
-        if (stall_test && !trap_covers(&el, &er, ye - ys, cx0, cx1)) {
-            setup_stats.culled_empty++;     /* (mga.textrap_empty_stall) */
-            continue;
-        }
-        setup_stats.traps++;
-        ex = (el.x + 0.5) - g.x0;          /* exact: multiples of 1/16 */
-        ey = (ys + 0.5) - g.y0;
-        WR(MGAREG_AR0, (uint32_t)el.ar_step);
-        WR(MGAREG_AR1, (uint32_t)el.ar_err);
-        WR(MGAREG_AR2, (uint32_t)el.ar_dec);
-        WR(MGAREG_AR4, (uint32_t)er.ar_err);
-        WR(MGAREG_AR5, (uint32_t)er.ar_dec);
-        WR(MGAREG_AR6, (uint32_t)er.ar_step);
-        WR(MGAREG_SGN, (el.neg ? SGN_SDXL : 0) | (er.neg ? SGN_SDXR : 0));
-        WR(MGAREG_FXBNDRY, ((uint32_t)(er.x & 0xFFFF) << 16) | (uint32_t)(el.x & 0xFFFF));
-        if (flags & MGA_S_Z) {
-            double z = eval(&pz, ex, ey);
-            if (flags & MGA_S_Z32) {
-                uint64_t zs = z32_start(z);
-                WR(MGAREG_DR0_Z32LSB, (uint32_t)zs);
-                WR(MGAREG_DR0_Z32MSB, (uint32_t)(zs >> 32) & 0xFFFF);
             } else {
-                WR(MGAREG_DR0, z16_start(z));
-            }
-        }
-        if (flags & MGA_S_COLOR) {
-            WR(MGAREG_DR4, col_start(eval(&pr, ex, ey)));
-            WR(MGAREG_DR8, col_start(eval(&pg, ex, ey)));
-            WR(MGAREG_DR12, col_start(eval(&pb, ex, ey)));
-        } else {
-            WR(MGAREG_DR4, col_start(v[0]->r));
-            WR(MGAREG_DR8, col_start(v[0]->g));
-            WR(MGAREG_DR12, col_start(v[0]->b));
-        }
-        if (flags & MGA_S_ALPHA) {
-            WR(MGAREG_ALPHASTART, col_start(eval(&pa, ex, ey)));
-        }
-        if (flags & MGA_S_FOG) {
-            WR(MGAREG_FOGSTART, col_start(eval(&pf, ex, ey)));
-        }
-        if (flags & MGA_S_SPEC) {
-            WR(MGAREG_SPECRSTART, col_start(eval(&psr, ex, ey)));
-            WR(MGAREG_SPECGSTART, col_start(eval(&psg, ex, ey)));
-            WR(MGAREG_SPECBSTART, col_start(eval(&psb, ex, ey)));
-        }
-        if (flags & MGA_S_TEX) {
-            WR(MGAREG_TMR(6), (uint32_t)fx(eval(&ps, ex, ey), 1048576.0));
-            WR(MGAREG_TMR(7), (uint32_t)fx(eval(&pt, ex, ey), 1048576.0));
-            WR(MGAREG_TMR(8), (uint32_t)fx(eval(&pq, ex, ey), 65536.0));
-        }
-        if (flags & MGA_S_TEX2) {
-            /* The G400's second programming step (specification §4.5.5.5):
-             * everything above reached both maps; now map 1 alone, then
-             * start the engine. Its sizes and increments go with the first
-             * trapezoid drawn and stay for the second. */
-            int tw = ctx->tex_tw1, th = ctx->tex_th1;
-            WR(MGAREG_TEXCTL2, ctx->texctl2_1 | TEXCTL2_MAP1);
-            if (map1_sizes) {
-                uint32_t wh1[2], tm1[6];
-                int w_wh1, w_tm1;
-                wh1[0] = TEXWH(tw, 8 - tw, (1u << tw) - 1);      /* (rfw as map 0's) */
-                wh1[1] = TEXWH(th, 8 - th, (1u << th) - 1);
-                tm1[0] = (uint32_t)fx(ps1.dx, 1048576.0);
-                tm1[1] = (uint32_t)fx(ps1.dy, 1048576.0);
-                tm1[2] = (uint32_t)fx(pt1.dx, 1048576.0);
-                tm1[3] = (uint32_t)fx(pt1.dy, 1048576.0);
-                tm1[4] = (uint32_t)fx(pq1.dx, 65536.0);
-                tm1[5] = (uint32_t)fx(pq1.dy, 65536.0);
-                w_wh1 = !(setup_valid & SH_WH1) || !same(sh.wh[1], wh1, 2);
-                w_tm1 = !(setup_valid & SH_TM1) || !same(sh.tm[1], tm1, 6);
-                if (w_wh1) {            /* map 1 only */
-                    setup_wrote_texsize = 1;
-                    WR(MGAREG_TEXWIDTH, wh1[0]);
-                    WR(MGAREG_TEXHEIGHT, wh1[1]);
-                    keep(sh.wh[1], wh1, 2);
-                    setup_valid |= SH_WH1;
+                edge_exact(v[0]->X16, v[0]->Y16, v[2]->X16, v[2]->Y16, ys, &lng);
+                edge_exact(sa->X16, sa->Y16, sb->X16, sb->Y16, ys, &sht);
+                if (reduce) {
+                    edge_reduce(&lng, ar_lim());
+                    edge_reduce(&sht, ar_lim());
                 }
-                if (w_tm1) {
-                    WR(MGAREG_TMR(0), tm1[0]);
-                    WR(MGAREG_TMR(1), tm1[1]);
-                    WR(MGAREG_TMR(2), tm1[2]);
-                    WR(MGAREG_TMR(3), tm1[3]);
-                    WR(MGAREG_TMR(4), tm1[4]);
-                    WR(MGAREG_TMR(5), tm1[5]);
-                    keep(sh.tm[1], tm1, 6);
-                    setup_valid |= SH_TM1;
-                }
-                map1_sizes = 0;
             }
-            WR(MGAREG_TMR(6), (uint32_t)fx(eval(&ps1, ex, ey), 1048576.0));
-            WR(MGAREG_TMR(7), (uint32_t)fx(eval(&pt1, ex, ey), 1048576.0));
-            WR(MGAREG_TMR(8), (uint32_t)fx(eval(&pq1, ex, ey), 65536.0));
-            WR(MGAREG_TEXCTL2, ctx->texctl2_1);   /* map 1 only; broadcast from the next write */
+            if (mid_right) { el = lng; er = sht; } else { el = sht; er = lng; }
+            if (stall_test) {                   /* (mga.textrap_empty_stall: trap_rows) */
+                int32_t skip, rows = trap_rows(&el, &er, ye - ys, cx0, cx1, &skip);
+                if (!rows) {
+                    setup_stats.culled_empty++;
+                    break;
+                }
+                if (skip) {
+                    ye = ys + skip;             /* (from its first row that draws: the edges again there) */
+                    continue;
+                }
+                ye = ys + rows;
+            }
+            setup_stats.traps++;
+            ex = (el.x + 0.5) - g.x0;          /* exact: multiples of 1/16 */
+            ey = (ys + 0.5) - g.y0;
+            WR(MGAREG_AR0, (uint32_t)el.ar_step);
+            WR(MGAREG_AR1, (uint32_t)el.ar_err);
+            WR(MGAREG_AR2, (uint32_t)el.ar_dec);
+            WR(MGAREG_AR4, (uint32_t)er.ar_err);
+            WR(MGAREG_AR5, (uint32_t)er.ar_dec);
+            WR(MGAREG_AR6, (uint32_t)er.ar_step);
+            WR(MGAREG_SGN, (el.neg ? SGN_SDXL : 0) | (er.neg ? SGN_SDXR : 0));
+            WR(MGAREG_FXBNDRY, ((uint32_t)(er.x & 0xFFFF) << 16) | (uint32_t)(el.x & 0xFFFF));
+            if (flags & MGA_S_Z) {
+                double z = eval(&pz, ex, ey);
+                if (flags & MGA_S_Z32) {
+                    uint64_t zs = z32_start(z);
+                    WR(MGAREG_DR0_Z32LSB, (uint32_t)zs);
+                    WR(MGAREG_DR0_Z32MSB, (uint32_t)(zs >> 32) & 0xFFFF);
+                } else {
+                    WR(MGAREG_DR0, z16_start(z));
+                }
+            }
+            if (flags & MGA_S_COLOR) {
+                WR(MGAREG_DR4, col_start(eval(&pr, ex, ey)));
+                WR(MGAREG_DR8, col_start(eval(&pg, ex, ey)));
+                WR(MGAREG_DR12, col_start(eval(&pb, ex, ey)));
+            } else {
+                WR(MGAREG_DR4, col_start(v[0]->r));
+                WR(MGAREG_DR8, col_start(v[0]->g));
+                WR(MGAREG_DR12, col_start(v[0]->b));
+            }
+            if (flags & MGA_S_ALPHA) {
+                WR(MGAREG_ALPHASTART, col_start(eval(&pa, ex, ey)));
+            }
+            if (flags & MGA_S_FOG) {
+                WR(MGAREG_FOGSTART, col_start(eval(&pf, ex, ey)));
+            }
+            if (flags & MGA_S_SPEC) {
+                WR(MGAREG_SPECRSTART, col_start(eval(&psr, ex, ey)));
+                WR(MGAREG_SPECGSTART, col_start(eval(&psg, ex, ey)));
+                WR(MGAREG_SPECBSTART, col_start(eval(&psb, ex, ey)));
+            }
+            if (flags & MGA_S_TEX) {
+                WR(MGAREG_TMR(6), (uint32_t)fx(eval(&ps, ex, ey), 1048576.0));
+                WR(MGAREG_TMR(7), (uint32_t)fx(eval(&pt, ex, ey), 1048576.0));
+                WR(MGAREG_TMR(8), (uint32_t)fx(eval(&pq, ex, ey), 65536.0));
+            }
+            if (flags & MGA_S_TEX2) {
+                /* The G400's second programming step (specification §4.5.5.5):
+                 * everything above reached both maps; now map 1 alone, then
+                 * start the engine. Its sizes and increments go with the first
+                 * trapezoid drawn and stay for the second. */
+                int tw = ctx->tex_tw1, th = ctx->tex_th1;
+                WR(MGAREG_TEXCTL2, ctx->texctl2_1 | TEXCTL2_MAP1);
+                if (map1_sizes) {
+                    uint32_t wh1[2], tm1[6];
+                    int w_wh1, w_tm1;
+                    wh1[0] = TEXWH(tw, 8 - tw, (1u << tw) - 1);      /* (rfw as map 0's) */
+                    wh1[1] = TEXWH(th, 8 - th, (1u << th) - 1);
+                    tm1[0] = (uint32_t)fx(ps1.dx, 1048576.0);
+                    tm1[1] = (uint32_t)fx(ps1.dy, 1048576.0);
+                    tm1[2] = (uint32_t)fx(pt1.dx, 1048576.0);
+                    tm1[3] = (uint32_t)fx(pt1.dy, 1048576.0);
+                    tm1[4] = (uint32_t)fx(pq1.dx, 65536.0);
+                    tm1[5] = (uint32_t)fx(pq1.dy, 65536.0);
+                    w_wh1 = !(setup_valid & SH_WH1) || !same(sh.wh[1], wh1, 2);
+                    w_tm1 = !(setup_valid & SH_TM1) || !same(sh.tm[1], tm1, 6);
+                    if (w_wh1) {            /* map 1 only */
+                        setup_wrote_texsize = 1;
+                        WR(MGAREG_TEXWIDTH, wh1[0]);
+                        WR(MGAREG_TEXHEIGHT, wh1[1]);
+                        keep(sh.wh[1], wh1, 2);
+                        setup_valid |= SH_WH1;
+                    }
+                    if (w_tm1) {
+                        WR(MGAREG_TMR(0), tm1[0]);
+                        WR(MGAREG_TMR(1), tm1[1]);
+                        WR(MGAREG_TMR(2), tm1[2]);
+                        WR(MGAREG_TMR(3), tm1[3]);
+                        WR(MGAREG_TMR(4), tm1[4]);
+                        WR(MGAREG_TMR(5), tm1[5]);
+                        keep(sh.tm[1], tm1, 6);
+                        setup_valid |= SH_TM1;
+                    }
+                    map1_sizes = 0;
+                }
+                WR(MGAREG_TMR(6), (uint32_t)fx(eval(&ps1, ex, ey), 1048576.0));
+                WR(MGAREG_TMR(7), (uint32_t)fx(eval(&pt1, ex, ey), 1048576.0));
+                WR(MGAREG_TMR(8), (uint32_t)fx(eval(&pq1, ex, ey), 65536.0));
+                WR(MGAREG_TEXCTL2, ctx->texctl2_1);   /* map 1 only; broadcast from the next write */
+            }
+            WR(MGAREG_YDSTLEN + MGAREG_EXEC, ((uint32_t)(ys & 0xFFFF) << 16) | (uint32_t)(ye - ys));
         }
-        WR(MGAREG_YDSTLEN + MGAREG_EXEC, ((uint32_t)(ys & 0xFFFF) << 16) | (uint32_t)(ye - ys));
     }
 }

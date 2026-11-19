@@ -46,36 +46,46 @@ from texel corners, which the emulated G100 needed. Without the shift it matches
   DOS-GL's frames on the emulated G100 change by at most one RGB565 step, on filtered textures (t07, t20, t21, t28,
   t30); the same tests pass and fail as before.
 
-## A textured trapezoid that draws nothing stalls the engine (local patch 0132)
+## A textured trapezoid with an empty row left of the clip stalls the engine (local patches 0132, 0133)
 
-DOS-GL's conformance t10 (fog) hung the PC with the real G100 at its first triangles. `FOGPROBE`
-(`tests/hal/fogprobe.c`) drew one shape a run, without fog, where a stall only times out the HAL's engine sync and
-resets the engine (with fog the whole PC hangs, so the shapes were found without it):
+DOS-GL's conformance t10 and t13 (both with fog) hung the PC with the real G100. Found in two rounds, on the card:
 
-| Shape (a perspective-textured `TEXTURE_TRAP` unless said) | Pixels drawn | Real G100 |
-|---|---|---|
-| On the screen | 19,500 | draws |
-| Its last rows wholly left of the screen (t10's third triangle) | 176 | draws |
-| Its first rows wholly left of the screen | 169 | draws |
-| A sliver on the screen between pixel centres, textured or not | 0 | draws (nothing) |
-| Wholly right of the screen | 0 | draws (nothing) |
-| Wholly left of the screen, untextured (`TRAP`) | 0 | draws (nothing) |
-| Wholly left of the screen, affine or perspective | 0 | **stalls** |
-| One empty row on the screen, the rest wholly left (t10's fifth triangle) | 0 | **stalls** |
+1. **2026-11-18, one shape a run** (`FOGPROBE`, `tests/hal/fogprobe.c`, without fog, where a stall only times out
+   the HAL's engine sync and resets the engine):
 
-So the engine stalls on a textured trapezoid that draws no pixel, with spans left of the clip.
-- **The HAL:** `mga.textrap_empty_stall` (the G100 only) makes the setup leave out a `TEXTURE_TRAP` piece that covers
-  no column inside the engine's clip (`engine_get_clip`) on any of its rows. The test is exact, from the edges' own
-  row stepping (`trap_covers` in `hal/src/setup/trap.c`): the first and last rows, then whether either edge reaches
-  the clip at all, then row by row. Such a piece draws nothing, so no pixel changes: DOS-GL's frames on the emulated
-  G100 are identical with and without it. `test_trap` checks it against the exact coverage rule on 4,000 triangles
-  (across and beyond the clip's edges, slivers, both edge rules). The G100 setup goldens drop the pieces it leaves
-  out. Tests on the real card: every shape above runs without a stall, and so do t10's first five triangles together,
-  which stalled before.
-- **86Box, local patch 0132:** the emulated G100 reports such a trapezoid as the `textrap-empty` hazard (it draws
-  nothing, as the real card would have before stalling). `make loopa-selftest-ext CHECKS=g100stall` draws t10's fifth
-  triangle with the HAL's test (`FOGPROBE ... t10only5`: nothing sent, nothing reported) and without it
-  (`... nocull`: the hazard).
+   | Shape (a perspective-textured `TEXTURE_TRAP` unless said) | Pixels drawn | Real G100 |
+   |---|---|---|
+   | On the screen | 19,500 | draws |
+   | Its last rows wholly left of the screen (t10's third triangle) | 176 | draws |
+   | Its first rows wholly left of the screen | 169 | draws |
+   | A sliver on the screen between pixel centres, textured or not | 0 | draws (nothing) |
+   | Wholly right of the screen | 0 | draws (nothing) |
+   | Wholly left of the screen, untextured (`TRAP`) | 0 | draws (nothing) |
+   | Wholly left of the screen, its tip at the top, affine or perspective | 0 | **stalls** |
+   | Its tip on the screen, every other row wholly left (t10's fifth triangle) | 0 | **stalls** |
+
+   The first fix left out textured pieces that draw nothing. t10 still hung the PC, with the engine's fog off
+   (`DGL_NOFOG=1`) too, and t13 sends no such piece.
+2. **2026-11-19, DOS-GL's own triangles** (`FOGPROBE replay` of `DGL_TRILOG=1` logs, an engine sync after each):
+   exactly 14 of t10's 816 triangles and 2 of t13's 22 stalled, the same whatever ALPHACTRL held. Each of them, and
+   none of the rest, has a row whose span is **empty and left of the clip**: a triangle's tip off the screen's left
+   edge, below rows that draw (t10's eighth: its top on the screen, its tip 244 pixels left of it) or above them.
+   The shapes of round 1 agree: the two that stalled have such rows below their tips; the rest have none (empty rows
+   on the screen, or wider rows wholly left, do not stall it). Replaying t10 without a sync after each triangle then
+   hung the PC without fog: after a stall the CPU's next writes to the card never complete.
+
+- **The HAL:** with `mga.textrap_empty_stall` (the G100 only), the setup sends a textured piece of a triangle from its
+  first row that draws when an empty row left of the clip lies before it, and only up to the first such row after it
+  (`trap_rows` in `hal/src/setup/trap.c`: from the edges' own row stepping; usually two divisions, row by row only
+  for a piece whose left edge leaves the clip). The edges move one way each, so such a row never lies between rows
+  that draw. A piece that draws nothing is not sent; any other piece is sent whole, as before. No pixel changes:
+  DOS-GL's frames on the emulated G100 are identical with and without it. `test_trap` checks 5,800 triangles (across
+  and beyond the clip's edges, slivers, flat tops, both edge rules) against each row's exact span: no such row sent,
+  every row that draws sent once, a piece without such a row sent whole. The G100 setup goldens follow.
+- **86Box, local patches 0132 and 0133:** the emulated G100 reports a textured trapezoid with such a row as the
+  `textrap-empty` hazard. Replaying t13 without the HAL's test, it reports exactly the 2 triangles the card stalled
+  on. `make loopa-selftest-ext CHECKS=g100stall` draws t10's fifth and eighth triangles with the HAL's test (no hazard;
+  the eighth's 52 pixels drawn) and without it (`nocull`: the hazard).
 
 ## Still open
 
@@ -86,23 +96,12 @@ So the engine stalls on a textured trapezoid that draws no pixel, with spans lef
 - **DOS-GL's conformance:** 12 of 35 tests fail on the emulated G100 (t08 t09 t13 t17 t20 t21 t22 t24 t25 t26 t28
   t30), the same before and after these changes. On the real card t01 to t09 run (t07 passes now; t08 and t09 fail
   as in 86Box).
-- **t10 and t13 still hang the real G100's PC** (2026-11-18, evening). t10 hung it with the empty-trapezoid test in
-  place and with the engine's fog off (`DGL_NOFOG=1`), so a second cause is left. t13 sends no empty trapezoid, so it
-  meets that second cause only. Next on the card:
+- **t10 and t13 on the real card with `trap_rows`:** to be run (2026-11-19). Until then, the tools used:
   - `FOGPROBE replay` draws DOS-GL's own triangles from a `DGL_TRILOG=1` log (t10's 816, t13's 22, with a depth
     buffer when they use one), without fog, syncing after each (`each`): a stall names its triangle.
   - `DGL_TRISYNC=1` makes DOS-GL sync after each triangle and log one that stalls (`DGL-STALL`); the device's close
     logs `DGL-ENGINE` when the engine timed out at all.
-  - What the two tests do that the card has not yet run cleanly, from the engine's state at their first drawn
-    triangle on the emulated G100 (a `REGCRC=1` build with `DGL_STATEDUMP=N`: every register's last value), against
-    t04 to t07, which ran on the card:
-
-    | | t10, fog off | t13 |
-    |---|---|---|
-    | A textured trapezoid with ALPHACTRL's alpha from the iterated colour (`01000054`; t06 and t07 `02000054`; the G100's `engine_init` writes no ALPHACTRL, so FOGPROBE drew with whatever was there) | yes | no |
-    | A textured trapezoid with depth (DWGCTL `000c0536`; t04's depth was untextured) | no | yes |
-    | Fog with a 64x64 texture (FOGPROBE's fogged shapes used 8x8) | no | yes |
-    | The alpha stipple (its translucent quad) | no | yes |
-
-    Point sampling (TEXFILTER 0) is not among them: t06 ran with it. `FOGPROBE ... alphactrl HEX` sets ALPHACTRL for
-    the replay.
+  - `DGL_STATEDUMP=N` (a `REGCRC=1` build) prints every register's last value after the Nth triangle, to compare two
+    programs' engine state. It found that t10 drew with ALPHACTRL's alpha from the iterated colour, unlike any test
+    run on the card before; the replays then stalled on the same triangles with it and without it (`FOGPROBE ...
+    alphactrl HEX`), so it plays no part. (The G100's `engine_init` writes no ALPHACTRL.)

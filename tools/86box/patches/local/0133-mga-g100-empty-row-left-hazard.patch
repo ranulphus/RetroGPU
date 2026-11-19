@@ -1,0 +1,72 @@
+diff --git a/src/video/vid_mga.c b/src/video/vid_mga.c
+index 8888995..d234ca5 100644
+--- a/src/video/vid_mga.c
++++ b/src/video/vid_mga.c
+@@ -80,7 +80,7 @@ enum {
+     HZ_AGP,             /* an AGP fetch from memory the CPU caches write-back */
+     HZ_TLUT,            /* the G200's LUT load on the G400 family */
+     HZ_G450_MEM,        /* a G450's VRAM used after a soft reset without its memory set-up (local patch 0129) */
+-    HZ_TEXTRAP_EMPTY,   /* a G100 TEXTURE_TRAP that draws nothing, its spans left of the clip (local patch 0132) */
++    HZ_TEXTRAP_EMPTY,   /* a G100 TEXTURE_TRAP with a row whose span is empty and left of the clip (local patches 0132, 0133) */
+     HZ_KINDS
+ };
+ static const char *const hz_names[HZ_KINDS] = { "warp-inflight", "warp-opmode", "rfw", "agp-cached", "tlut",
+@@ -6707,7 +6707,7 @@ blit_texture_trap(mystique_t *mystique)
+     int       z_write;
+     const int trans_sel = (mystique->dwgreg.dwgctrl_running & DWGCTRL_TRANS_MASK) >> DWGCTRL_TRANS_SHIFT;
+     const int dest32    = ((mystique->maccess_running & MACCESS_PWIDTH_MASK) == MACCESS_PWIDTH_32);
+-    int       hz_drawn = 0, hz_left = 0;   /* MGA-Glide local patch 0132: rows drawing inside the clip, wholly left of it */
++    int       hz_empty_left = 0, hz_first = -1;   /* MGA-Glide local patches 0132, 0133: rows with an empty span left of the clip */
+ 
+     mga_trap_ar_fields(mystique);
+ 
+@@ -6724,15 +6724,11 @@ blit_texture_trap(mystique_t *mystique)
+                 int16_t              old_x_l = x_l;
+                 int                  dx;
+ 
+-                /* MGA-Glide local patch 0132 (silicon hazards): whether
+-                 * this row draws a column inside the clip, or lies wholly
+-                 * left of it. */
+-                if (x_l < x_r && mystique->dwgreg.ydst_lin >= mystique->dwgreg.ytop && mystique->dwgreg.ydst_lin <= mystique->dwgreg.ybot) {
+-                    if (x_r - 1 < (int) mystique->dwgreg.cxleft)
+-                        hz_left++;
+-                    else if (x_l <= (int) mystique->dwgreg.cxright)
+-                        hz_drawn++;
+-                }
++                /* MGA-Glide local patches 0132, 0133 (silicon hazards):
++                 * a row whose span is empty, left of the clip. */
++                if (x_l >= x_r && x_l < (int) mystique->dwgreg.cxleft && mystique->dwgreg.ydst_lin >= mystique->dwgreg.ytop &&
++                    mystique->dwgreg.ydst_lin <= mystique->dwgreg.ybot && !hz_empty_left++)
++                    hz_first = y;
+ 
+                 uint64_t z_back_32 = mystique->dwgreg.extended_dr[0];
+ 
+@@ -7076,16 +7072,18 @@ skip_pixel:
+ 
+                 mystique->dwgreg.selline = (mystique->dwgreg.selline + 1) & 7;
+             }
+-            /* MGA-Glide local patch 0132 (silicon hazards): a real G100's
+-             * engine stalls on a textured trapezoid that draws no pixel,
+-             * with spans left of the clip (and with fog the PC hangs):
+-             * bench-g400's PC with a G100, FOGPROBE, 2026-11-18. Wholly
+-             * right of the clip, an empty sliver on the screen, or one
+-             * drawing a pixel with other rows clipped do not stall it.
+-             * This model draws as before (nothing) and reports it. */
+-            if (mystique->type == MGA_G100 && !hz_drawn && hz_left)
+-                mga_hazard(HZ_TEXTRAP_EMPTY, "a TEXTURE_TRAP of %d rows drew nothing, %d of them wholly left of the clip (cxleft %d): "
+-                           "a real G100's engine stalls on it", mystique->dwgreg.length, hz_left, (int) mystique->dwgreg.cxleft);
++            /* MGA-Glide local patches 0132, 0133 (silicon hazards): a real
++             * G100's engine stalls on a textured trapezoid with a row whose
++             * span is empty and left of the clip, as at a triangle's tip off
++             * the screen's left edge, and the CPU's next writes then hang
++             * the PC: bench-g400's PC with a G100, 2026-11-19, DOS-GL's t10
++             * and t13 replayed a triangle at a time (FOGPROBE): exactly the
++             * 16 with such a row stalled. Off the right edge, empty rows on
++             * the screen, or wider rows wholly left do not stall it. This
++             * model draws as before and reports it. */
++            if (mystique->type == MGA_G100 && hz_empty_left)
++                mga_hazard(HZ_TEXTRAP_EMPTY, "a TEXTURE_TRAP of %d rows has %d empty rows left of the clip (cxleft %d), the first its row %d: "
++                           "a real G100's engine stalls on it", mystique->dwgreg.length, hz_empty_left, (int) mystique->dwgreg.cxleft, hz_first);
+             break;
+ 
+         default:

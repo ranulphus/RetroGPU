@@ -281,19 +281,26 @@ def check_g100vram():
 
 
 def check_g100stall():
-    """Local patch 0132: a real G100's engine stalls on a textured trapezoid that draws nothing with its spans left of
-    the clip (bench-g400's PC, 2026-11-18; with fog the PC hung). 86Box's G100 reports it as the textrap-empty hazard.
-    FOGPROBE draws t10's fifth triangle (its top row an empty span on the screen, the rest wholly left of it): with the
-    HAL's cull (mga.textrap_empty_stall) nothing is sent and nothing reported; with nocull the hazard."""
+    """Local patches 0132, 0133: a real G100's engine stalls on a textured trapezoid with a row whose span is empty and
+    left of the clip (bench-g400's PC, 2026-11-19: exactly the 16 of DOS-GL's t10 and t13 triangles with one), and the
+    CPU's next writes then hang the PC. 86Box's G100 reports it as the textrap-empty hazard. FOGPROBE draws two of t10's
+    triangles: the fifth (nothing on the screen, its rows below its tip empty there) and the eighth (pixels on the
+    screen, its tip below and left of it). With the HAL's trimming (mga.textrap_empty_stall) no hazard, the eighth's
+    rows that draw still sent; with nocull the hazard for both."""
+    tip8 = "tri -244 453.3125 15.8125 360.5 1.5 360.5"
     out = {}
-    for name, args in (("cull", "t10only5"), ("nocull", "t10only5 nocull")):
+    for name, args in (("t5", "t10only5"), ("t5-nocull", "t10only5 nocull"), ("t8", tip8), ("t8-nocull", tip8 + " nocull")):
         st, serial = job("selftest-g100stall-" + name, "--card", "g100", "--exe", "build/djgpp/FOGPROBE.EXE",
                          "--args", args)
-        m = re.search(r"fogprobe step=t10only5 status=.* traps=(\d+) culled=(\d+)", serial)
-        out[name] = (st, m.group(1) if m else "?", m.group(2) if m else "?", sorted(hazards_of("selftest-g100stall-" + name) or {}))
-    good = out["cull"] == ("PASS", "0", "1", []) and out["nocull"] == ("PASS", "1", "0", ["textrap-empty"])
-    return report("g100-stall", good, "culled: %s traps=%s culled=%s hazards %s; nocull: %s traps=%s culled=%s hazards %s" % (
-        out["cull"] + out["nocull"]))
+        m = re.search(r"fogprobe step=\S+ status=.* traps=(\d+) culled=(\d+) drawn=(\d+)", serial)
+        out[name] = (st, m.groups() if m else ("?", "?", "?"), sorted(hazards_of("selftest-g100stall-" + name) or {}))
+    good = out["t5"][0] == "PASS" and out["t5"][1][0] == "0" and out["t5"][2] == [] and \
+        out["t5-nocull"][0] == "PASS" and out["t5-nocull"][2] == ["textrap-empty"] and \
+        out["t8"][0] == "PASS" and out["t8"][1][0] == "1" and out["t8"][2] == [] and \
+        out["t8-nocull"][0] == "PASS" and out["t8-nocull"][2] == ["textrap-empty"] and \
+        out["t8"][1][2] == out["t8-nocull"][1][2] and out["t8"][1][2] != "0"
+    return report("g100-stall", good, "; ".join("%s: %s traps=%s culled=%s drawn=%s hazards %s" % (
+        (k, v[0]) + tuple(v[1]) + (v[2],)) for k, v in out.items()))
 
 
 CHECKS = {"486": check_486, "vbe": check_vbe, "net": check_net, "com2": check_com2, "himemx": check_himemx,

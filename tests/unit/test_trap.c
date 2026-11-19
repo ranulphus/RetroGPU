@@ -252,23 +252,49 @@ static void test_voodoo_edges(void)
     CHECK_EQ(bad, 0);
 }
 
-/* mga.textrap_empty_stall (the real G100 stalls on a textured trapezoid
- * that draws nothing, clipped on the left): a TEXTURE_TRAP piece is left
- * out exactly when it covers no pixel inside the engine's clip columns.
- * Triangles across and beyond the clip's left and right edges, slivers
- * between pixel centres, both edge rules. */
+/* mga.textrap_empty_stall: a real G100's engine stalls on a textured
+ * trapezoid with a row whose span is empty and left of the clip (at a
+ * triangle's tip off the screen's left edge; bench-g400, 2026-11-19: all 16
+ * of DOS-GL's t10 and t13 triangles that stalled, and no other). The setup
+ * sends such a piece's rows as trapezoids that hold no such row, and every
+ * row that draws a pixel inside the clip. Each trapezoid sent (YDSTLEN) is
+ * checked against each row's span by the exact rule (or the Voodoo's):
+ * triangles across and beyond the clip's edges, slivers, both edge rules. */
+static int pieces_n, pieces_y[64], pieces_len[64];
+
+static void piece_hook(uint32_t off, uint32_t v)
+{
+    if (off == MGAREG_YDSTLEN + MGAREG_EXEC && pieces_n < 64) {
+        pieces_y[pieces_n] = (int)(v >> 16);
+        pieces_len[pieces_n++] = (int)(v & 0xFFFF);
+    }
+}
+
+static int64_t floor_div64(int64_t a, int64_t b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }   /* (b > 0) */
+static int64_t ceil_div64(int64_t a, int64_t b) { return -floor_div64(-a, b); }
+
+/* The exact rule's first covered column of the edge (Xa,Ya)-(Xb,Yb) on row y: ceil(X/16 - 1/2). */
+static int exact_x(int32_t Xa, int32_t Ya, int32_t Xb, int32_t Yb, int y)
+{
+    int64_t dY = (int64_t)Yb - Ya, dX = (int64_t)Xb - Xa;
+    int64_t P = (int64_t)Xa * dY + ((int64_t)16 * y + 8 - Ya) * dX;
+    return (int)ceil_div64(P - 8 * dY, 16 * dY);
+}
+
 static void test_empty_textrap(void)
 {
-    int n, bad = 0, kept = 0, culled = 0, cases = 0;
+    int n, bad = 0, pieces = 0, split = 0, trimmed = 0, cases = 0;
     mga_tri_ctx c = ctx_flat();
     c.dwgctl = DWG_OPCOD_TEXTURE_TRAP | DWG_ATYPE_I;
     c.tex_tw = c.tex_th = 3;
     mga.textrap_empty_stall = 1;
     stub_cx0 = 40; stub_cx1 = 200;
-    for (n = 0; n < 4000; n++) {
+    refrast_write_hook = piece_hook;
+    for (n = 0; n < 6000; n++) {
         mga_svtx p[3];
         const mga_svtx *v[3], *t;
-        int i, part, y, x, want[2] = { 0, 0 }, rows[3], voodoo = n % 5 == 4;
+        int i, y, rows[3], voodoo = n % 5 == 4, sent[H], draws_n = 0, sent_n = 0, err = 0;
+        int part_rows[2] = { 0, 0 }, part_sent[2] = { 0, 0 }, part_draws[2] = { 0, 0 }, part_el[2] = { 0, 0 };
         for (i = 0; i < 3; i++) {
             rnd_vtx(&p[i]);
             p[i].q = 1;
@@ -280,6 +306,8 @@ static void test_empty_textrap(void)
             p[1].X16 = p[0].X16 + rand() % 12;
             p[2].X16 = p[0].X16 + rand() % 12;
         }
+        if (n % 7 == 3)                                           /* a flat top: tips below */
+            p[1].Y16 = p[0].Y16;
         if ((int64_t)(p[1].X16 - p[0].X16) * (p[2].Y16 - p[0].Y16) ==
             (int64_t)(p[2].X16 - p[0].X16) * (p[1].Y16 - p[0].Y16))
             continue;                                             /* (no area: the setup drops it first) */
@@ -294,30 +322,69 @@ static void test_empty_textrap(void)
         c.flags = MGA_S_TEX | MGA_S_AFFINE | (voodoo ? MGA_S_VOODOO_EDGES : 0);
         for (i = 0; i < 3; i++)
             rows[i] = (v[i]->Y16 + 7) >> 4;
-        for (part = 0; part < 2; part++)
-            for (y = rows[part] < 0 ? 0 : rows[part]; y < rows[part + 1] && y < H && !want[part]; y++) {
-                int xl = 0, xr = 0;
-                if (voodoo)
-                    voodoo_span(v, y, &xl, &xr);
-                for (x = stub_cx0; x < stub_cx1 && !want[part]; x++)
-                    want[part] = voodoo ? x >= xl && x < xr : inside(v, x, y);
-            }
+        memset(sent, 0, sizeof sent);
+        pieces_n = 0;
         memset(&setup_stats, 0, sizeof setup_stats);
         setup_triangle(&p[0], &p[1], &p[2], &c);
         cases++;
-        kept += (int)setup_stats.traps;
-        culled += (int)setup_stats.culled_empty;
-        if ((int)setup_stats.traps != want[0] + want[1] && bad++ < 5)
-            fprintf(stderr, "textrap %d%s: %u pieces drawn, want %d+%d  (%d,%d)(%d,%d)(%d,%d)\n", n,
-                    voodoo ? " voodoo" : "", setup_stats.traps, want[0], want[1], p[0].X16, p[0].Y16, p[1].X16,
-                    p[1].Y16, p[2].X16, p[2].Y16);
+        pieces += pieces_n;
+        for (i = 0; i < pieces_n; i++)
+            for (y = pieces_y[i]; y < pieces_y[i] + pieces_len[i]; y++)
+                if (y < 0 || y >= H || sent[y]++)
+                    err |= 1;                                     /* (outside the screen, or sent twice) */
+        for (y = rows[0] < 0 ? 0 : rows[0]; y < rows[2] && y < H; y++) {
+            int xl, xr, l, r, draws, empty_left;
+            if (voodoo)
+                voodoo_span(v, y, &xl, &xr);
+            else {
+                const mga_svtx *sa = y < rows[1] ? v[0] : v[1], *sb = y < rows[1] ? v[1] : v[2];
+                int lx = exact_x(v[0]->X16, v[0]->Y16, v[2]->X16, v[2]->Y16, y);
+                int sx = exact_x(sa->X16, sa->Y16, sb->X16, sb->Y16, y);
+                int64_t cross = (int64_t)(v[2]->X16 - v[0]->X16) * (v[1]->Y16 - v[0]->Y16) -
+                                (int64_t)(v[2]->Y16 - v[0]->Y16) * (v[1]->X16 - v[0]->X16);
+                xl = cross < 0 ? lx : sx;
+                xr = cross < 0 ? sx : lx;
+            }
+            l = xl > stub_cx0 ? xl : stub_cx0;
+            r = xr < stub_cx1 ? xr : stub_cx1;
+            draws = l < r;
+            empty_left = xl >= xr && xl < stub_cx0;
+            draws_n += draws;
+            sent_n += sent[y] != 0;
+            i = y >= rows[1];
+            part_rows[i]++;
+            part_sent[i] += sent[y] != 0;
+            part_draws[i] += draws;
+            part_el[i] += empty_left;
+            if (draws && !sent[y])
+                err |= 2;                                         /* (a row that draws, not sent) */
+            if (empty_left && sent[y])
+                err |= 4;                                         /* (an empty row left of the clip, sent) */
+        }
+        for (i = 0; i < 2; i++) {
+            if (part_draws[i] && !part_el[i] && part_sent[i] != part_rows[i])
+                err |= 8;                                         /* (no such row: not sent whole) */
+            if (!part_draws[i] && part_sent[i])
+                err |= 16;                                        /* (drawing nothing: sent) */
+        }
+        if (pieces_n > 2)
+            split++;
+        if (sent_n > draws_n)
+            ;                                                     /* (rows drawing nothing between them: allowed) */
+        else if (sent_n < rows[2] - rows[0])
+            trimmed++;
+        if (err && bad++ < 5)
+            fprintf(stderr, "textrap %d%s: error %d, %d pieces  (%d,%d)(%d,%d)(%d,%d)\n", n, voodoo ? " voodoo" : "",
+                    err, pieces_n, p[0].X16, p[0].Y16, p[1].X16, p[1].Y16, p[2].X16, p[2].Y16);
     }
+    refrast_write_hook = NULL;
     mga.textrap_empty_stall = 0;
     stub_cx0 = 0; stub_cx1 = W;
-    printf("empty textrap: %d triangles, %d pieces drawn, %d left out\n", cases, kept, culled);
+    printf("empty textrap: %d triangles, %d trapezoids sent, %d trimmed, %d split in more than two\n", cases, pieces,
+           trimmed, split);
     CHECK_EQ(bad, 0);
-    CHECK(kept > 1000);
-    CHECK(culled > 1000);
+    CHECK(pieces > 1000);
+    CHECK(trimmed > 500);
 }
 
 int unit_main(void)
