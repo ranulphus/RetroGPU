@@ -328,10 +328,24 @@ void mg_hooks_install(void)
         mg_log(MG_LOG_WARN, "fault/exit hooks unavailable");
 }
 
+#ifdef MGA_REGCRC
+/* REGCRC=1 builds: the running CRC of every register write and WARP vertex so far (the HAL's register trace), at
+ * each swap and at close: the check that moving the Matrox code behind the back-end table changed no write
+ * (glide/tools/conform/regcrc.py, gl/docs/b1.md's method). */
+void mg_regcrc(const char *at)
+{
+    mg_line("MGL-REGCRC %s frame=%u crc=%08lx n=%lu", at, mg.frame, (unsigned long)mga_trace_crc(),
+            (unsigned long)mga_trace_crc_count());
+}
+#endif
+
 GR_ENTRY(void, grSstWinClose, (void))
 {
     if (!mg.open)
         return;
+#ifdef MGA_REGCRC
+    mg_regcrc("close");
+#endif
     engine_sync(200000);
     mg_warp_stop();
     vbe_set_text_mode();

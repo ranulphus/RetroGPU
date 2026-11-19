@@ -94,6 +94,9 @@ GR_ENTRY(void, grBufferSwap, (int swap_interval))
     mg.frame++;
     tex_frame();
     mg_frame_end();
+#ifdef MGA_REGCRC
+    mg_regcrc("swap");
+#endif
     PROF_BACK(po);
 }
 

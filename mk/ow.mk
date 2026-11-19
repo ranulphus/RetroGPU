@@ -16,15 +16,26 @@ OW_CFLAGS += -od -d1 -dMG_DEBUG=1
 else
 OW_CFLAGS += -oxt
 endif
+# REGCRC=1: the HAL's register trace with a running CRC of every register write and WARP vertex, printed at each
+# buffer swap and at close (MGL-REGCRC lines): the check that moving Glide's Matrox code behind its back-end table
+# changed no write (glide/tools/conform/regcrc.py). build/ow/regcrc_mode rebuilds everything when it changes.
+ifeq ($(REGCRC),1)
+OW_CFLAGS += -dMGA_TRACE_MMIO=1 -dMGA_REGCRC=1
+endif
+build/ow/regcrc_mode: FORCE
+	@mkdir -p $(dir $@)
+	@echo '$(REGCRC)' | cmp -s - $@ || echo '$(REGCRC)' > $@
+.PHONY: FORCE
+FORCE:
 # DLL and HAL code: no stack probes, no default-library references.
 OW_DLLFLAGS := -bd -s -zl
 
-build/ow/%.obj: %.c | build/gen/stamp
+build/ow/%.obj: %.c build/ow/regcrc_mode | build/gen/stamp
 	@mkdir -p $(dir $@)
 	$(Q)echo "  WCC     $<"
 	$(Q)$(WCC) $(OW_CFLAGS) $(if $(filter glide/src/% hal/%,$<),$(OW_DLLFLAGS)) -ad=$(@:.obj=.d) -adt=$@ -add=$< -adfs -fo=$@ $<
 
-build/ow/gen/%.obj: build/gen/%.c | build/gen/stamp
+build/ow/gen/%.obj: build/gen/%.c build/ow/regcrc_mode | build/gen/stamp
 	@mkdir -p $(dir $@)
 	$(Q)echo "  WCC     $<"
 	$(Q)$(WCC) $(OW_CFLAGS) $(OW_DLLFLAGS) -ad=$(@:.obj=.d) -adt=$@ -add=$< -adfs -fo=$@ $<

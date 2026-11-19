@@ -10,7 +10,7 @@ build/ow/exe/build/gen/%.obj: build/gen/%.c | build/gen/stamp
 	$(Q)echo "  WCC     $<"
 	$(Q)$(WCC) $(OW_EXEFLAGS) -ad=$(@:.obj=.d) -adt=$@ -add=$< -adfs -fo=$@ $<
 
-build/ow/exe/%.obj: %.c | build/gen/stamp
+build/ow/exe/%.obj: %.c build/ow/regcrc_mode | build/gen/stamp
 	@mkdir -p $(dir $@)
 	$(Q)echo "  WCC     $<"
 	$(Q)$(WCC) $(OW_EXEFLAGS) -ad=$(@:.obj=.d) -adt=$@ -add=$< -adfs -fo=$@ $<

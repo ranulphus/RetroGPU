@@ -132,6 +132,9 @@ typedef struct {
 } mg_stats_t;
 extern mg_stats_t mg_stats;
 void mg_frame_end(void);
+#ifdef MGA_REGCRC
+void mg_regcrc(const char *at);         /* (REGCRC=1 builds: the MGL-REGCRC line, sst.c) */
+#endif
 
 /* Glide's profiling stages (MGA_PROF builds, hal/include/mga/prof.h): the
  * MGL-PROF line at each MGL-STAT. Time in LFB and texture API calls stays

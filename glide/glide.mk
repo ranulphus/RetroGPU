@@ -42,12 +42,12 @@ runtime: build/ow/GLIDE2X.OVL
 # timers; MGAGLIDE stats=N adds an MGL-PROF line to each MGL-STAT. Pentium only.
 OWP := build/ow-prof
 RT_OBJS_PROF := $(RT_SRCS:%.c=$(OWP)/%.obj) $(OWP)/gen/stubs.obj $(OWP)/gen/api_names.obj $(OWP)/gen/thunks.obj
-$(OWP)/%.obj: %.c | build/gen/stamp
+$(OWP)/%.obj: %.c build/ow/regcrc_mode | build/gen/stamp
 	@mkdir -p $(dir $@)
 	$(Q)echo "  WCC     $< (prof)"
 	$(Q)$(WCC) $(OW_CFLAGS) -dMGA_PROF=1 $(if $(filter glide/src/% hal/%,$<),$(OW_DLLFLAGS)) -ad=$(@:.obj=.d) -adt=$@ \
 	  -add=$< -adfs -fo=$@ $<
-$(OWP)/gen/%.obj: build/gen/%.c | build/gen/stamp
+$(OWP)/gen/%.obj: build/gen/%.c build/ow/regcrc_mode | build/gen/stamp
 	@mkdir -p $(dir $@)
 	$(Q)echo "  WCC     $< (prof)"
 	$(Q)$(WCC) $(OW_CFLAGS) -dMGA_PROF=1 $(OW_DLLFLAGS) -ad=$(@:.obj=.d) -adt=$@ -add=$< -adfs -fo=$@ $<
