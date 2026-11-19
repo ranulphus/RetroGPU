@@ -124,6 +124,14 @@ class Capture:
             t.join(30)
 
 
+def with_sersay(pc, run):
+    """RUN.BAT's lines, SERSAY called from C:\\TEST on a PC whose bench.local.toml says sersay = "test" (one with no
+    C:\\HX of the harness's tools, as the P3, where only C:\\GLOS and C:\\TEST are ours): the job carries it."""
+    if pc.get("sersay") != "test":
+        return run
+    return [("C:\\TEST\\SERSAY.COM" + l[6:]) if l.startswith("SERSAY ") else l for l in run]
+
+
 def build_job(a, pc, cfg, job, token, jd, upload=True):
     """Write the job directory, RUN.BAT and (for the poller, which uploads by FTP) UP.TXT; return the file
     names."""
@@ -151,6 +159,8 @@ def build_job(a, pc, cfg, job, token, jd, upload=True):
     for spec in a.file:
         src, _, name = spec.partition("=")
         add(src, name or None)
+    if pc.get("sersay") == "test":
+        add(os.path.join(ROOT, "build/ow/dos/SERSAY.COM"))
     host = cfg["host"]
     addr = pc.get("address", host["address"])
     run = ["C:", "CD \\TEST", "IF NOT EXIST C:\\OUT\\NUL MD C:\\OUT",
@@ -185,7 +195,7 @@ def build_job(a, pc, cfg, job, token, jd, upload=True):
         run += ["%s %s" % (add(a.exe), a.args)]
     if not upload:                              # (over ssh the host fetches C:\OUT itself)
         run += ["SERSAY HX-EXIT", "SERSAY HX-JOB-END"]
-        open(os.path.join(jd, "RUN.BAT"), "wb").write(dos_lines(run))
+        open(os.path.join(jd, "RUN.BAT"), "wb").write(dos_lines(with_sersay(pc, run)))
         return files + ["RUN.BAT"]
     run += ["SERSAY HX-EXIT",
             "COPY C:\\TEST\\UP.TXT C:\\HX\\UP.TXT > NUL",
@@ -194,7 +204,7 @@ def build_job(a, pc, cfg, job, token, jd, upload=True):
             "SERSAY HX-UPLOAD",
             "FTP -port %d %s < C:\\HX\\UP.TXT > C:\\HX\\FTP.LOG" % (pc["ftp_port"], addr),
             "SERSAY HX-UPLOAD-END"]
-    open(os.path.join(jd, "RUN.BAT"), "wb").write(dos_lines(run))
+    open(os.path.join(jd, "RUN.BAT"), "wb").write(dos_lines(with_sersay(pc, run)))
     open(os.path.join(jd, "UP.TXT"), "wb").write(("bench\r\n%s\r\n" % token).encode())
     return files + ["RUN.BAT", "UP.TXT"]
 
