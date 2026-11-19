@@ -137,6 +137,9 @@ void virge_3d_texture(const virge_texture *t);
 void virge_3d_blend(int mode);                  /* VIRGE_BLEND_* */
 void virge_3d_fog(int on, uint32_t rgb888);
 void virge_tri(const virge_vertex *a, const virge_vertex *b, const virge_vertex *c);
+/* (For bench C's measurements: perspective's U/W shift, 11 by default, and Z's fractional bits along a line, 16;
+ * 0 leaves one as it is.) */
+void virge_tri_tune(int uw_shift, int zdx_frac);
 /* Texture memory: the bytes a texture takes with its mipmaps, where its
  * level n (0: the largest) starts, and a level's texels from the CPU (rows
  * of 2^(log2size - n) texels, packed: 4 or 2 bytes each). */

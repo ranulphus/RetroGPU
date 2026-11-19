@@ -3,7 +3,9 @@
 **Status (2026-11-14): v1, the owner's answers in (below). V0, V1 and V2 done in Loop A and on main (V2:
 Gouraud, Z, blending, fog and textures in three formats, NEAREST/LINEAR, perspective, mipmaps, modulate, within
 VTRI's tolerances on both boards). B1 has landed; V3 (the ViRGE/DX as a RetroGPU device) built in Loop A (below), GLOS's
-desktop on it to come with GLOS's session; then B2 (the owner's order); bench C pending.**
+desktop on it to come with GLOS's session; then B2 (the owner's order). On bench C (2026-11-18 and 19) the 2D
+layer and the device pass byte for byte, and VTRI's 15 cases all pass once two of 86Box's constants were
+corrected (below, "On bench C"; 86Box local patch 0135).**
 
 The owner's decisions (2026-11-12, `gl/docs/backends.md`): the ViRGE/DX is the first card after the Matrox ones,
 before the Riva TNT2; DOS-GL, GLOS's desktop and Glide all run on it; the card is bench C's (the 486DX4, PCI,
@@ -87,7 +89,7 @@ licences are listed in V1 before any code is written from them.
 - **For GLOS** (its session, 2026-11-12): its desktop takes only VBE modes with a linear framebuffer, in 8, 16
   (RGB565) or 32 bits; on this card the linear window has to come from this layer (later its device level), and
   a 15-bit desktop is a new screen format for GLOS (its windows already carry their format).
-- **Bench C** (VPROBE, VTWOD on silicon, its BIOS's modes) waits for the PC to boot from its disk.
+- **Bench C:** VPROBE and VTWOD pass on the real card (below, "On bench C").
 
 ## V2 so far
 
@@ -125,29 +127,12 @@ licences are listed in V1 before any code is written from them.
   (P2 board 28 s for the whole program, 486 82 s): NEAREST's texels picked differently at their edges for under 2%
   of pixels, LINEAR within two steps, the rest within one but for under 0.3%. `VTRI only=CASE k=MIN,MAX` runs one
   case at other scales.
-- **For bench C to settle:**
-  - 86Box's model takes Z along a line (`TdZdX`) with 16 fractional bits (it starts each line at `TZS << 1`); the
-    data book says S16.15 as for `TZS` and `TdZdY`. The code follows the model, marked.
-  - **U and V without perspective:** the data book says S12.8.11 (texels of the largest level, 2^19 to a texel,
-    whatever the size); 86Box's model takes 2^(27 - s) to a texel (s the mipmap size field), the perspective
-    format's. They agree only at 256 texels (s = 8), so `tex-nearest`, `tex-linear` and `tex-mip`'s largest level
-    are where both agree; `tex-modulate` (64) and `tex-mip` (128) find out which is right. The code follows the model.
-  - **The scale of U/W with perspective:** 86Box's model has the ViRGE/DX's texel position as (U/W) * 2^(38 - s)
-    (and the first ViRGE's 16 times less); the data book gives the formats only. The code puts U at the position
-    times W over 2^11 (`PERSP_UW_SHIFT`).
-  - **LINEAR's sample points:** whether the chip weights about the texel's corner (86Box's model, no half-texel
-    offset) or its centre. The code moves half a texel for OpenGL on the model's word.
-  - **The source stride** (`DEST_SRC_STR` bits 11-0, "a flat texture's row"): 86Box's model ignores it (rows
-    packed); the code writes the packed row, at least 8 bytes (so flat 16-bit textures of 2 texels or fewer would
-    differ).
-  - Dithering of 16-bit output (86Box's model: on by default, up to 7/8 of a step), and whether the unlit triangle
-    takes the vertex's alpha for blending.
-  - **The first pixel's offset:** 86Box's model steps each attribute from the edge to a line's first pixel by the
-    edge's position to 1/32 of a pixel (always over, left to right; under, right to left). Colours never show it;
-    a minified LINEAR texture does (`VTRI k=1.0,1.5 only=tex-linear`: 2.1% of pixels two steps out, none three;
-    `k=0.2,0.5`: 0.05%), and NEAREST picks a neighbouring texel for 1.5-2% of pixels. VTRI's tolerances allow it.
-    The set-up could take half of it back (every start less dA/dx over 64, either direction) if bench C shows the
-    chip does the same; it does not tune to the model before then.
+- **Settled on bench C** (2026-11-19; below, "On bench C"): Z along a line (`TdZdX`) has the data book's 15
+  fractional bits, not the 16 of 86Box's model, and with perspective U is the texel position times W over 2^7
+  (`PERSP_UW_SHIFT`), the first ViRGE's scale in 86Box's model, not the 16 times larger one it gives the DX. Both
+  were wrong in the model for the DX and are corrected by 86Box local patch 0135. `virge_tri_tune` (VTRI's
+  `pshift=N`, `zfrac=N`) still changes them for a sweep. The other open points read as the model has them
+  (below); the source stride of flat textures of 2 texels or fewer is still untested.
 - **References:** the data book and measurement only. Mesa's old ViRGE driver (`s3v`, Mesa 6-7) carries no licence
   in its files (an author's name only) and is not in Mesa's licence list, so nothing is taken from it; 86Box's
   model is GPL and only run against (its behaviour read for facts, its code not used).
@@ -175,7 +160,39 @@ licences are listed in V1 before any code is written from them.
   unit tester's capture), closed. In Loop A it passes on the ViRGE/DX (486 and P2 boards, 16 and 15 bits) and on
   the Matrox device (G400 and G200), the same program and the same script: the table fits a second card. In the
   smoke tier on the P2 board, and the merge tier on all four.
-- **Still V3's:** GLOS's desktop on the device (its session's plan, with the API above); bench C on silicon.
+- **Still V3's:** GLOS's desktop on the device (its session's plan, with the API above). RGDEV passes on bench C.
+
+## On bench C (the real ViRGE/DX, 2026-11-18 and 19)
+
+Bench C is the 486DX4-100 (PCI) with a ViRGE/DX of 4 MB, under GLOS; the programs run as jobs through GLOS's
+SSH (`tools/bench/run.py --pc bench-486`), their lines read from GLOS's log.
+- **The chip:** `5333:8A01`, an 86C375 (the ViRGE/DX) revision 1, 4 MB. Its BIOS is VBE 2.0, with a linear window
+  at `F0000000` (86Box's ViRGE BIOS is VBE 1.2, banked only), so DOS-GL's VBE path copies to it linearly.
+- **2D and the device:** VTWOD's fills, copies, copies between surfaces, colour expansion and images, and RGDEV's
+  200 random operations through the device table, are byte for byte the same as `tests/hal/sw2d.c`'s model, as in
+  Loop A. (VPROBE's colour bars and VTWOD's cursor and display-start reads use Loop A's screen capture, which
+  the bench doesn't have.)
+- **VTRI:** with 86Box's two constants, `zbuf`, `tex-persp`, `tex-persp-linear` and `tex-8888` failed on nearly
+  every pixel they drew; every other case passed. A sweep of five rounds (`pshift` 7, 9, 11, 13, 15; `zfrac` 15
+  beside the model's 16) gave the same counts in every round: only `pshift=7` passes the perspective cases, and
+  `zfrac=15` passes `zbuf` (11 pixels off by more than a step, of 67,206). With those as the defaults all 15
+  cases pass (`zbuf` 12 off; `tex-persp` 702, `tex-persp-linear` 27, `tex-8888` 283, NEAREST's texel edges as
+  in Loop A).
+- **What the passing cases settle:**
+  - **U and V without perspective:** the model's 2^(27 - s) to a texel is the chip's (`tex-modulate` at 64 texels
+    and `tex-mip` at 128 pass); the data book's S12.8.11 reading is not.
+  - **LINEAR's sample points:** about the texel's corner, as the model; the half-texel move for OpenGL stays.
+  - **The first pixel's offset:** NEAREST picks a neighbouring texel for 1.7-1.9% of pixels (`tex-nearest`,
+    `tex-mip`), as in Loop A, so the chip steps from the edge as the model does. The set-up doesn't take half of
+    it back; V4's conformance decides whether that is worth doing.
+  - **The formats:** ARGB1555, ARGB4444 and ARGB8888 textures, 15-bit output, the 16-bit Z buffer.
+  - Dithering and the unlit triangle's alpha are not told apart by VTRI: `blend` and `tex-fog` pass within its
+    tolerances.
+- **86Box local patch 0135** (`tools/86box/patches/local/`): the emulated ViRGE/DX takes U/W and V/W with the
+  86C325's samplers and steps Z along a line by twice `TdZdX`; the other ViRGE models are unchanged. VTRI's
+  defaults pass in Loop A with it on both boards, as on the card; with the old constants (`pshift=11 zfrac=16`)
+  the patched model fails the same four cases as the card did, by nearly the same counts (`tex-persp` 41,478
+  pixels off in both, from the same first pixel; `tex-8888` 42,547 against 42,546).
 
 ## The owner's answers (2026-11-12)
 

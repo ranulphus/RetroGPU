@@ -7,9 +7,10 @@
  * Z passes. At 640x480 in 15-bit colour (the 3D engine's 16-bit format),
  * with a 16-bit Z buffer, read back from VRAM.
  *
- *   VTRI [n=N] [only=CASE] [k=MIN,MAX]
+ *   VTRI [n=N] [only=CASE] [k=MIN,MAX] [pshift=N] [zfrac=N]
  *
- * (k: the texels a pixel of every textured case, for experiments.)
+ * (k: the texels a pixel of every textured case, for experiments. pshift and
+ * zfrac: virge_tri_tune's two open constants, for bench C's measurements.)
  *
  * HX-TEST lines: map, mode, then the cases: random, mesh, zbuf (Gouraud and
  * Z); blend (the vertex's alpha); tex-nearest, tex-linear, tex-persp,
@@ -399,6 +400,10 @@ int main(int argc, char **argv)
             only = argv[i] + 5;
         else if (!strncmp(argv[i], "k=", 2))
             sscanf(argv[i] + 2, "%f,%f", &kover[0], &kover[1]);
+        else if (!strncmp(argv[i], "pshift=", 7))
+            virge_tri_tune(atoi(argv[i] + 7), 0);
+        else if (!strncmp(argv[i], "zfrac=", 6))
+            virge_tri_tune(0, atoi(argv[i] + 6));
     hx_init(1, argv, "vtri");                   /* (its own arguments only) */
     if (virge_find() < 0 || virge_map() < 0) {
         hx_test("map", 0, "no ViRGE/DX mapped");

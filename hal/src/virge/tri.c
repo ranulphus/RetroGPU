@@ -120,9 +120,21 @@ static double clampd(double v, double lo, double hi) { return v < lo ? lo : v > 
 enum { A_R, A_G, A_B, A_A, A_Z, A_U, A_V, A_W, A_D, NATTR };
 
 /* With perspective, U = u W and W = 1/w scaled so the triangle's largest is
- * 2^wbits; the engine (86Box's ViRGE/DX model) takes the texel position as
- * U/W, so U is the position times W over 2^11: U's fraction 2^(wbits - 11). */
-#define PERSP_UW_SHIFT 11
+ * 2^wbits; the engine takes the texel position as U/W, so U is the position
+ * times W over 2^7: U's fraction 2^(wbits - 7). Z along a line (TdZdX) has
+ * 15 fractional bits, as the data book says. Bench C's ViRGE/DX settled both
+ * (2026-11-19, docs/virge.md): 86Box's DX model had 2^11 and 16 bits.
+ * virge_tri_tune changes them for VTRI's sweeps. */
+static int persp_uw_shift = 7, z_dx_frac = 15;
+#define PERSP_UW_SHIFT persp_uw_shift
+
+void virge_tri_tune(int uw_shift, int zdx_frac)
+{
+    if (uw_shift > 0 && uw_shift < 24)
+        persp_uw_shift = uw_shift;
+    if (zdx_frac > 0 && zdx_frac < 24)
+        z_dx_frac = zdx_frac;
+}
 
 void virge_tri(const virge_vertex *a, const virge_vertex *b, const virge_vertex *c)
 {
@@ -306,7 +318,7 @@ void virge_tri(const virge_vertex *a, const virge_vertex *b, const virge_vertex 
     /* (Z along a line: 16 fractional bits in 86Box's model, which starts each
      * line's Z at TZS << 1 and adds TdZdX to that; the data book says S16.15
      * for TdZdX as for TZS and TdZdY. Bench C decides: docs/virge.md.) */
-    WR(VIRGE_3D_DZDX, (int32_t)floor(sx * grad[A_Z][0] * 65536.0 + 0.5));
+    WR(VIRGE_3D_DZDX, (int32_t)floor(ldexp(sx * grad[A_Z][0], z_dx_frac) + 0.5));
     WR(VIRGE_3D_DZDY, fx15(grad[A_Z][0] * dx02 - grad[A_Z][1]));
     WR(VIRGE_3D_ZS, fx15(clampd(grad[A_Z][2], 0, 65535.99)));
     fifo_wait(9);

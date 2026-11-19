@@ -1,0 +1,91 @@
+diff --git a/src/video/vid_s3_virge.c b/src/video/vid_s3_virge.c
+index f2ea06a..a07d2c2 100644
+--- a/src/video/vid_s3_virge.c
++++ b/src/video/vid_s3_virge.c
+@@ -4264,6 +4264,11 @@ tri(virge_t *virge, s3d_t *s3d_tri, s3d_state_t *state, int yc, int32_t dx1, int
+     int      bpp     = (s3d_tri->cmd_set >> 2) & 7;
+     uint32_t dest_offset;
+     uint32_t z_offset;
++    /* MGA-Glide local patch 0135: Z along a line starts at TZS << 1 (16 bits);
++     * the ViRGE/DX's TdZdX has 15, as the data book says (S16.15, like TZS
++     * and TdZdY), so it steps twice its value. Measured on a real ViRGE/DX
++     * (RetroGPU's VTRI zbuf case, 2026-11-19); the other chips as before. */
++    int32_t  zdx     = (virge->chip == S3_VIRGEDX) ? (int32_t) ((uint32_t) s3d_tri->TdZdX << 1) : s3d_tri->TdZdX;
+ 
+     dest_offset = s3d_tri->dest_base + (state->y * s3d_tri->dest_str);
+     z_offset    = s3d_tri->z_base + (state->y * s3d_tri->z_str);
+@@ -4325,7 +4330,7 @@ tri(virge_t *virge, s3d_t *s3d_tri, s3d_state_t *state, int yc, int32_t dx1, int
+             state->v = state->base_v + ((s3d_tri->TdVdX * dx) >> 5);
+             state->w = state->base_w + ((s3d_tri->TdWdX * dx) >> 5);
+             state->d = state->base_d + ((s3d_tri->TdDdX * dx) >> 5);
+-            z += ((s3d_tri->TdZdX * dx) >> 5);
++            z += ((zdx * dx) >> 5);
+ 
+             if (s3d_tri->cmd_set & CMD_SET_HC) {
+                 if (x_dir > 0) {
+@@ -4338,7 +4343,7 @@ tri(virge_t *virge, s3d_t *s3d_tri, s3d_state_t *state, int yc, int32_t dx1, int
+                     if (x < s3d_tri->clip_l) {
+                         int diff_x = s3d_tri->clip_l - x;
+ 
+-                        z += (s3d_tri->TdZdX * diff_x);
++                        z += (zdx * diff_x);
+                         state->u += (s3d_tri->TdUdX * diff_x);
+                         state->v += (s3d_tri->TdVdX * diff_x);
+                         state->r += (s3d_tri->TdRdX * diff_x);
+@@ -4360,7 +4365,7 @@ tri(virge_t *virge, s3d_t *s3d_tri, s3d_state_t *state, int yc, int32_t dx1, int
+                     if (x > s3d_tri->clip_r) {
+                         int diff_x = x - s3d_tri->clip_r;
+ 
+-                        z += (s3d_tri->TdZdX * diff_x);
++                        z += (zdx * diff_x);
+                         state->u += (s3d_tri->TdUdX * diff_x);
+                         state->v += (s3d_tri->TdVdX * diff_x);
+                         state->r += (s3d_tri->TdRdX * diff_x);
+@@ -4453,7 +4458,7 @@ tri(virge_t *virge, s3d_t *s3d_tri, s3d_state_t *state, int yc, int32_t dx1, int
+                         Z_WRITE(z_addr, src_z);
+                 }
+ 
+-                z += s3d_tri->TdZdX;
++                z += zdx;
+                 state->u += s3d_tri->TdUdX;
+                 state->v += s3d_tri->TdVdX;
+                 state->r += s3d_tri->TdRdX;
+@@ -4802,16 +4807,19 @@ s3_virge_triangle(virge_t *virge, s3d_t *s3d_tri, int render_lane, int render_la
+         case 7:
+             state.tex_sample = virge->bilinear_enabled ? tex_sample_normal_filter : tex_sample_normal;
+             break;
++        /* MGA-Glide local patch 0135: the ViRGE/DX takes U/W and V/W as the
++         * ViRGE (86C325) does, not with the _375 samplers' 16 times larger
++         * scale: measured on a real ViRGE/DX (RetroGPU VTRI, 2026-11-19). */
+         case (0 | 8):
+         case (1 | 8):
+-            if ((virge->chip == S3_VIRGEDX) || (virge->chip >= S3_VIRGEGX2))
++            if (virge->chip >= S3_VIRGEGX2)
+                 state.tex_sample = tex_sample_persp_mipmap_375;
+             else
+                 state.tex_sample = tex_sample_persp_mipmap;
+             break;
+         case (2 | 8):
+         case (3 | 8):
+-            if ((virge->chip == S3_VIRGEDX) || (virge->chip >= S3_VIRGEGX2))
++            if (virge->chip >= S3_VIRGEGX2)
+                 state.tex_sample = virge->bilinear_enabled ? tex_sample_persp_mipmap_filter_375 :
+                                                              tex_sample_persp_mipmap_375;
+             else
+@@ -4820,14 +4828,14 @@ s3_virge_triangle(virge_t *virge, s3d_t *s3d_tri, int render_lane, int render_la
+             break;
+         case (4 | 8):
+         case (5 | 8):
+-            if ((virge->chip == S3_VIRGEDX) || (virge->chip >= S3_VIRGEGX2))
++            if (virge->chip >= S3_VIRGEGX2)
+                 state.tex_sample = tex_sample_persp_normal_375;
+             else
+                 state.tex_sample = tex_sample_persp_normal;
+             break;
+         case (6 | 8):
+         case (7 | 8):
+-            if ((virge->chip == S3_VIRGEDX) || (virge->chip >= S3_VIRGEGX2))
++            if (virge->chip >= S3_VIRGEGX2)
+                 state.tex_sample = virge->bilinear_enabled ? tex_sample_persp_normal_filter_375 :
+                                                              tex_sample_persp_normal_375;
+             else
