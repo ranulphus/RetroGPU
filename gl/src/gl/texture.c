@@ -499,6 +499,36 @@ static void unpack(GLenum format, const void *pixels, int w, int h, unsigned cha
     }
 }
 
+/* A sub-image's texels (unpacked into tmp, w by h) into the level, and the rectangle cut down to those that
+ * changed: in each row the first and last texel that differ, then the box round them (GLQuake re-sends 128-texel
+ * lightmap rows when one surface's patch of ~18 changed: a back end that writes texels into place one by one
+ * converts and writes a sixth as many). *w = 0 when nothing changed. */
+static void narrow_rect(dgl_level *L, const uint32_t *tmp, GLint *x, GLint *y, GLsizei *w, GLsizei *h)
+{
+    int r, x0 = *w, x1 = -1, y0 = -1, y1 = -1;
+    for (r = 0; r < *h; r++) {
+        uint32_t *d = (uint32_t *)(L->rgba + ((size_t)(*y + r) * L->w + *x) * 4);
+        const uint32_t *s = tmp + (size_t)r * *w;
+        int a = 0, b = *w - 1;
+        while (a <= b && d[a] == s[a])
+            a++;
+        if (a > b)
+            continue;                           /* (the row as it was) */
+        while (d[b] == s[b])
+            b--;
+        memcpy(d + a, s + a, (size_t)(b - a + 1) * 4);
+        if (a < x0) x0 = a;
+        if (b > x1) x1 = b;
+        if (y0 < 0) y0 = r;
+        y1 = r;
+    }
+    if (y0 < 0) {
+        *w = 0;
+        return;
+    }
+    *x += x0, *y += y0, *w = x1 - x0 + 1, *h = y1 - y0 + 1;
+}
+
 /* Copy client rows of 8-bit colour indices. */
 static void unpack_idx(const void *pixels, int w, int h, unsigned char *dst, int dst_stride)
 {
@@ -580,10 +610,31 @@ void APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint x, GLint y, GLsi
     }
     if (w && h && dgl_be->tex_change)
         dgl_be->tex_change(t);
-    if (L->idx)
-        unpack_idx(pixels, w, h, L->idx + (size_t)y * L->w + x, L->w);
-    else
-        unpack(format, pixels, w, h, L->rgba + ((size_t)y * L->w + x) * 4, L->w * 4, L->ifc);
+    {
+        static uint32_t *tmp;
+        static size_t tmp_n;
+        dgl_caps caps;
+        size_t n = (size_t)w * (size_t)h;
+        memset(&caps, 0, sizeof caps);
+        dgl_be->caps(&caps);
+        if (caps.sub_narrow && !L->idx && n > tmp_n && n <= 262144) {
+            uint32_t *p = (uint32_t *)realloc(tmp, n * 4);
+            if (p)
+                tmp = p, tmp_n = n;
+        }
+        if (L->idx)
+            unpack_idx(pixels, w, h, L->idx + (size_t)y * L->w + x, L->w);
+        else if (caps.sub_narrow && n && n <= tmp_n && !t->dirty) {
+            unpack(format, pixels, w, h, (unsigned char *)tmp, w * 4, L->ifc);
+            narrow_rect(L, tmp, &x, &y, &w, &h);
+            if (!w) {
+                FT_END();
+                return;                         /* (every texel as it was: nothing to tell the back end) */
+            }
+        } else {
+            unpack(format, pixels, w, h, L->rgba + ((size_t)y * L->w + x) * 4, L->w * 4, L->ifc);
+        }
+    }
     if (w && h && !dgl_be->tex_sub(t, level, x, y, w, h)) {
         dgl_texc.sub_full++;
         t->dirty = 1;

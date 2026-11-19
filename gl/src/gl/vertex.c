@@ -305,6 +305,11 @@ void dgl_tri_general(GLint a, GLint b, GLint c, GLint provoking)
     tri(a, b, c, provoking, NULL);
 }
 
+/* The immediate vertices of the primitive being assembled (NULL: arrays), for a back end's fast hook calling
+ * dgl_poly_general: read directly, not through the arrays' general reader (fetch: a third of GLQuake's vertex time
+ * on the P3 when the TNT2's polygons went this way). */
+static const dgl_vin *cur_imm;
+
 int dgl_poly_general(const GLint *ids, int n, GLint provoking)
 {
     dgl_cvtx v[DGL_POLY_MAX], pv;
@@ -312,8 +317,8 @@ int dgl_poly_general(const GLint *ids, int n, GLint provoking)
     if (!dgl_sink.polygon || n < 3 || n > DGL_POLY_MAX)
         return 0;
     for (i = 0; i < n; i++)
-        v[i] = *get(ids[i], NULL);      /* (copies: two of them may share a cache slot) */
-    pv = *get(provoking, NULL);
+        v[i] = *get(ids[i], cur_imm);   /* (copies: two of them may share a cache slot) */
+    pv = *get(provoking, cur_imm);
     dgl_sink.polygon(v, n, &pv);
     return 1;
 }
@@ -351,11 +356,14 @@ static void assemble(GLenum mode, GLsizei count, const GLint *idx, GLint first, 
         plan_imm(imm, count);
     else
         plan_arrays();
+    cur_imm = imm;
     if (dgl_sink.fast && dgl_sink.fast(mode, count, idx, first)) {     /* (a list's: indices into its vertices) */
+        cur_imm = NULL;
         if (dgl_sink.end)
             dgl_sink.end();
         return;
     }
+    cur_imm = NULL;
     switch (mode) {
     case GL_TRIANGLES:
         for (i = 0; i + 2 < count; i += 3)

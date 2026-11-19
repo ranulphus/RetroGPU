@@ -57,7 +57,11 @@ typedef struct {
     unsigned stamp;
     unsigned palgen;                    /* colour-index levels: the palette's generation expanded through */
     const dgl_palette *pal;
+    int      code, lw, lh;              /* its TNT2_TEX_ format and size, for rectangles written in place */
+    uint32_t mark;                      /* the command stream after the last draw with it (tnt2_mark) */
 } ttex;
+
+static ttex *cur_tt0, *cur_tt1;          /* the copies the state sent draws with (marked at each draw's end) */
 
 static unsigned stamp;
 static uint32_t tris, lines_, points_;
@@ -103,6 +107,8 @@ static uint32_t chip_format(const dgl_level *l, int *cpp, int *has_alpha)
 static void tex_drop(dgl_texture *t)
 {
     ttex *x = (ttex *)t->be;
+    if (x == cur_tt0) cur_tt0 = NULL;
+    if (x == cur_tt1) cur_tt1 = NULL;
     if (x) {
         if (dgl_vram_retire(x->block) != 0) {   /* (drawing queued may still read it: free after the next sync) */
             tnt2_sync(1000000);
@@ -179,6 +185,8 @@ static ttex *prepare(dgl_texture *t)
         ttex *old = (ttex *)t->be;
         uint32_t oldblock = old ? old->block : 0;
         t->be = NULL;
+        if (old == cur_tt0) cur_tt0 = NULL;
+        if (old == cur_tt1) cur_tt1 = NULL;
         free(old);
         x = (ttex *)calloc(1, sizeof *x);
         if (!x || room(size + 128u, &x->block, t) != 0) {
@@ -221,6 +229,7 @@ static ttex *prepare(dgl_texture *t)
             ;
         if (i == n)
             tnt2_tex_load_rgba8(x->off, code, lw, lh, n, src);   /* (a free block: nothing queued reads it) */
+        x->code = code, x->lw = lw, x->lh = lh;
         for (i = 0; i < n; i++)
             free(expanded[i]);
     }
@@ -228,6 +237,7 @@ static ttex *prepare(dgl_texture *t)
     x->levels = n;
     x->has_alpha = alpha;
     x->stamp = ++stamp;
+    x->mark = tnt2_mark();
     x->pal = pal;
     x->palgen = pal ? pal->gen : 0;
     t->be = x;
@@ -262,9 +272,57 @@ static uint32_t bfactor(GLenum f)
 
 static int fogging;                     /* the fog factor goes in the vertices' specular alpha */
 static int valid_ok;                    /* the words sent are GL's state now (until a dirty bit or a texture change) */
-static const dgl_texture *valid_tex;
+static const dgl_texture *valid_tex, *valid_tex1;
+static int mt_on;                       /* drawing with the multitexture object (0x55) */
+static int shift_s1, shift_t1;          /* its second texture's whole-period shift */
 static float vx_s, vx_o, vy_s, vy_o, vz_s, vz_o;    /* the viewport's scale and offset, from the last validate */
 static int shift_s, shift_t;            /* a repeating texture: coordinates shifted by whole periods per triangle */
+
+/* 0..1 to a byte: one FISTP in the current (nearest) rounding, no control-word switches (mga/fp.h: a cast or
+ * floorf costs two FLDCWs each, which stall a P6; four a vertex were a third of the P3's projection time). */
+static uint32_t ub(float v)
+{
+    /* v * 255 rounded to an integer by adding 1.5 * 2^23 (the float's last place is then 1), read back as an
+     * integer, then clamped as an integer: no x87 compares (each an FNSTSW) and no FISTP. Values far out of range
+     * land outside 0-255 and clamp the right way. */
+    union { float f; int32_t i; } u;
+    int32_t i;
+    u.f = v * 255.0f + 12582912.0f;
+    i = u.i - 0x4B400000;
+    return (uint32_t)(i < 0 ? 0 : i > 255 ? 255 : i);
+}
+
+/* A vertex's colour packed, the last one's kept (GLQuake's world: one colour a polygon, or none). */
+static uint32_t col_key[4], col_val, col_set;
+
+static uint32_t colour_of(const dgl_cvtx *c)
+{
+    uint32_t k[4];
+    memcpy(k, &c->r, sizeof k);         /* (r, g, b, a: one after another in dgl_cvtx) */
+    if (col_set && k[0] == col_key[0] && k[1] == col_key[1] && k[2] == col_key[2] && k[3] == col_key[3])
+        return col_val;
+    memcpy(col_key, k, sizeof k);
+    col_set = 1;
+    return col_val = ub(c->a) << 24 | ub(c->r) << 16 | ub(c->g) << 8 | ub(c->b);
+}
+
+/* A vertex's two outcodes at once (bit set: outside that plane): the view volume's (returned) and the guard
+ * band's (*guard), from the signs of the planes' distances stored as floats and read as integers, so no x87
+ * compares (an FNSTSW each with i586 code; the shared dgl_outcode's twelve a vertex were a fifth of the P3's
+ * projection). A distance of -0 counts as outside: harmless both ways (a trivially rejected triangle is wholly
+ * on a plane, a guard-band vertex is clipped). */
+static unsigned outcodes(const dgl_cvtx *v, unsigned *guard)
+{
+    union { float f; uint32_t u; } d[10];
+    float gw = GUARD * v->w;
+    d[0].f = v->z + v->w, d[1].f = v->w - v->z;
+    d[2].f = v->x + v->w, d[3].f = v->w - v->x, d[4].f = v->y + v->w, d[5].f = v->w - v->y;
+    d[6].f = v->x + gw, d[7].f = gw - v->x, d[8].f = v->y + gw, d[9].f = gw - v->y;
+    *guard = (d[0].u >> 31) | (d[1].u >> 31) << 1 | (d[6].u >> 31) << 2 | (d[7].u >> 31) << 3 |
+             (d[8].u >> 31) << 4 | (d[9].u >> 31) << 5;
+    return (d[0].u >> 31) | (d[1].u >> 31) << 1 | (d[2].u >> 31) << 2 | (d[3].u >> 31) << 3 |
+           (d[4].u >> 31) << 4 | (d[5].u >> 31) << 5;
+}
 
 static void cut(int *c, int x0, int y0, int x1, int y1)
 {
@@ -289,18 +347,180 @@ static void scissor(int draw, int *c)
     if (c[3] < c[1]) c[3] = c[1];
 }
 
+/* A texture unit's words for either object: its copy's offset, FORMAT and FILTER (the white texel when none). */
+static ttex *tex_words(dgl_texture *t, uint32_t *off, uint32_t *format, uint32_t *filter, int *ss, int *st)
+{
+    ttex *x = t ? prepare(t) : NULL;
+    *ss = *st = 0;
+    if (!x) {
+        *off = tnt2_tex_dummy_off(), *format = 0x110016A1u, *filter = 0x11001010u;
+        return NULL;
+    }
+    {
+        int mip = t->min_filter != GL_NEAREST && t->min_filter != GL_LINEAR;
+        uint32_t mag = t->mag_filter == GL_LINEAR ? 2u : 1u, min;
+        switch (t->min_filter) {
+        case GL_LINEAR: min = 2; break;
+        case GL_NEAREST_MIPMAP_NEAREST: min = 3; break;
+        case GL_LINEAR_MIPMAP_NEAREST: min = 4; break;
+        case GL_NEAREST_MIPMAP_LINEAR: min = 5; break;
+        case GL_LINEAR_MIPMAP_LINEAR: min = 6; break;
+        default: min = 1; break;
+        }
+        if (mip && x->levels < 2)
+            min = min == 3 || min == 5 ? 1u : 2u;
+        *off = x->off;
+        *ss = t->wrap_s == GL_REPEAT, *st = t->wrap_t == GL_REPEAT;
+        *format = x->format | wrap_of(t->wrap_s) << 24 | wrap_of(t->wrap_t) << 28 | (uint32_t)(mip ? x->levels : 1) << 12;
+        /* The level by footprint sums, rounded down after the bias: +4/8 gives OpenGL's nearest (docs/tnt2.md). */
+        *filter = mag << 28 | min << 24 | (mip ? 4u << 16 : 0u) | 0x1010u;
+    }
+    return x;
+}
+
+/* The multitexture object's combiners (docs/tnt2.md): each stage out = in0*in1 + in2*in3, an input a byte of
+ * (source << 2 | alpha << 1 | inverse): 1 zero, 2 the constant, 3 the vertex's colour, 4 the stage before, 5 and 6
+ * the textures. */
+enum { CS_ZERO = 1, CS_CONST = 2, CS_PRIM = 3, CS_PREV = 4, CS_TEX0 = 5 };
+#define CIN(src, alpha, inv) ((uint32_t)(src) << 2 | ((alpha) ? 2u : 0u) | ((inv) ? 1u : 0u))
+#define CW(a, b, c, d) ((a) | (b) << 8 | (c) << 16 | (d) << 24 | 1u << 29)   /* (MAP: identity) */
+#define C_ONE  CIN(CS_ZERO, 0, 1)
+#define C_NONE CIN(CS_ZERO, 0, 0)
+
+/* GL_COMBINE_ARB (texture_env_combine): a function's arguments as inputs. The colour combiner takes a source's
+ * alpha by the ALPHA bit; ONE_MINUS operands flip INVERSE. */
+static uint32_t comb_in(int unit, GLenum src, GLenum op, int colour)
+{
+    uint32_t s;
+    switch (src) {
+    case GL_TEXTURE: s = CS_TEX0 + (uint32_t)unit; break;
+    case GL_TEXTURE0_ARB: case GL_TEXTURE1_ARB: s = CS_TEX0 + (uint32_t)(src - GL_TEXTURE0_ARB); break;
+    case GL_CONSTANT_ARB: s = CS_CONST; break;
+    case GL_PRIMARY_COLOR_ARB: s = CS_PRIM; break;
+    default: s = unit ? CS_PREV : CS_PRIM; break;      /* GL_PREVIOUS_ARB (unit 0's: the vertex colour) */
+    }
+    if (colour)
+        return CIN(s, op == GL_SRC_ALPHA || op == GL_ONE_MINUS_SRC_ALPHA,
+                   op == GL_ONE_MINUS_SRC_COLOR || op == GL_ONE_MINUS_SRC_ALPHA);
+    return CIN(s, 0, op == GL_ONE_MINUS_SRC_ALPHA);
+}
+
+/* A function to one word: REPLACE a0*1, MODULATE a0*a1, ADD and ADD_SIGNED a0*1 + a1*1 (the latter less a half,
+ * by the map), INTERPOLATE a0*a2 + a1*(1-a2); the output map scales by 1, 2 or 4 (Mesa's driver never used 4).
+ * SUBTRACT has no form here: drawn as MODULATE, said once. */
+static uint32_t comb_fn(GLenum fn, const uint32_t *a, float scale)
+{
+    uint32_t map = scale >= 3.0f ? 3u : scale >= 1.5f ? 2u : 1u, in0, in1, in2, in3;
+    switch (fn) {
+    case GL_REPLACE: in0 = a[0], in1 = C_ONE, in2 = C_NONE, in3 = C_NONE; break;
+    case GL_ADD: case GL_ADD_SIGNED_ARB:
+        in0 = a[0], in1 = C_ONE, in2 = a[1], in3 = C_ONE;
+        if (fn == GL_ADD_SIGNED_ARB)
+            map = map == 1 ? 4u : 7u;           /* (BIAS, BIAS_SCALE2: no bias with four) */
+        break;
+    case GL_INTERPOLATE_ARB: in0 = a[0], in1 = a[2], in2 = a[1], in3 = a[2] ^ 1u; break;
+    default:
+        if (fn != GL_MODULATE)
+            warn_once(6, "GL_SUBTRACT_ARB drawn as GL_MODULATE (the TNT2's combiner adds)");
+        in0 = a[0], in1 = a[1], in2 = C_NONE, in3 = C_NONE;
+        break;
+    }
+    return in0 | in1 << 8 | in2 << 16 | in3 << 24 | map << 29;
+}
+
+static void combine_words(int unit, const dgl_texenv *e, uint32_t *aw, uint32_t *cw)
+{
+    uint32_t c[3], a[3];
+    int i;
+    for (i = 0; i < 3; i++) {
+        c[i] = comb_in(unit, e->src_rgb[i], e->op_rgb[i], 1);
+        a[i] = comb_in(unit, e->src_alpha[i], e->op_alpha[i], 0);
+    }
+    *cw = comb_fn(e->combine_rgb, c, e->rgb_scale);
+    *aw = comb_fn(e->combine_alpha, a, e->alpha_scale);
+}
+
+/* Does a unit's environment read the constant colour (GL_BLEND, or a combine argument)? */
+static int uses_const(const dgl_texenv *e)
+{
+    int i;
+    if (e->mode == GL_BLEND)
+        return 1;
+    if (e->mode != GL_COMBINE_ARB)
+        return 0;
+    for (i = 0; i < 3; i++)
+        if (e->src_rgb[i] == GL_CONSTANT_ARB || e->src_alpha[i] == GL_CONSTANT_ARB)
+            return 1;
+    return 0;
+}
+
+static void stage_words(int unit, int on, const dgl_texenv *e, int has_alpha, uint32_t *aw, uint32_t *cw)
+{
+    uint32_t T = CS_TEX0 + (uint32_t)unit, P = unit ? CS_PREV : CS_PRIM;
+    GLenum env = e->mode;
+    if (!on) {
+        *aw = *cw = CW(CIN(P, 0, 0), C_ONE, C_NONE, C_NONE);
+        return;
+    }
+    if (env == GL_COMBINE_ARB) {
+        combine_words(unit, e, aw, cw);
+        return;
+    }
+    switch (env) {
+    case GL_REPLACE:
+        *cw = CW(CIN(T, 0, 0), C_ONE, C_NONE, C_NONE);
+        *aw = has_alpha ? *cw : CW(CIN(P, 0, 0), C_ONE, C_NONE, C_NONE);
+        break;
+    case GL_DECAL:                      /* C = Cp (1 - At) + Ct At, A = Ap */
+        *cw = CW(CIN(T, 0, 0), CIN(T, 1, 0), CIN(P, 0, 0), CIN(T, 1, 1));
+        *aw = CW(CIN(P, 0, 0), C_ONE, C_NONE, C_NONE);
+        break;
+    case GL_ADD:                        /* C = Cp + Ct, A = Ap At */
+        *cw = CW(CIN(T, 0, 0), C_ONE, CIN(P, 0, 0), C_ONE);
+        *aw = CW(CIN(T, 0, 0), CIN(P, 0, 0), C_NONE, C_NONE);
+        break;
+    case GL_BLEND:                      /* C = Cp (1 - Ct) + Cc Ct, A = Ap At */
+        *cw = CW(CIN(P, 0, 0), CIN(T, 0, 1), CIN(CS_CONST, 0, 0), CIN(T, 0, 0));
+        *aw = CW(CIN(T, 0, 0), CIN(P, 0, 0), C_NONE, C_NONE);
+        break;
+    default:                            /* GL_MODULATE (and what this can't do) */
+        *cw = CW(CIN(T, 0, 0), CIN(P, 0, 0), C_NONE, C_NONE);
+        *aw = *cw;
+        break;
+    }
+}
+
+static uint32_t sop(GLenum o)
+{
+    switch (o) {
+    case GL_ZERO: return 2;
+    case GL_REPLACE: return 3;
+    case GL_INCR: return 4;
+    case GL_DECR: return 5;
+    case GL_INVERT: return 6;
+    default: return 1;                  /* GL_KEEP */
+    }
+}
+
 static void validate(void)
 {
     dgl_texture *t = dgl_gl.texture_2d ? dgl_unit_texture(0) : NULL;
+    dgl_texture *t1 = dgl_gl.texture_2d1 ? dgl_unit_texture(1) : NULL;
+    int masked = !dgl_gl.color_mask[0] || !dgl_gl.color_mask[1] || !dgl_gl.color_mask[2] || !dgl_gl.color_mask[3];
+    int stencil = dgl_gl.stencil_test && rg_tnt2.depth_bits == 24;
+    int need_mt = t1 != NULL || masked || stencil ||
+                  (t && (dgl_tex_env(0)->mode == GL_BLEND || dgl_tex_env(0)->mode == GL_COMBINE_ARB));
     ttex *x;
     uint32_t off, format, filter, blend, control, fogc;
     int c[4];
     /* Nothing GL draws with changed since (GLQuake: a thousand begins a frame, most with the state as it was): the
      * words sent still hold (the layer sends them again itself after 2D). */
-    if (valid_ok && t == valid_tex && !(t && (t->dirty || t->level[0].idx)) &&
+    if (valid_ok && t == valid_tex && t1 == valid_tex1 && need_mt == mt_on && !(t && (t->dirty || t->level[0].idx)) &&
+        !(t1 && (t1->dirty || t1->level[0].idx)) &&
         !(dgl_gl.dirty & (DGL_DIRTY_RASTER | DGL_DIRTY_TARGET | DGL_DIRTY_TEXTURE | DGL_DIRTY_FOG | DGL_DIRTY_CLIP)))
         return;
     x = t ? prepare(t) : NULL;
+    cur_tt0 = x, cur_tt1 = NULL;
     vx_s = dgl_gl.viewport[2] * 0.5f, vx_o = dgl_gl.viewport[0] + dgl_gl.viewport[2] * 0.5f;
     vy_s = -dgl_gl.viewport[3] * 0.5f, vy_o = dgl_ctx.height - (dgl_gl.viewport[1] + dgl_gl.viewport[3] * 0.5f);
     vz_s = (float)((dgl_gl.depth_far - dgl_gl.depth_near) * 0.5);
@@ -335,8 +555,7 @@ static void validate(void)
         case GL_REPLACE: blend |= x->has_alpha ? TB_DECAL : TB_DECALALPHA; break;
         case GL_DECAL: blend |= TB_DECALALPHA; break;
         case GL_ADD: blend |= TB_ADD; break;
-        default:
-            warn_once(2, "GL_BLEND and combine texture environments drawn as GL_MODULATE");
+        default:                        /* (GL_BLEND goes to the multitexture object's combiners) */
             blend |= TB_MODULATEALPHA;
             break;
         }
@@ -347,8 +566,6 @@ static void validate(void)
         filter = 0x11001010u;
         blend |= TB_MODULATEALPHA;
     }
-    if (dgl_gl.texture_2d1)
-        warn_once(3, "the second texture unit is not drawn yet");
     fogging = dgl_gl.fog;
     if (fogging)
         blend |= B_FOG;
@@ -358,7 +575,8 @@ static void validate(void)
         blend |= 2u << 24 | 1u << 28;   /* (ONE, ZERO) */
     control = C_Z_FIXED | C_CORNER | C_CULL_NONE;  /* (culling here, on the window vertices) */
     if (dgl_gl.alpha_test) {
-        int ref = (int)floorf(dgl_gl.alpha_ref * 255.0f + 0.5f);
+        float rf = dgl_gl.alpha_ref * 255.0f + 0.5f;  /* (mga_ifloor: exact, without floorf's FLDCWs) */
+        int ref = rf < 0.0f ? 0 : rf > 255.0f ? 255 : mga_ifloor(rf);
         control |= C_ALPHA_ON | cmp_of(dgl_gl.alpha_func) << 8 | (uint32_t)(ref < 0 ? 0 : ref > 255 ? 255 : ref);
     } else
         control |= 8u << 8;
@@ -370,16 +588,50 @@ static void validate(void)
         control |= 8u << 16;
     if (dgl_gl.dither)
         control |= C_DITHER;
-    if (!dgl_gl.color_mask[0] || !dgl_gl.color_mask[1] || !dgl_gl.color_mask[2] || !dgl_gl.color_mask[3])
-        warn_once(4, "colour masks are not drawn yet (all channels written)");
-    if (dgl_gl.stencil_test)
-        warn_once(5, "the stencil test is not drawn yet");
-    fogc = 0xFF000000u | (uint32_t)(dgl_gl.fog_color[0] * 255.0f + 0.5f) << 16 |
-           (uint32_t)(dgl_gl.fog_color[1] * 255.0f + 0.5f) << 8 | (uint32_t)(dgl_gl.fog_color[2] * 255.0f + 0.5f);
-    tnt2_3d_state(off, format, filter, blend, control, fogc);
+    if (dgl_gl.stencil_test && rg_tnt2.depth_bits != 24)
+        warn_once(5, "the stencil test needs a 32-bit context (Z24S8): not drawn at 16 bits");
+    fogc = 0xFF000000u | ub(dgl_gl.fog_color[0]) << 16 | ub(dgl_gl.fog_color[1]) << 8 | ub(dgl_gl.fog_color[2]);
+    mt_on = need_mt;
+    if (!need_mt)
+        tnt2_3d_state(off, format, filter, blend, control, fogc);
+    else {
+        /* The multitexture object: both units, the combiners, colour writes, stencil. */
+        uint32_t w[16], off1, format1, filter1;
+        const dgl_texenv *e0 = dgl_tex_env(0), *e1 = dgl_tex_env(1);
+        ttex *x0, *x1;
+        int ss, st;
+        x0 = tex_words(t, &w[0], &w[2], &w[4], &ss, &st);
+        shift_s = ss, shift_t = st;
+        x1 = tex_words(t1, &off1, &format1, &filter1, &ss, &st);
+        shift_s1 = ss, shift_t1 = st;
+        cur_tt0 = x0, cur_tt1 = x1;
+        w[1] = off1, w[3] = format1, w[5] = filter1;
+        stage_words(0, x0 != NULL, e0, x0 ? x0->has_alpha : 1, &w[6], &w[7]);
+        stage_words(1, x1 != NULL, e1, x1 ? x1->has_alpha : 1, &w[8], &w[9]);
+        {
+            /* (one constant for both stages: the unit that reads it; unit 0's when both do) */
+            const dgl_texenv *ce = x1 && uses_const(e1) && !(x0 && uses_const(e0)) ? e1 : e0;
+            if (x0 && x1 && uses_const(e0) && uses_const(e1) && memcmp(e0->color, e1->color, sizeof e0->color))
+                warn_once(7, "two different texture environment colours: unit 0's for both");
+            w[10] = ub(ce->color[3]) << 24 | ub(ce->color[0]) << 16 | ub(ce->color[1]) << 8 | ub(ce->color[2]);
+        }
+        w[11] = blend & ~0xFu;              /* (no texture map field in 0x55's BLEND) */
+        w[12] = control | (dgl_gl.color_mask[3] ? 0x04000000u : 0) | (dgl_gl.color_mask[0] ? 0x08000000u : 0) |
+                (dgl_gl.color_mask[1] ? 0x10000000u : 0) | (dgl_gl.color_mask[2] ? 0x20000000u : 0);
+        w[13] = 0, w[14] = 0x111;
+        if (stencil) {
+            w[12] |= (dgl_gl.stencil_writemask & 255u) ? 0x02000000u : 0;
+            w[13] = 1u | cmp_of(dgl_gl.stencil_func) << 4 | ((uint32_t)dgl_gl.stencil_ref & 255u) << 8 |
+                    (dgl_gl.stencil_mask & 255u) << 16 | (dgl_gl.stencil_writemask & 255u) << 24;
+            w[14] = sop(dgl_gl.stencil_fail) | sop(dgl_gl.stencil_zfail) << 4 | sop(dgl_gl.stencil_zpass) << 8;
+        }
+        w[15] = fogc;
+        tnt2_3d_mt_state(w);
+    }
     dgl_gl.dirty &= ~(DGL_DIRTY_RASTER | DGL_DIRTY_TARGET | DGL_DIRTY_TEXTURE | DGL_DIRTY_FOG | DGL_DIRTY_CLIP);
     valid_ok = 1;
     valid_tex = t;
+    valid_tex1 = t1;
 }
 
 /* ---- Drawing ---------------------------------------------------------------- */
@@ -392,14 +644,12 @@ static int tb_begin(void)
     return 1;
 }
 
-static void tb_end(void) { }               /* (the layer tells the chip once 4 KB of commands wait) */
-
-/* 0..1 to a byte: one FISTP in the current (nearest) rounding, no control-word switches (mga/fp.h: a cast or
- * floorf costs two FLDCWs each, which stall a P6; four a vertex were a third of the P3's projection time). */
-static uint32_t ub(float v)
+/* The textures drawn with marked: a rectangle written into one waits for the chip to pass it (tex_sub). */
+static void tb_end(void)
 {
-    int32_t i = v > 0.0f ? (v < 1.0f ? mga_irint(v * 255.0f) : 255) : 0;
-    return (uint32_t)i;
+    uint32_t m = tnt2_mark();
+    if (cur_tt0) cur_tt0->mark = m;
+    if (cur_tt1) cur_tt1->mark = m;
 }
 
 static float fog_factor(float d)
@@ -422,9 +672,10 @@ static void project(const dgl_cvtx *c, tnt2_vertex *v, const dgl_cvtx *colour)
     v->sy = c->y * iw * vy_s + vy_o;
     v->sz = c->z * iw * vz_s + vz_o;
     v->rhw = iw;
-    v->color = ub(colour->a) << 24 | ub(colour->r) << 16 | ub(colour->g) << 8 | ub(colour->b);
+    v->color = colour_of(colour);
     v->specular = (fogging ? ub(fog_factor(c->eye_d)) : 255u) << 24;
     v->tu = c->s, v->tv = c->t;
+    v->tu1 = c->s1, v->tv1 = c->t1;
 }
 
 static double offset_for(const tnt2_vertex *p0, const tnt2_vertex *p1, const tnt2_vertex *p2)
@@ -448,6 +699,17 @@ static void wrap_shift(tnt2_vertex *v, int n)
 {
     float ms = v[0].tu, mt = v[0].tv;
     int i;
+    if (mt_on && (shift_s1 || shift_t1)) {
+        float m1 = v[0].tu1, n1 = v[0].tv1;
+        for (i = 1; i < n; i++) {
+            if (v[i].tu1 < m1) m1 = v[i].tu1;
+            if (v[i].tv1 < n1) n1 = v[i].tv1;
+        }
+        m1 = shift_s1 && m1 > -1e9f && m1 < 1e9f ? (float)mga_ifloor(m1) : 0;
+        n1 = shift_t1 && n1 > -1e9f && n1 < 1e9f ? (float)mga_ifloor(n1) : 0;
+        for (i = 0; i < n; i++)
+            v[i].tu1 -= m1, v[i].tv1 -= n1;
+    }
     for (i = 1; i < n; i++) {
         if (v[i].tu < ms) ms = v[i].tu;
         if (v[i].tv < mt) mt = v[i].tv;
@@ -466,12 +728,13 @@ static void draw_triangle(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *
     tnt2_vertex v[9];
     double area2;
     int n, i, flat = dgl_gl.shade_model == GL_FLAT;
+    unsigned ga, gb, gc;
     dgl_prims.tris_in++;
-    if (dgl_outcode(a, 1.0f, 1.0f) & dgl_outcode(b, 1.0f, 1.0f) & dgl_outcode(c, 1.0f, 1.0f)) {
+    if (outcodes(a, &ga) & outcodes(b, &gb) & outcodes(c, &gc)) {
         dgl_prims.clipped++;            /* (wholly outside one of the view volume's planes: no clipping needed) */
         return;
     }
-    if (!(dgl_outcode(a, GUARD, GUARD) | dgl_outcode(b, GUARD, GUARD) | dgl_outcode(c, GUARD, GUARD))) {
+    if (!(ga | gb | gc)) {
         n = 3;
         project(a, &v[0], flat ? prov : a), project(b, &v[1], flat ? prov : b), project(c, &v[2], flat ? prov : c);
     } else {
@@ -493,8 +756,10 @@ static void draw_triangle(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *
             project(&out[i], &v[i], &out[i]);
     }
     /* The polygon's own area (a clipped one's first three vertices can lie on one line: conformance t35's quad). */
-    for (area2 = 0, i = 0; i < n; i++)
-        area2 += (double)v[i].sx * v[(i + 1) % n].sy - (double)v[(i + 1) % n].sx * v[i].sy;
+    for (area2 = 0, i = 0; i < n; i++) {
+        int j = i + 1 == n ? 0 : i + 1;         /* (not %: an IDIV) */
+        area2 += (double)v[i].sx * v[j].sy - (double)v[j].sx * v[i].sy;
+    }
     if (area2 == 0) {
         dgl_prims.zero_area++;
         return;
@@ -514,11 +779,14 @@ static void draw_triangle(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *
                 v[i].sz = (float)(z < 0 ? 0 : z > 1 ? 1 : z);
             }
     }
-    if (shift_s || shift_t)
+    if (shift_s || shift_t || (mt_on && (shift_s1 || shift_t1)))
         wrap_shift(v, n);
     PROF_SWITCH(PROF_D_SETUP);
     for (i = 1; i + 1 < n; i++) {
-        tnt2_tri(&v[0], &v[i], &v[i + 1]);
+        if (mt_on)
+            tnt2_tri_mt(&v[0], &v[i], &v[i + 1]);
+        else
+            tnt2_tri(&v[0], &v[i], &v[i + 1]);
         tris++;
     }
 }
@@ -574,16 +842,16 @@ static void tb_polygon(const dgl_cvtx *v, int n, const dgl_cvtx *prov)
     int i, flat = dgl_gl.shade_model == GL_FLAT;
     if (n < 3)
         return;
-    for (i = 0; i < n; i++)
-        out &= dgl_outcode(&v[i], 1.0f, 1.0f);
+    for (i = 0; i < n; i++) {
+        unsigned g;
+        out &= outcodes(&v[i], &g);
+        oc |= g;
+    }
     if (out) {
         dgl_prims.clipped++;            /* (wholly outside one of the view volume's planes) */
         return;
     }
-    if (!fogging && n <= 16)
-        for (i = 0; i < n; i++)
-            oc |= dgl_outcode(&v[i], GUARD, GUARD);
-    if (fogging || n > 16 || oc) {
+    if (fogging || n > (mt_on ? 8 : 16) || oc) {
         for (i = 1; i + 1 < n; i++)
             tb_triangle(&v[0], &v[i], &v[i + 1], prov);
         return;
@@ -591,8 +859,10 @@ static void tb_polygon(const dgl_cvtx *v, int n, const dgl_cvtx *prov)
     dgl_prims.tris_in += (unsigned)(n - 2);
     for (i = 0; i < n; i++)
         project(&v[i], &w[i], flat ? prov : &v[i]);
-    for (i = 0; i < n; i++)
-        area2 += (double)w[i].sx * w[(i + 1) % n].sy - (double)w[(i + 1) % n].sx * w[i].sy;
+    for (i = 0; i < n; i++) {
+        int j = i + 1 == n ? 0 : i + 1;
+        area2 += (double)w[i].sx * w[j].sy - (double)w[j].sx * w[i].sy;
+    }
     if (area2 == 0) {
         dgl_prims.zero_area++;
         return;
@@ -612,11 +882,15 @@ static void tb_polygon(const dgl_cvtx *v, int n, const dgl_cvtx *prov)
                 w[i].sz = (float)(z < 0 ? 0 : z > 1 ? 1 : z);
             }
     }
-    if (shift_s || shift_t)
+    if (shift_s || shift_t || (mt_on && (shift_s1 || shift_t1)))
         wrap_shift(w, n);
     PROF_SWITCH(PROF_D_SETUP);
-    tnt2_poly(w, n);
+    if (mt_on)
+        tnt2_poly_mt(w, n);
+    else
+        tnt2_poly(w, n);
     tris += (unsigned)(n - 2);
+    dgl_prims.seqs++;                   /* (polygons sent whole) */
 }
 
 /* A line: a quad half the width either side, across its minor axis (OpenGL's wide lines' shape), b's colour when
@@ -642,8 +916,13 @@ static void tb_line(const dgl_cvtx *a, const dgl_cvtx *b)
     } else {
         q[0].sx -= hw, q[1].sx += hw, q[2].sx += hw, q[3].sx -= hw;
     }
-    tnt2_tri(&q[0], &q[1], &q[2]);
-    tnt2_tri(&q[0], &q[2], &q[3]);
+    if (mt_on) {
+        tnt2_tri_mt(&q[0], &q[1], &q[2]);
+        tnt2_tri_mt(&q[0], &q[2], &q[3]);
+    } else {
+        tnt2_tri(&q[0], &q[1], &q[2]);
+        tnt2_tri(&q[0], &q[2], &q[3]);
+    }
     lines_++;
 }
 
@@ -662,9 +941,28 @@ static void tb_point(const dgl_cvtx *a)
     q[1].sx += h, q[1].sy -= h;
     q[2].sx += h, q[2].sy += h;
     q[3].sx -= h, q[3].sy += h;
-    tnt2_tri(&q[0], &q[1], &q[2]);
-    tnt2_tri(&q[0], &q[2], &q[3]);
+    if (mt_on) {
+        tnt2_tri_mt(&q[0], &q[1], &q[2]);
+        tnt2_tri_mt(&q[0], &q[2], &q[3]);
+    } else {
+        tnt2_tri(&q[0], &q[1], &q[2]);
+        tnt2_tri(&q[0], &q[2], &q[3]);
+    }
     points_++;
+}
+
+/* GL_POLYGON whole to tb_polygon (each vertex projected and sent once): the GL core would send it as a fan of
+ * triangles, each projecting all three of its vertices (GLQuake's world: six vertices a polygon, projected twelve
+ * times). Polygons only: a fan's or strip's triangles are culled one by one. */
+static int tb_fast(GLenum mode, GLsizei count, const GLint *idx, GLint first)
+{
+    GLint ids[DGL_POLY_MAX];
+    GLsizei i;
+    if (mode != GL_POLYGON || count < 4 || count > DGL_POLY_MAX)
+        return 0;
+    for (i = 0; i < count; i++)
+        ids[i] = idx ? idx[i] : first + i;
+    return dgl_poly_general(ids, (int)count, ids[0]);    /* (a polygon's provoking vertex: its first) */
 }
 
 static void install(void)
@@ -672,7 +970,7 @@ static void install(void)
     valid_ok = 0;
     dgl_sink.begin = tb_begin;
     dgl_sink.triangle = tb_triangle;
-    dgl_sink.fast = NULL;                       /* (the general path only) */
+    dgl_sink.fast = tb_fast;                    /* (polygons whole; the rest the general path) */
     dgl_sink.polygon = tb_polygon;
     dgl_sink.line = tb_line;
     dgl_sink.point = tb_point;
@@ -719,16 +1017,33 @@ static void caps(dgl_caps *c)
     memset(c, 0, sizeof *c);
     strcpy(name, tnt2.name ? tnt2.name : "Riva TNT2");
     c->renderer = name;
-    c->texture_units = 1;
+    c->texture_units = 2;                       /* (the multitexture object's two) */
+    c->sub_narrow = 1;                          /* (tex_sub writes texels into place by the CPU) */
     c->max_texture_size = 2048;
 }
 
 static void synced(void) { dgl_vram_sync_done(); }   /* (the blocks retired before it are free) */
 
+/* A rectangle of a single-level texture (GLQuake's lightmaps, before each surface with -mtex: ~900 a second)
+ * written in place once the chip has done every draw queued with it (the layer's fence); anything else is made
+ * again whole at its next use (t->dirty). */
 static int tex_sub(dgl_texture *t, int level, int x, int y, int w, int h)
 {
-    (void)t, (void)level, (void)x, (void)y, (void)w, (void)h;
-    return 0;                                   /* (made again whole at its next use: t->dirty) */
+    ttex *tx = (ttex *)t->be;
+    const dgl_level *l = &t->level[level];
+    if (!tx || level != 0 || tx->levels != 1 || tx->pal || !l->rgba || t->dirty || l->w != (1 << tx->lw) ||
+        l->h != (1 << tx->lh) || x < 0 || y < 0 || x + w > l->w || y + h > l->h)
+        return 0;
+    {
+        int o = PROF_SWITCH(PROF_D_DRAIN), r = tnt2_mark_wait(tx->mark, 1000000);
+        PROF_BACK(o);
+        if (r != 0)
+            return 0;
+    }
+    tnt2_tex_sub_rgba8(tx->off, tx->code, tx->lw, tx->lh, x, y, w, h, l->rgba, l->w);
+    tnt2_3d_tex_written();
+    dgl_texc.sub_fast++;
+    return 1;
 }
 
 static void tex_free(dgl_texture *t) { tex_drop(t); }

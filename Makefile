@@ -120,6 +120,7 @@ DJ_SRC_NTRI0 := tests/tnt2/ntri0.c build/djgpp/libtnt2.a
 DJ_SRC_NTRI := tests/tnt2/ntri.c build/djgpp/libtnt2.a
 DJ_SRC_NTRI32 := tests/tnt2/ntri32.c build/djgpp/libtnt2.a
 DJ_SRC_NSHOW := tests/tnt2/nshow.c build/djgpp/libtnt2.a
+DJ_SRC_STEAL := tests/tnt2/steal.c
 DJ_SRC_VTWOD := tests/virge/vtwod.c tests/hal/sw2d.c build/djgpp/libvirge.a
 DJ_SRC_VTRI := tests/virge/vtri.c build/djgpp/libvirge.a
 build/djgpp/HOOKS.EXE: tests/hal/hooks.c
@@ -146,6 +147,7 @@ build/djgpp/NTRI0.EXE: tests/tnt2/ntri0.c build/djgpp/libtnt2.a
 build/djgpp/NTRI.EXE: tests/tnt2/ntri.c build/djgpp/libtnt2.a
 build/djgpp/NTRI32.EXE: tests/tnt2/ntri32.c build/djgpp/libtnt2.a
 build/djgpp/NSHOW.EXE: tests/tnt2/nshow.c build/djgpp/libtnt2.a
+build/djgpp/STEAL.EXE: tests/tnt2/steal.c
 build/djgpp/VTWOD.EXE: tests/virge/vtwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libvirge.a
 build/djgpp/VTWOD.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/VTRI.EXE: tests/virge/vtri.c build/djgpp/libvirge.a

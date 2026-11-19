@@ -32,6 +32,10 @@ int  tnt2_accel_init(void);
 int  tnt2_sync(uint32_t timeout_us);    /* every command done: 0, or -1 on time-out */
 int  tnt2_idle(void);                   /* 1: every command written so far is done (no wait) */
 void tnt2_kick(void);                   /* the ring's written commands to the chip now */
+/* A place in the command stream, and whether the chip has done everything before it (a fence without notifiers). */
+uint32_t tnt2_mark(void);
+int  tnt2_mark_done(uint32_t mark);
+int  tnt2_mark_wait(uint32_t mark, uint32_t timeout_us);    /* 0, or -1 on time-out */
 
 /* 2D. The target: a surface at byte offset off in video memory, pitch_bytes apart, 8, 16 or 32 bits a pixel
  * (offsets and pitches multiples of 64 bytes). The clip is inclusive-exclusive. */
@@ -69,6 +73,7 @@ typedef struct {
     float sx, sy, sz, rhw;
     uint32_t color, specular;
     float tu, tv;
+    float tu1, tv1;             /* the second texture's (the multitexture object's only) */
 } tnt2_vertex;
 int      tnt2_3d_init(void);
 void     tnt2_3d_target(uint32_t color_off, uint32_t zeta_off, int pitch_bytes, int bpp, int w, int h);
@@ -77,6 +82,14 @@ void     tnt2_3d_state(uint32_t tex_off, uint32_t format, uint32_t filter, uint3
                        uint32_t fogcolor);
 void     tnt2_tri(const tnt2_vertex *a, const tnt2_vertex *b, const tnt2_vertex *c);
 void     tnt2_poly(const tnt2_vertex *v, int n);     /* a fan of n (3-16) vertices, each sent once */
+/* The multitexture triangle object (class 0x55: two textures, combiners, colour masks, stencil) in subchannel 7's
+ * place: tnt2_3d_mt_state takes its 16 words (OFFSET 0-1, FORMAT 0-1, FILTER 0-1, COMBINE_ALPHA(0), COMBINE_COLOR(0),
+ * COMBINE_ALPHA(1), COMBINE_COLOR(1), COMBINE_FACTOR, BLEND, CONTROL0-2, FOGCOLOR) and makes 0x55 the object drawn
+ * with; tnt2_3d_state makes 0x54 it again. tnt2_tri_mt and tnt2_poly_mt (3-8 vertices) draw with it. */
+void     tnt2_3d_mt_state(const uint32_t w[16]);
+void     tnt2_3d_tex_written(void);     /* texels written in place: the state sent again (the texture cache) */
+void     tnt2_tri_mt(const tnt2_vertex *a, const tnt2_vertex *b, const tnt2_vertex *c);
+void     tnt2_poly_mt(const tnt2_vertex *v, int n);
 uint32_t tnt2_tex_dummy_off(void);      /* a 1x1 white A8R8G8B8 texel in VRAM, for untextured triangles */
 uint32_t tnt2_3d_trap(uint32_t *addr, uint32_t *data);
 void     tnt2_3d_raw(int sub3d, uint32_t method, uint32_t value);  /* (bring-up: a method on the 3D surfaces' (1)
@@ -88,5 +101,8 @@ uint32_t tnt2_tex_load(uint32_t off, int cpp, int log2w, int log2h, int levels, 
 /* The same from RGBA8 levels (r, g, b, a bytes, rows of w), converted to the chip's format in the same pass. */
 enum { TNT2_TEX_A8R8G8B8, TNT2_TEX_R5G6B5, TNT2_TEX_A1R5G5B5, TNT2_TEX_A4R4G4B4 };
 uint32_t tnt2_tex_load_rgba8(uint32_t off, int fmt, int log2w, int log2h, int levels, const uint8_t *const *rgba);
+/* A rectangle of the base level written in place (the engine done with the texture first: tnt2_mark_wait). */
+void     tnt2_tex_sub_rgba8(uint32_t off, int fmt, int log2w, int log2h, int x, int y, int w, int h,
+                            const uint8_t *rgba, int stride);
 
 #endif

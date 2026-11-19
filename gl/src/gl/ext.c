@@ -5,12 +5,22 @@
 #include "gl_state.h"
 #include "../dgl/dgl.h"
 #include "../backend/backend.h"
+#include <string.h>
 
+/* (kept for the device and back end it was asked of: glMultiTexCoord asks it each call, GLQuake's world thousands
+ * of times a frame) */
 int dgl_texture_units(void)
 {
-    dgl_caps c;
-    dgl_be->caps(&c);
-    return c.texture_units;
+    static const void *be, *dev;
+    static int n;
+    if (be != (const void *)dgl_be || dev != (const void *)dgl_dev) {
+        dgl_caps c;
+        memset(&c, 0, sizeof c);
+        dgl_be->caps(&c);
+        n = c.texture_units;
+        be = dgl_be, dev = dgl_dev;
+    }
+    return n;
 }
 
 /* The unit a GL_TEXTUREi_ARB or GL_TEXTUREi_SGIS names; -1 (and

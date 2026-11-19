@@ -187,8 +187,34 @@ RetroGPU is MIT, so code is written from documentation and from MIT-licensed dri
   tenth across it is split in four in clip space, up to three times, to follow OpenGL's per-pixel fog.
 - **Clears** by the 2D engine in the scissor; a Z24S8 clear carries the stencil byte. **Lines and points** as
   quads (the chip has neither).
-- **Not yet, approximated and said once (DGL-WARN):** GL_BLEND's environment, colour masks, the stencil test, the
-  second texture unit (the 0x55 object has all four).
+- **The multitexture object** (class 0x55, `tnt2_3d_mt_state`, `tnt2_tri_mt`, `tnt2_poly_mt`): bound to subchannel
+  7 in the textured triangle's place when GL needs it: a second texture unit, GL_BLEND's environment, a colour mask
+  or the stencil test (32-bit contexts: Z24S8). Handle 0x8000001A in RAMHT slot 10, instance 0x120C (word 0
+  0x01000055); its SURFACES bound to the 3D surfaces object at set-up. Its state in Mesa's two bursts (0x308-0x324,
+  0x32C-0x348): OFFSET 0-1, FORMAT 0-1, FILTER 0-1, the two stages' COMBINE_ALPHA and COMBINE_COLOR, COMBINE_FACTOR
+  (unit 0's environment colour: one constant for both), BLEND, CONTROL0-2 (colour write bits 26-29, stencil),
+  FOGCOLOR. Each stage is `in0*in1 + in2*in3` over bytes of (source << 2 | alpha << 1 | inverse), sources 1 zero, 2
+  the constant, 3 the vertex colour, 4 the stage before, 5 and 6 the textures: GL's MODULATE, REPLACE, DECAL, ADD
+  and BLEND each one stage's words. Vertices TLMTVERTEX (ten dwords, eight slots from 0x400), DRAWPRIMITIVE from
+  0x540 as the triangle object's. A switch between the two objects binds the other and sends its state again (the
+  safe rule: whether each keeps its state across a rebind isn't known). Conformance's stencil and colour-mask cases
+  go through it, and GLQuake's `-mtex` (the lightmap by GL_BLEND on unit 1).
+- **texture_env_combine** (advertised with two units): each function is one stage's words: REPLACE a0*1, MODULATE
+  a0*a1, ADD a0*1 + a1*1, ADD_SIGNED the same with the BIAS map (BIAS_SCALE2 with a scale), INTERPOLATE
+  a0*a2 + a1*(1-a2); SRC_ALPHA operands set the colour combiner's ALPHA bit, ONE_MINUS ones INVERSE. Scales of 2
+  and 4 by the output map: **SCALE4 (map 3) works on the P3** (t25's x4 case exact), though Mesa's driver never
+  used it. SUBTRACT has no form (drawn as MODULATE, said once). The stages share one constant colour: the unit
+  that reads it.
+- **The texture cache** keeps texels it has read after the CPU writes new ones in place (t18 on the P3: half a
+  quad drawn with the old texels, along a triangle's edge; a 16x16 lightmap's updates never shown). Sending the
+  triangle object's state again, unchanged, empties it (t18 and t32 then exact): the layer does after every
+  rectangle written in place (`tnt2_3d_tex_written`).
+- **A fence without notifiers** (`tnt2_mark`, `tnt2_mark_done`, `tnt2_mark_wait`): a place in the command stream
+  as laps round the ring and the offset in it; the chip has done everything before it once its read pointer is
+  1,024 dwords past (taken to be more than PFIFO's cache and PGRAPH's pipeline hold: an assumption, not a
+  documented figure; GLQuake's frames with ~2,000 rectangles a second written so show no stale texels) or everything
+  is done. Each draw marks its textures;
+  a rectangle written into a texture in place (`tnt2_tex_sub_rgba8`) waits for its mark first.
 - **Conformance on the P3** (`CARD=tnt2 make conform-bench PC=bench-p3`, OSMesa's references, the default
   tolerances): the first run passed 31 of 35; then four fixes: a clipped polygon's area over all its vertices (t35:
   a quad clipped to the guard band had its first three vertices on one line and was dropped), the whole-period
@@ -208,9 +234,22 @@ RetroGPU is MIT, so code is written from documentation and from MIT-licensed dri
   | a texture made again (GLQuake's lightmaps, ~74 a second) into a new block, the old one retired until a sync, not after a drain; the swizzle by tables; a guard band of 4 | 44.6 | 47.0 |
   | colours to bytes and the period shift without `floorf` or casts (each switches the x87's control word twice: a third of the projection's time); textures converted and swizzled in one pass, then written in one sequential run (write-combining's bursts); triangles wholly outside the view volume dropped before clipping (a third of what GLQuake sends); validation skipped while GL's dirty bits are clear; projection in single precision from the viewport's scale and offset | **64.6** | **82.4** |
 
-  What is left, by the timers at 320x200: the game itself, GL's transform, and this back end's projection about
-  equal thirds; GLQuake's two passes (the lightmaps by a second draw of the world: Windows' driver has the 0x55
-  object's two textures in one) are the next to take.
+  Then the multitexture object (0x55, below) for GLQuake's `-mtex`, and the CPU's work cut again:
+
+  | Change | `-mtex` 640 | `-mtex` 320 | two passes 640 | two passes 320 |
+  |---|---|---|---|---|
+  | the 0x55 object: right at once (frame 400: 271 pixels of 307,200 more than 24 levels from the G400's two passes), but each lightmap rectangle GLQuake sends before a surface (~900 a second) made the texture again whole | 30.5 | 30.0 | 67.2 | |
+  | a rectangle written in place once the chip has passed the last draw with it (a fence: `tnt2_mark`), in whole 4x4 blocks (a 32-byte line each, so write-combining bursts) | 59.1 | 70.0 | | |
+  | GL's sub-image narrowed to the texels that changed (GLQuake sends 128-texel rows for one ~18-texel patch: the back end's `sub_narrow`); outcodes from the distances' sign bits (no x87 compares); colours cached and rounded by adding 1.5 * 2^23; GL_POLYGON whole to the polygon path (it went as a fan of triangles, each vertex projected two or three times), its immediate vertices read directly; `dgl_texture_units` cached (glMultiTexCoord asked the back end each call) | **77.4** | **96.9** | **73.7** | **104.5** |
+
+  Against Windows 98's 100.7 and 152.7 that is 77% and 68% (the faster of the two ways at each size). At 320x200,
+  by the timers (`PROF=1`, k cycles a frame at ~75 fps): the game outside GL (`app`) 2,300 (alone about Windows 98's
+  whole frame at 152.7: 2,950 on the 451 MHz P3), GL's transform 975 (~300 cycles a vertex), the back end's
+  projection ~1,000 (~300 a vertex), validation 570 (~1,000 a begin: GLQuake sets the texture environment twice a
+  surface), texture work ~800, setup 290, the swap 200. With the texture cache emptied after each rectangle (below):
+  75.8 and 94.2 with `-mtex`. **`STEAL`** (`tests/tnt2/steal.c`: a tight loop on the time-stamp counter, gaps over
+  400 cycles summed) under GLOS on the P3: 1.1% of the CPU lost (GLOS's 1 kHz tick, ~4,800 cycles each), so the
+  game's time is the game's own.
 - **Still T4's:** GLOS's screensavers, Fifth Wheel and PrBoom-plus on the P3; the 0x55 object for the gaps.
 
 ## How it fits RetroGPU

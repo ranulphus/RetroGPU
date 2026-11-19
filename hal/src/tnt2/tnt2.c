@@ -119,6 +119,7 @@ void tnt2_unmap(void)
 
 static volatile uint32_t *ring;
 static int ring_put, ring_cur, ring_free;
+static uint32_t ring_laps;                      /* times the CPU has gone round (tnt2_mark's positions) */
 static const int ring_max = RING_DWORDS - 1;
 
 static void write_put(int put)
@@ -154,6 +155,7 @@ static void ring_wait(int size)
                 }
                 write_put(SKIPS);
                 ring_cur = ring_put = SKIPS;
+                ring_laps++;
                 ring_free = get - (SKIPS + 1);
             }
         } else
@@ -182,6 +184,43 @@ static void kick_soon(void)
         pending += ring_max;
     if (pending >= 1024)
         tnt2_kick();
+}
+
+/* A position in the command stream (laps round the ring, and the place in it), and whether the chip has done
+ * everything written before it: its read pointer well past it (the margin taken to be more than the FIFO's cache
+ * and PGRAPH's pipeline hold: an assumption, not a documented figure; docs/tnt2.md), or every command done. The chip is never more than a lap behind (ring_wait). */
+#define MARK_MARGIN 1024
+
+uint32_t tnt2_mark(void) { return ring_laps * RING_DWORDS + (uint32_t)ring_cur; }
+
+static uint32_t chip_pos(void)
+{
+    uint32_t put_abs = ring_laps * RING_DWORDS + (uint32_t)ring_put;
+    int get = read_get(), behind = ring_put - get;
+    if (behind < 0)
+        behind += ring_max;                     /* (the chip still in the lap before) */
+    return put_abs - (uint32_t)behind;
+}
+
+int tnt2_mark_done(uint32_t mark)
+{
+    if ((int32_t)(tnt2_mark() - mark) >= (int32_t)(2 * RING_DWORDS))
+        return 1;                               /* (two laps back: long done) */
+    if ((int32_t)(chip_pos() - mark) >= MARK_MARGIN)
+        return 1;
+    return read_get() == ring_put && ring_cur == ring_put && PGRAPH[0x0700 / 4] == 0;
+}
+
+int tnt2_mark_wait(uint32_t mark, uint32_t timeout_us)
+{
+    uint32_t t0 = sys_time_us();
+    if (tnt2_mark_done(mark))
+        return 0;
+    tnt2_kick();
+    while (!tnt2_mark_done(mark))
+        if (sys_time_us() - t0 > timeout_us)
+            return -1;
+    return 0;
 }
 
 void tnt2_kick(void)
@@ -532,10 +571,13 @@ int tnt2_vsync_wait(uint32_t timeout_us)
 
 #define SUBCH(s, m) (((uint32_t)(s) << 13) | (uint32_t)(m))
 static uint32_t clip_now[4];                    /* (the 3D clip PGRAPH has: tnt2_3d_clip) */
+static int tri_obj;                             /* (the object on subchannel 7: below) */
+static void forget_3d(void);                    /* (the words cached as sent: the engine set up again) */
 #define S3D 4                                   /* subchannel 4: the 3D surfaces (the line object's before) */
 #define TRI 7                                   /* subchannel 7: the textured triangle (the scaled image's before) */
 #define H_SURF3D 0x80000018u                    /* (RAMHT slots 8 and 9: the X driver's handles hash 0x80000010+i to i) */
 #define H_TTRI   0x80000019u
+#define H_MTRI   0x8000001Au                    /* (RAMHT slot 10) */
 #define DUMMY_TEX_OFF (tnt2.fb_usable + RING_DWORDS * 4u + SCRATCH_BYTES)   /* 1x1 A8R8G8B8 white, 128-byte aligned */
 
 uint32_t tnt2_tex_dummy_off(void) { return DUMMY_TEX_OFF; }
@@ -558,17 +600,23 @@ uint32_t tnt2_3d_trap(uint32_t *addr, uint32_t *data)
 int tnt2_3d_init(void)
 {
     clip_now[0] = ~0u;                                  /* (the engine was set up again: PGRAPH's clip unknown) */
+    forget_3d();
     /* The objects: 0x53 at instance 0x120A (PRAMIN dwords 0x828-0x82B), 0x54 at 0x120B (0x82C-0x82F). */
     PRAMIN[0x0828] = 0x01000053; PRAMIN[0x0829] = 0; PRAMIN[0x082A] = 0x12001200; PRAMIN[0x082B] = 0;
     PRAMIN[0x082C] = 0x01000054; PRAMIN[0x082D] = 0; PRAMIN[0x082E] = 0x12001200; PRAMIN[0x082F] = 0;
+    PRAMIN[0x0830] = 0x01000055; PRAMIN[0x0831] = 0; PRAMIN[0x0832] = 0x12001200; PRAMIN[0x0833] = 0;
     PRAMIN[16] = H_SURF3D; PRAMIN[17] = 0x8001120A;
     PRAMIN[18] = H_TTRI;   PRAMIN[19] = 0x8001120B;
+    PRAMIN[20] = H_MTRI;   PRAMIN[21] = 0x8001120C;
     tnt2_fb[DUMMY_TEX_OFF + 0] = 0xFF; tnt2_fb[DUMMY_TEX_OFF + 1] = 0xFF;
     tnt2_fb[DUMMY_TEX_OFF + 2] = 0xFF; tnt2_fb[DUMMY_TEX_OFF + 3] = 0xFF;
     three_d = 1;
     ring_start(SUBCH(S3D, 0), 1); NEXT(H_SURF3D);
+    ring_start(SUBCH(TRI, 0), 1); NEXT(H_MTRI);         /* the multitexture object's SURFACES first */
+    ring_start(SUBCH(TRI, 0x18C), 1); NEXT(H_SURF3D);
     ring_start(SUBCH(TRI, 0), 1); NEXT(H_TTRI);
     ring_start(SUBCH(TRI, 0x18C), 1); NEXT(H_SURF3D);     /* SURFACES: the 3D surfaces object (in hardware) */
+    tri_obj = 0x54;
     return tnt2_sync(200000) == 0 && PGRAPH[0x0100 / 4] == 0 ? 0 : -1;   /* (PGRAPH_INTR: nothing trapped) */
 }
 
@@ -578,6 +626,13 @@ int tnt2_3d_init(void)
 static struct { uint32_t color, zeta; int pitch, bpp, w, h, set; } t3d;
 static uint32_t st3d[6];
 static int st3d_set;
+static uint32_t mt3d[16];               /* the multitexture object's words, sent while it is the one in use */
+static int mt3d_set, tri_obj;           /* tri_obj: 0x54 or 0x55, the object bound to subchannel 7 */
+
+static void forget_3d(void)
+{
+    t3d.set = 0, st3d_set = 0, mt3d_set = 0;
+}
 
 static void send_target(int clip)
 {
@@ -613,10 +668,32 @@ void tnt2_3d_clip(int x0, int y0, int x1, int y1)
 static void send_state(void)
 {
     int i;
+    if (tri_obj == 0x55) {              /* (Mesa's two bursts: 0x308-0x324, 0x32C-0x348; 0x328 not written) */
+        ring_start(SUBCH(TRI, 0x308), 8);
+        for (i = 0; i < 8; i++)
+            NEXT(mt3d[i]);
+        ring_start(SUBCH(TRI, 0x32C), 8);
+        for (i = 8; i < 16; i++)
+            NEXT(mt3d[i]);
+        return;
+    }
     ring_start(SUBCH(TRI, 0x300), 7);
     NEXT(0);
     for (i = 0; i < 6; i++)
         NEXT(st3d[i]);
+}
+
+/* Subchannel 7 to the triangle object wanted: a switch binds it and sends its state again (the safe rule: whether
+ * the two objects keep their own state across a rebind is not known). */
+static void use_obj(int obj)
+{
+    if (tri_obj == obj)
+        return;
+    ring_start(SUBCH(TRI, 0), 1);
+    NEXT(obj == 0x55 ? H_MTRI : H_TTRI);
+    tri_obj = obj;
+    if (obj == 0x55 ? mt3d_set : st3d_set)
+        send_state();
 }
 
 /* The 2D objects share PGRAPH's surface and state registers with the 3D ones: after any 2D operation a triangle
@@ -640,6 +717,10 @@ void tnt2_3d_target(uint32_t color_off, uint32_t zeta_off, int pitch_bytes, int 
 void tnt2_3d_state(uint32_t tex_off, uint32_t format, uint32_t filter, uint32_t blend, uint32_t control,
                    uint32_t fogcolor)
 {
+    if (tri_obj != 0x54) {
+        st3d_set = 0;                                   /* (sent at the switch below) */
+        use_obj(0x54);
+    }
     if (st3d_set && !stale_3d && st3d[0] == tex_off && st3d[1] == format && st3d[2] == filter && st3d[3] == blend &&
         st3d[4] == control && st3d[5] == fogcolor)
         return;                                         /* (the same, and nothing 2D since) */
@@ -679,6 +760,80 @@ void tnt2_tri(const tnt2_vertex *a, const tnt2_vertex *b, const tnt2_vertex *c)
     }
     ring_start(SUBCH(TRI, 0x600), 1);
     NEXT(0x102);
+    kick_soon();
+}
+
+/* Texels written in place: the triangle objects' state sent again before the next draw, even unchanged (the
+ * chip's texture cache keeps texels it read until its texture registers are written: t18 on the P3). */
+void tnt2_3d_tex_written(void)
+{
+    stale_3d = 1;
+}
+
+void tnt2_3d_mt_state(const uint32_t w[16])
+{
+    if (tri_obj == 0x55 && mt3d_set && !stale_3d && !memcmp(w, mt3d, sizeof mt3d))
+        return;
+    memcpy(mt3d, w, sizeof mt3d);
+    mt3d_set = 1;
+    if (stale_3d && t3d.set) {
+        send_target(0);
+        stale_3d = 0;
+        if (tri_obj == 0x55) {
+            send_state();
+            return;
+        }
+    }
+    if (tri_obj != 0x55)
+        use_obj(0x55);                                  /* (it sends the words) */
+    else
+        send_state();
+}
+
+static void stale_check(void)
+{
+    if (stale_3d) {
+        if (t3d.set)
+            send_target(0);
+        if (tri_obj == 0x55 ? mt3d_set : st3d_set)
+            send_state();
+        stale_3d = 0;
+    }
+}
+
+static void put_mt(const tnt2_vertex *v)
+{
+    NEXT(fbits(v->sx)); NEXT(fbits(v->sy)); NEXT(fbits(v->sz)); NEXT(fbits(v->rhw));
+    NEXT(v->color); NEXT(v->specular); NEXT(fbits(v->tu)); NEXT(fbits(v->tv)); NEXT(fbits(v->tu1)); NEXT(fbits(v->tv1));
+}
+
+/* The multitexture object: TLMTVERTEX (10 dwords, 8 slots from 0x400), DRAWPRIMITIVE from 0x540. */
+void tnt2_tri_mt(const tnt2_vertex *a, const tnt2_vertex *b, const tnt2_vertex *c)
+{
+    stale_check();
+    ring_start(SUBCH(TRI, 0x400), 30);
+    put_mt(a), put_mt(b), put_mt(c);
+    ring_start(SUBCH(TRI, 0x540), 1);
+    NEXT(0x102);
+    kick_soon();
+}
+
+void tnt2_poly_mt(const tnt2_vertex *v, int n)
+{
+    int i;
+    if (n < 3 || n > 8)
+        return;
+    stale_check();
+    ring_start(SUBCH(TRI, 0x400), 10 * n);
+    for (i = 0; i < n; i++)
+        put_mt(&v[i]);
+    ring_start(SUBCH(TRI, 0x540), (n - 1) / 2);
+    for (i = 1; i + 1 < n; i += 2) {
+        uint32_t w = (uint32_t)(i + 1) | (uint32_t)i << 8;
+        if (i + 2 < n)
+            w |= (uint32_t)(i + 2) << 12 | (uint32_t)(i + 1) << 20;
+        NEXT(w);
+    }
     kick_soon();
 }
 
@@ -845,6 +1000,88 @@ uint32_t tnt2_tex_load_rgba8(uint32_t off, int fmt, int log2w, int log2h, int le
         off += bytes;
     }
     return off;
+}
+
+/* A rectangle of a texture's base level from RGBA8 (the whole level, rows stride texels apart), written in place.
+ * The swizzle keeps each aligned 4x4 block in 16 texels in a row: the rectangle's blocks are written whole from
+ * the level (a block's texels outside the rectangle unchanged in it), each a whole 32-byte line or two, so
+ * write-combining sends bursts (texel by texel in rows, a line took four partial writes). Textures under 4 texels
+ * a side texel by texel. The engine done with the texture first: the caller's fence (tnt2_mark_wait). */
+static uint32_t texel16(int fmt, const uint8_t *s)
+{
+    return fmt == TNT2_TEX_R5G6B5 ? (uint32_t)((s[0] >> 3) << 11 | (s[1] >> 2) << 5 | (s[2] >> 3))
+         : fmt == TNT2_TEX_A1R5G5B5 ? (uint32_t)((s[3] >> 7) << 15 | (s[0] >> 3) << 10 | (s[1] >> 3) << 5 | (s[2] >> 3))
+         : (uint32_t)((s[3] >> 4) << 12 | (s[0] >> 4) << 8 | (s[1] >> 4) << 4 | (s[2] >> 4));
+}
+
+void tnt2_tex_sub_rgba8(uint32_t off, int fmt, int log2w, int log2h, int x0, int y0, int w, int h,
+                        const uint8_t *rgba, int stride)
+{
+    /* (a 4x4 block's texels in swizzled order: (0,0) (1,0) (0,1) (1,1) (2,0) (3,0) (2,1) (3,1), then rows 2-3) */
+    static const uint8_t bx[16] = { 0, 1, 0, 1, 2, 3, 2, 3, 0, 1, 0, 1, 2, 3, 2, 3 };
+    static const uint8_t by[16] = { 0, 0, 1, 1, 0, 0, 1, 1, 2, 2, 3, 3, 2, 2, 3, 3 };
+    int x, y, i;
+    swizzle_tables(log2w, log2h);
+    if (log2w < 2 || log2h < 2) {
+        for (y = y0; y < y0 + h; y++) {
+            const uint8_t *s = rgba + ((long)y * stride + x0) * 4;
+            for (x = x0; x < x0 + w; x++, s += 4) {
+                uint32_t t = sw_x[x] | sw_y[y];
+                if (fmt == TNT2_TEX_A8R8G8B8)
+                    ((volatile uint32_t *)(tnt2_fb + off))[t] =
+                        (uint32_t)s[3] << 24 | (uint32_t)s[0] << 16 | (uint32_t)s[1] << 8 | s[2];
+                else
+                    ((volatile uint16_t *)(tnt2_fb + off))[t] = (uint16_t)texel16(fmt, s);
+            }
+        }
+        return;
+    }
+    /* (one loop a format: the conversion inlined, not chosen per texel) */
+#define TNT2_SUB_LOOP(BODY)                                                                     \
+    for (y = y0 & ~3; y < y0 + h; y += 4)                                                       \
+        for (x = x0 & ~3; x < x0 + w; x += 4) {                                                 \
+            const uint8_t *s = rgba + ((long)y * stride + x) * 4;                               \
+            uint32_t t = sw_x[x] | sw_y[y];                                                     \
+            BODY                                                                                \
+        }
+#define TNT2_Q(i) (s + (by[i] * stride + bx[i]) * 4)
+#define TNT2_565(q) ((uint32_t)((q)[0] >> 3) << 11 | (uint32_t)((q)[1] >> 2) << 5 | (uint32_t)((q)[2] >> 3))
+#define TNT2_1555(q) ((uint32_t)((q)[3] >> 7) << 15 | (uint32_t)((q)[0] >> 3) << 10 | (uint32_t)((q)[1] >> 3) << 5 | \
+                      (uint32_t)((q)[2] >> 3))
+#define TNT2_4444(q) ((uint32_t)((q)[3] >> 4) << 12 | (uint32_t)((q)[0] >> 4) << 8 | (uint32_t)((q)[1] >> 4) << 4 | \
+                      (uint32_t)((q)[2] >> 4))
+#define TNT2_PAIRS(CONV)                                                                        \
+    {                                                                                           \
+        volatile uint32_t *d = (volatile uint32_t *)(tnt2_fb + off + t * 2);                    \
+        for (i = 0; i < 16; i += 2)                                                             \
+            d[i >> 1] = CONV(TNT2_Q(i)) | CONV(TNT2_Q(i + 1)) << 16;                            \
+    }
+    switch (fmt) {
+    case TNT2_TEX_A8R8G8B8:
+        TNT2_SUB_LOOP({
+            volatile uint32_t *d = (volatile uint32_t *)(tnt2_fb + off) + t;
+            for (i = 0; i < 16; i++) {
+                const uint8_t *q = TNT2_Q(i);
+                d[i] = (uint32_t)q[3] << 24 | (uint32_t)q[0] << 16 | (uint32_t)q[1] << 8 | q[2];
+            }
+        })
+        break;
+    case TNT2_TEX_R5G6B5:
+        TNT2_SUB_LOOP(TNT2_PAIRS(TNT2_565))
+        break;
+    case TNT2_TEX_A1R5G5B5:
+        TNT2_SUB_LOOP(TNT2_PAIRS(TNT2_1555))
+        break;
+    default:
+        TNT2_SUB_LOOP(TNT2_PAIRS(TNT2_4444))
+        break;
+    }
+#undef TNT2_SUB_LOOP
+#undef TNT2_Q
+#undef TNT2_565
+#undef TNT2_1555
+#undef TNT2_4444
+#undef TNT2_PAIRS
 }
 
 /* ---- the set-up (nv_hw.c's NVLoadStateExt for NV_ARCH_04, no display state) ---- */

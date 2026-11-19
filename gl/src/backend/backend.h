@@ -20,6 +20,8 @@ typedef struct {
     const char *renderer;           /* GL_RENDERER's chip ("DOS-GL on ...") */
     int texture_units;              /* 1, or 2 */
     int max_texture_size;
+    int sub_narrow;                 /* glTexSubImage2D tells tex_sub only the texels that changed (0: the rectangle
+                                     * given); the caller zeroes the struct before caps */
 } dgl_caps;
 
 /* The back end's counters (DGL_STATS, DGL_FRAMES). */
