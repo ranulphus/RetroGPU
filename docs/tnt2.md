@@ -286,8 +286,10 @@ RetroGPU is MIT, so code is written from documentation and from MIT-licensed dri
   16 bits is coarse far away, 6.9%), t13 (2 of 24 cells: TEXTURE_SUB_ITRGB, a subtraction;
   CCRGB_BLEND_ITRGB_ON_TEXALPHA, where the retail Voodoo's isn't the documented blend: approximate on the Matrox
   too), t22 (gamma: the display captured, not possible on a bench; the RAMDAC's ramp not applied yet).
-- **Still T5's:** gamma; the GTA and Screamer Rally replays on the P3 (GLPLAY through `tools/bench/run.py
-  --replay`) and the retail games.
+- **The replays on the P3** (GLPLAY with the traces through `tools/bench/run.py --replay`, against the emulated
+  Voodoo's frames at the replays' tolerances, 40 levels and 5%): GTA's frames 60, 150, 240 and 295 with no pixel
+  out; Screamer Rally's 60, 150, 200 and 240 at most 0.05% out. **T5's exit is met.**
+- **Still T5's:** gamma (the RAMDAC's palette in direct colour); the retail games on the P3, watched.
 
 ## How it fits RetroGPU
 
