@@ -319,10 +319,9 @@ static int open_glos(const rg_open *o, rg_opened *out)
     w.w = o->width;
     w.h = o->height;
     full = rg_glos_full(o->glos_flags, o->width, o->height);   /* (full screen: no frame either) */
-    w.flags = GLOS_WF_FIXED | GLOS_WF_ANYWHERE | ((o->glos_flags & RG_GLOS_BARE) || full ? GLOS_WF_BARE : 0);
     for (i = 0; i < sizeof w.title - 1 && name[i] && name[i] != '.'; i++)
         w.title[i] = name[i];
-    if ((r = rg_glos_call(GLOS_WIN_CREATE, &w)) != 0) {
+    if ((r = rg_glos_win_create(&w, o->glos_flags, &full)) != 0) {
         close_dev();
         rg_set_error("GLOS made no %dx%d window (error %d)", o->width, o->height, r);
         return -1;

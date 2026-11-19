@@ -65,9 +65,9 @@ int rg_glos_fits(int w, int h)
     return w <= scr.w && h <= scr.h ? 2 : 0;
 }
 
-/* (Asked for, a context smaller than the screen stays framed: a GLOS window shown full screen keeps the screen's
-   size, so a smaller block of VRAM in it showed nothing (GLOS c0a5d0e, Loop A, 2026-11-19); GLOS's own mode for such
-   a window is still to come.) */
+/* (Asked for, a context smaller than the screen keeps its size with GLOS 2.8's GLOS_WF_OWN_MODE; built against an
+   older GLOS it stays framed: a GLOS window shown full screen without it takes the screen's size, so a smaller block
+   of VRAM in it showed nothing, GLOS c0a5d0e, Loop A, 2026-11-19.) */
 int rg_glos_full(unsigned glos_flags, int w, int h)
 {
     struct glos_screen scr;
@@ -77,7 +77,35 @@ int rg_glos_full(unsigned glos_flags, int w, int h)
         return 0;
     memset(&scr, 0, sizeof scr);
     scr.size = sizeof scr;
-    return rg_glos_call(GLOS_DRAW_SCREEN, &scr) == 0 && w == scr.w && h == scr.h;
+    if (rg_glos_call(GLOS_DRAW_SCREEN, &scr) != 0)
+        return 0;
+    if (w == scr.w && h == scr.h)
+        return 1;
+#ifdef GLOS_WF_OWN_MODE
+    if (w <= scr.w && h <= scr.h)
+        return 2;
+#endif
+    return 0;
+}
+
+int rg_glos_win_create(void *wp, unsigned glos_flags, int *full)
+{
+    struct glos_win_create *w = (struct glos_win_create *)wp;
+    int r;
+    w->flags = GLOS_WF_FIXED | GLOS_WF_ANYWHERE | ((glos_flags & RG_GLOS_BARE) || *full ? GLOS_WF_BARE : 0);
+#ifdef GLOS_WF_OWN_MODE
+    if (*full == 2)
+        w->flags |= GLOS_WF_OWN_MODE;
+#endif
+    r = rg_glos_call(GLOS_WIN_CREATE, w);
+#ifdef GLOS_WF_OWN_MODE
+    if (r == GLOS_E_ARGUMENT && *full == 2) {
+        *full = 0;                      /* (a GLOS before 2.8: framed, as then) */
+        w->flags = GLOS_WF_FIXED | GLOS_WF_ANYWHERE | ((glos_flags & RG_GLOS_BARE) ? GLOS_WF_BARE : 0);
+        r = rg_glos_call(GLOS_WIN_CREATE, w);
+    }
+#endif
+    return r;
 }
 
 void *rg_glos_ptr(unsigned linear)      /* a linear address GLOS gave, as a near pointer */
@@ -93,6 +121,7 @@ int rg_glos_call(unsigned fn, void *s) { (void)fn; (void)s; return -1; }
 unsigned rg_glos_caps(void) { return 0; }
 int rg_glos_fits(int w, int h) { (void)w; (void)h; return 0; }
 int rg_glos_full(unsigned glos_flags, int w, int h) { (void)glos_flags; (void)w; (void)h; return 0; }
+int rg_glos_win_create(void *w, unsigned glos_flags, int *full) { (void)w; (void)glos_flags; (void)full; return -1; }
 void *rg_glos_ptr(unsigned linear) { (void)linear; return NULL; }
 
 #endif

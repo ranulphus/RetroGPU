@@ -436,6 +436,7 @@ static void retrace_wait(void)
 }
 
 void rg_mga_glos_show(uint32_t off);     /* mga_glos.c */
+int  rg_mga_glos_shown(void);
 
 static int swap(int vsync)
 {
@@ -449,6 +450,14 @@ static int swap(int vsync)
             return 0;
         }
         show = rg_mga.front_is_a ? rg_mga.back_off : rg_mga.front_off;
+        if (vsync && rg_mga_glos_shown()) {
+            /* (the display is on the window's pixels itself, GLOS 2.7: the flip waits for the blank, as full screen) */
+            uint32_t t0 = sys_time_us();
+            if (rg_mga.hooks.wait)
+                rg_mga.hooks.wait();
+            engine_vsync_wait(50000);
+            retrace_us += sys_time_us() - t0;
+        }
         rg_mga_glos_show(show);
         rg_mga.front_is_a = !rg_mga.front_is_a;
         set_target();

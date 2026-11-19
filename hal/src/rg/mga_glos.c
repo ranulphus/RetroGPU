@@ -72,17 +72,30 @@ static int block(uint32_t min, uint32_t max, uint32_t *off, uint32_t *bytes)
     return 0;
 }
 
+static int shown;                       /* (GLOS 2.7) the display itself on the window's pixels at the last show */
+
 void rg_mga_glos_show(uint32_t off)
 {
     struct glos_winvram v;
     if (!window)
         return;
+    memset(&v, 0, sizeof v);
     v.size = sizeof v;
     v.handle = window;
     v.offset = off;
     v.pitch = (unsigned)rg_mga.pitch_px * 2u;
-    rg_glos_call(GLOS_DRAW_WINVRAM, &v);
+    if (rg_glos_call(GLOS_DRAW_WINVRAM, &v) != 0) {
+        shown = 0;
+        return;
+    }
+#if GLOS_MINOR >= 7
+    shown = v.shown != 0;
+#endif
 }
+
+/* The display is on the window's own pixels (a full-screen window, all there is to see: GLOS 2.7's `shown`), so
+   nothing is copied and a swap that wants no tearing waits for the blank itself. */
+int rg_mga_glos_shown(void) { return window && shown; }
 
 static int full;                        /* shown full screen (GLOS_WS_FULL) */
 
@@ -200,10 +213,9 @@ int rg_mga_glos_open(const rg_open *o, rg_opened *out)
     w.w = o->width;
     w.h = o->height;
     full = rg_glos_full(o->glos_flags, o->width, o->height);   /* (full screen: no frame either) */
-    w.flags = GLOS_WF_FIXED | GLOS_WF_ANYWHERE | ((o->glos_flags & RG_GLOS_BARE) || full ? GLOS_WF_BARE : 0);
     for (i = 0; i < sizeof w.title - 1 && name[i] && name[i] != '.'; i++)
         w.title[i] = name[i];
-    if ((r = rg_glos_call(GLOS_WIN_CREATE, &w)) != 0) {
+    if ((r = rg_glos_win_create(&w, o->glos_flags, &full)) != 0) {
         rg_set_error("GLOS made no %dx%d window (error %d)", o->width, o->height, r);
         return -1;
     }
