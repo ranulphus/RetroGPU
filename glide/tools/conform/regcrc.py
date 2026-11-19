@@ -2,6 +2,8 @@
 """regcrc.py - Glide conformance runs compared exactly (the Glide back-end seam's check, after DOS-GL's B1).
 
     glide/tools/conform/regcrc.py snap DIR CARD     copy out/conform/<t>/ (serial.log, frames) to DIR/CARD/<t>/
+    glide/tools/conform/regcrc.py snaprun SRC DIR CARD NAME   one run's directory (a replay: out/replay/gta/mga) to
+                                                              DIR/CARD/NAME/
     glide/tools/conform/regcrc.py compare BASE NEW [CARD ...]
 
 Run with REGCRC=1 builds (make runtime dostests REGCRC=1): each conformance run's serial log then carries an
@@ -17,7 +19,7 @@ import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 LINE = re.compile(r"MGL-REGCRC (\S+) frame=(\d+) crc=([0-9a-f]+) n=(\d+)")
-FRAME = re.compile(r"^t\d+[a-z]*_\d+\.png$")
+FRAME = re.compile(r"^(t\d+[a-z]*|glp)_\d+\.png$")
 TEST = re.compile(r"^t\d+[a-z]*$")
 
 
@@ -54,6 +56,18 @@ def snap(dst, card):
                 shutil.copy2(os.path.join(d, fn), o)
         n += 1
     print("regcrc: %d tests of %s kept in %s" % (n, card, os.path.join(dst, card)))
+    return 0
+
+
+def snaprun(src, dst, card, name):
+    o = os.path.join(dst, card, name)
+    if os.path.isdir(o):
+        shutil.rmtree(o)
+    os.makedirs(o)
+    for fn in os.listdir(src):
+        if fn == "serial.log" or FRAME.match(fn):
+            shutil.copy2(os.path.join(src, fn), o)
+    print("regcrc: %s kept in %s" % (src, o))
     return 0
 
 
@@ -94,6 +108,8 @@ def compare(base, new, cards):
 def main(argv):
     if len(argv) >= 4 and argv[1] == "snap":
         return snap(argv[2], argv[3])
+    if len(argv) >= 6 and argv[1] == "snaprun":
+        return snaprun(argv[2], argv[3], argv[4], argv[5])
     if len(argv) >= 4 and argv[1] == "compare":
         return compare(argv[2], argv[3], argv[4:])
     print(__doc__.strip(), file=sys.stderr)
