@@ -127,8 +127,19 @@ RetroGPU is MIT, so code is written from documentation and from MIT-licensed dri
   as `sz` x 65535 truncated (0.3 reads back 19,660). Red at alpha 128 over blue with SRC_ALPHA, ONE_MINUS_SRC_ALPHA
   gives half of each. CULL_MODE CW (2) culls triangles clockwise on the screen (y down), CCW (3) the others, NONE
   (1) none: Direct3D's meaning, so OpenGL's default (counter-clockwise front faces, cull the back) is CW.
-- **Next in T2:** the other formats, LINEAR and mipmaps, fog, the 32-bit target; then `NTRI` with VTRI's scenes
-  against OpenGL's rules.
+- **2D and 3D share PGRAPH's state:** after 2D operations the triangle object's state block has to be sent again
+  (a triangle sent without it trapped: METHOD_CNT, INVALID_STATE at its first vertex), which is why Mesa sends it
+  before every run of triangles. The layer keeps the 3D target and state and sends both again before the next
+  triangle when 2D has run in between.
+- **`NTRI`** (`tests/tnt2/ntri.c`): VTRI's scenes and OpenGL reference, at R5G6B5 with Direct3D's texture
+  environments (DECAL: the texel's colour and alpha; MODULATEALPHA: the products). **The chip sets triangles up
+  from x and y in 1/16 pixel:** with vertices rounded to 1/16 (or coarser) for both, coverage and colours are exact;
+  at 1/32 the edges differ (the reference rounds them so, `snap=4`, the default). On the P3, 12 of the 13 cases
+  pass with coverage exact in every one: random, mesh, Z, vertex alpha, LINEAR (affine and perspective,
+  colour-exact), NEAREST (under 1% of pixels pick a neighbouring texel at texel edges), MODULATE, 32-bit and
+  ARGB4444 textures, the texel's alpha, fog. **`tex-mip` fails:** the chip chooses its mipmap level otherwise than
+  OpenGL's per-pixel rule (35% of pixels from another level); next to find.
+- **Next in T2:** the mipmap level, the 32-bit target; then T3 (the device).
 
 ## How it fits RetroGPU
 

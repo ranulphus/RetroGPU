@@ -275,6 +275,46 @@ int main(int argc, char **argv)
         }
         hx_test("cull", trap_ok("cull"), "%s", buf);
     }
+    {                                           /* after 2D: what must be sent again before 3D draws? */
+        static const char *vname[4] = { "state", "target+state", "target+surfaces+state", "bind+target+state" };
+        char buf[220] = "";
+        int k;
+        uint32_t zo = zoff;
+        for (k = 0; k < 4; k++) {
+            tnt2_vertex t[3];
+            int lit = 0, xx, yy;
+            uint32_t ti, ta, td;
+            tnt2_set_target(zo, pitch_px * 2, 16);
+            tnt2_fill(0, 0, W, H, 0xFFFF);
+            tnt2_set_target(0, pitch_px * 2, 16);
+            tnt2_fill(0, 0, W, H, 0);
+            if (k == 3)
+                tnt2_3d_raw(1, 0, tnt2_3d_handle(1));
+            if (k >= 1) {
+                tnt2_3d_raw(1, 0x30C, 0);
+                tnt2_3d_raw(1, 0x310, zo);
+                tnt2_3d_raw(1, 0x300, 0x103);
+                tnt2_3d_raw(1, 0x308, (uint32_t)(pitch_px * 2) << 16 | (uint32_t)(pitch_px * 2));
+            }
+            if (k == 2)
+                tnt2_3d_raw(0, 0x18C, tnt2_3d_handle(1));
+            tnt2_3d_state(tnt2_tex_dummy_off(), 0x110016A1u, 0x11001010u, 0x120001A4u, 0x40182800u, 0);
+            memset(t, 0, sizeof t);
+            t[0].sx = 100, t[0].sy = 100; t[1].sx = 300, t[1].sy = 100; t[2].sx = 100, t[2].sy = 300;
+            for (x = 0; x < 3; x++)
+                t[x].sz = 0.5f, t[x].rhw = 1, t[x].color = 0xFFFFFFFFu, t[x].specular = 0xFF000000u;
+            tnt2_tri(&t[0], &t[1], &t[2]);
+            tnt2_sync(1000000);
+            ti = tnt2_3d_trap(&ta, &td);
+            for (yy = 100; yy < 300; yy++)
+                for (xx = 100; xx < 300; xx++)
+                    lit += fb[yy * pitch_px + xx] != 0;
+            sprintf(buf + strlen(buf), "%s: %d lit%s; ", vname[k], lit, ti ? " TRAP" : "");
+            if (ti)
+                break;
+        }
+        hx_test("resend", 1, "%s", buf);
+    }
 out:
     tnt2_sync(200000);
     vbe_set_text_mode();

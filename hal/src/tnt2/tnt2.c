@@ -212,13 +212,14 @@ int tnt2_sync(uint32_t timeout_us)
 #define RECT_EXPAND_TWO_COLOR_CLIP  0x0000CBE4u     /* clip, colour 0, colour 1, size in, size out, point, data */
 #define RECT_EXPAND_TWO_COLOR_DATA0 0x0000CC00u
 
-static int cur_bpp, cur_rop = -1, three_d;
+static int cur_bpp, cur_rop = -1, three_d, stale_3d;  /* (stale_3d: a 2D operation since the 3D state went) */
 static uint32_t tgt_off;
 static int tgt_pitch;
 static int clip_x0, clip_y0, clip_x1 = 0x7FFF, clip_y1 = 0x7FFF;   /* (applied in software: below) */
 
 static void set_rop_copy(void)
 {
+    stale_3d = 1;
     if (cur_rop == 0xCC)
         return;
     ring_start(PATTERN_COLOR_0, 4);                     /* (nv_xaa.c's NVSetRopSolid: the pattern all ones) */
@@ -231,6 +232,7 @@ static void set_rop_copy(void)
 void tnt2_set_target(uint32_t off, int pitch_bytes, int bpp)
 {
     uint32_t surface, other;
+    stale_3d = 1;
     if (bpp == 32) surface = 0x00000006, other = 0x00000003;        /* (nv_dma.h's DEPTH24 formats) */
     else if (bpp == 16) surface = 0x00000004, other = 0x00000001;
     else surface = 0x00000001, other = 0x00000003;
@@ -517,6 +519,14 @@ int tnt2_vsync_wait(uint32_t timeout_us)
 
 uint32_t tnt2_tex_dummy_off(void) { return DUMMY_TEX_OFF; }
 
+/* (Bring-up experiments: raw methods on the 3D subchannels, the layer's caching bypassed.) */
+void tnt2_3d_raw(int sub3d, uint32_t method, uint32_t value)
+{
+    ring_start(SUBCH(sub3d ? S3D : TRI, method), 1);
+    NEXT(value);
+}
+uint32_t tnt2_3d_handle(int sub3d) { return sub3d ? 0x80000018u : 0x80000019u; }
+
 uint32_t tnt2_3d_trap(uint32_t *addr, uint32_t *data)
 {
     if (addr) *addr = PGRAPH[0x0704 / 4];       /* PGRAPH_TRAPPED_ADDR: the method (subchannel, method) */
@@ -543,20 +553,48 @@ int tnt2_3d_init(void)
 /* The colour buffer at color_off and the Z buffer at zeta_off, both pitch_bytes apart (a multiple of 64; the
  * Z buffer's bits a pixel are the colour's: 16-bit Z with 16-bit colour, 24-bit Z and 8 of stencil with 32), the
  * 3D clip w x h. */
-void tnt2_3d_target(uint32_t color_off, uint32_t zeta_off, int pitch_bytes, int bpp, int w, int h)
+static struct { uint32_t color, zeta; int pitch, bpp, w, h, set; } t3d;
+static uint32_t st3d[6];
+static int st3d_set;
+
+static void send_target(int clip)
 {
     ring_start(SUBCH(S3D, 0x30C), 2);                   /* OFFSET_COLOR, OFFSET_ZETA */
-    NEXT(color_off);
-    NEXT(zeta_off);
+    NEXT(t3d.color);
+    NEXT(t3d.zeta);
     ring_start(SUBCH(S3D, 0x300), 1);                   /* FORMAT: pitch-linear, R5G6B5 or X8R8G8B8 */
-    NEXT(bpp == 32 ? 0x105u : 0x103u);
+    NEXT(t3d.bpp == 32 ? 0x105u : 0x103u);
     ring_start(SUBCH(S3D, 0x308), 1);                   /* PITCH: zeta high, colour low */
-    NEXT(((uint32_t)pitch_bytes << 16) | (uint32_t)pitch_bytes);
+    NEXT(((uint32_t)t3d.pitch << 16) | (uint32_t)t3d.pitch);
+    if (!clip)
+        return;
     tnt2_sync(1000000);                                 /* (the clip straight into PGRAPH, the engine idle) */
     PGRAPH[0x053C / 4] = 0;
     PGRAPH[0x0540 / 4] = 0;
-    PGRAPH[0x0544 / 4] = (uint32_t)w & 0x3FFFF;
-    PGRAPH[0x0548 / 4] = (uint32_t)h & 0x3FFFF;
+    PGRAPH[0x0544 / 4] = (uint32_t)t3d.w & 0x3FFFF;
+    PGRAPH[0x0548 / 4] = (uint32_t)t3d.h & 0x3FFFF;
+}
+
+static void send_state(void)
+{
+    int i;
+    ring_start(SUBCH(TRI, 0x300), 7);
+    NEXT(0);
+    for (i = 0; i < 6; i++)
+        NEXT(st3d[i]);
+}
+
+/* The 2D objects share PGRAPH's surface and state registers with the 3D ones: after any 2D operation a triangle
+ * trapped (the P3: METHOD_CNT, INVALID_STATE at its first vertex) until the 3D state was sent again, which is why
+ * Mesa sends it before every run of triangles. So the layer keeps both and sends them again when 2D has run. */
+void tnt2_3d_target(uint32_t color_off, uint32_t zeta_off, int pitch_bytes, int bpp, int w, int h)
+{
+    t3d.color = color_off, t3d.zeta = zeta_off, t3d.pitch = pitch_bytes, t3d.bpp = bpp, t3d.w = w, t3d.h = h;
+    t3d.set = 1;
+    send_target(1);
+    if (st3d_set)
+        send_state();
+    stale_3d = 0;
 }
 
 /* The triangle object's whole state block (Mesa sends it before every run of triangles): COLORKEY, the texture's
@@ -564,14 +602,13 @@ void tnt2_3d_target(uint32_t color_off, uint32_t zeta_off, int pitch_bytes, int 
 void tnt2_3d_state(uint32_t tex_off, uint32_t format, uint32_t filter, uint32_t blend, uint32_t control,
                    uint32_t fogcolor)
 {
-    ring_start(SUBCH(TRI, 0x300), 7);
-    NEXT(0);
-    NEXT(tex_off);
-    NEXT(format);
-    NEXT(filter);
-    NEXT(blend);
-    NEXT(control);
-    NEXT(fogcolor);
+    st3d[0] = tex_off, st3d[1] = format, st3d[2] = filter, st3d[3] = blend, st3d[4] = control, st3d[5] = fogcolor;
+    st3d_set = 1;
+    if (stale_3d && t3d.set) {
+        send_target(0);
+        stale_3d = 0;
+    }
+    send_state();
 }
 
 static uint32_t fbits(float f)
@@ -587,6 +624,13 @@ void tnt2_tri(const tnt2_vertex *a, const tnt2_vertex *b, const tnt2_vertex *c)
 {
     const tnt2_vertex *v[3] = { a, b, c };
     int i;
+    if (stale_3d) {
+        if (t3d.set)
+            send_target(0);
+        if (st3d_set)
+            send_state();
+        stale_3d = 0;
+    }
     ring_start(SUBCH(TRI, 0x400), 24);
     for (i = 0; i < 3; i++) {
         NEXT(fbits(v[i]->sx)); NEXT(fbits(v[i]->sy)); NEXT(fbits(v[i]->sz)); NEXT(fbits(v[i]->rhw));

@@ -76,6 +76,9 @@ void     tnt2_3d_state(uint32_t tex_off, uint32_t format, uint32_t filter, uint3
 void     tnt2_tri(const tnt2_vertex *a, const tnt2_vertex *b, const tnt2_vertex *c);
 uint32_t tnt2_tex_dummy_off(void);      /* a 1x1 white A8R8G8B8 texel in VRAM, for untextured triangles */
 uint32_t tnt2_3d_trap(uint32_t *addr, uint32_t *data);
+void     tnt2_3d_raw(int sub3d, uint32_t method, uint32_t value);  /* (bring-up: a method on the 3D surfaces' (1)
+                                                                    or the triangle's (0) subchannel) */
+uint32_t tnt2_3d_handle(int sub3d);
 /* A texture's levels, each w x h texels of cpp bytes in rows from the CPU, stored swizzled from off (a multiple of
  * 128) one after another, as the chip reads them (the engine idle: tnt2_sync first). Returns the end. */
 uint32_t tnt2_tex_load(uint32_t off, int cpp, int log2w, int log2h, int levels, const void *const *level_texels);
