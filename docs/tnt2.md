@@ -3,7 +3,8 @@
 **Status (2026-11-19): v1, the owner's answers in (below). The card is in the P3 (bench B): a TNT2 M64 (NV5,
 64-bit memory). T0 done (below); before it, DOS-GL's software renderer through the card's VBE BIOS passed all 35
 conformance tests there (B3's bench tier). T1's 2D is byte for byte the software model's on the card, and its
-cursor and display start read back as written; seeing them on the screen is still owed.**
+cursor and display start read back as written and look right on the screen (T1 done). T2 done: NTRI's 13 cases
+pass on the card at 16 bits, NTRI32 at 32. T3's device passes RGDEV.**
 
 The owner's order of 2026-11-12 (`gl/docs/backends.md`): the S3 ViRGE/DX first (`docs/virge.md`), then the Riva
 TNT2, then ATI's Rage 128 Pro, then perhaps the Radeon 7000 VE. Each card gets a plan of its own before its work
@@ -98,7 +99,9 @@ RetroGPU is MIT, so code is written from documentation and from MIT-licensed dri
   random clips) and images, against the same model, all byte for byte on the P3 at 16 and 8 bits; with no screen
   capture there, the cursor's image in instance memory, CR31 and the position, and the display start are read back
   (all as written).
-- **Still T1's:** the cursor and a page flip seen on the P3's screen (the owner's eyes, as the ViRGE's mode test).
+- **Seen on the P3's screen** (`NSHOW`, the owner, 2026-11-19): two pages shown in turn every 2 seconds by the display
+  start in the vertical blank, and the hardware cursor (a right-angled triangle, white with a black border, then
+  yellow with a green border after its colours were changed) circling over them: both as they should be. T1 done.
 
 ## T2 so far (the P3, 2026-11-19)
 
@@ -148,7 +151,7 @@ RetroGPU is MIT, so code is written from documentation and from MIT-licensed dri
   with the colour's): coverage exact, the corners' colours, Z (0.3 stored as 0x4CCCCD in bits 31-8, the stencil byte
   below), alpha 128 over blue half of each. For 32-bit 2D the layer's surface format is Y32 (Mesa's), not the X
   driver's X8R8G8B8: that one leaves the top byte 0 on a fill, which in a Z24S8 buffer is Z's, so a Z clear failed.
-- **Next:** T3 (below); the cursor and a page flip seen on the P3's screen are still owed.
+- **Next:** T3 (below).
 
 ## T3 so far (the P3, 2026-11-19)
 
