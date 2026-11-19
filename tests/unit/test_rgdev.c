@@ -4,13 +4,15 @@
 #include "rg/device.h"
 #include <string.h>
 
-static int mga_ok, virge_ok, soft_ok, probes;
+static int mga_ok, virge_ok, tnt2_ok, soft_ok, probes;
 static int probe_mga(void) { probes++; if (!mga_ok) rg_set_error("no Matrox card"); return mga_ok ? 0 : -1; }
 static int probe_soft(void) { probes++; return soft_ok ? 0 : -1; }
 static int probe_virge(void) { probes++; return virge_ok ? 0 : -1; }
+static int probe_tnt2(void) { probes++; return tnt2_ok ? 0 : -1; }
 
 const rg_device rg_mga_device = { .name = "mga", .probe = probe_mga };
 const rg_device rg_virge_device = { .name = "virge", .probe = probe_virge };
+const rg_device rg_tnt2_device = { .name = "tnt2", .probe = probe_tnt2 };
 static int probe_mem(void) { probes++; return 0; }
 const rg_device rg_mem_device = { .name = "mem", .flags = RG_DEV_BY_NAME, .probe = probe_mem };
 static int probe_vbe(void) { probes++; return 0; }
@@ -24,7 +26,7 @@ int unit_main(void)
 {
     const rg_device *const two[] = { &rg_mga_device, &soft };
 
-    /* The build's own list: the Matrox device, then the ViRGE/DX's. */
+    /* The build's own list: the Matrox device, then the ViRGE/DX's, then the TNT2's. */
     mga_ok = 1;
     CHECK(rg_choose(NULL) == &rg_mga_device);
     CHECK(rg_choose("") == &rg_mga_device);
@@ -40,7 +42,12 @@ int unit_main(void)
     mga_ok = 1;
     CHECK(rg_choose(NULL) == &rg_mga_device);    /* (both: the Matrox one first) */
     CHECK(rg_window_device() == NULL);           /* (no fake has window_ok) */
-    mga_ok = 0, virge_ok = 0;
+    mga_ok = 0, virge_ok = 0, tnt2_ok = 1;
+    CHECK(rg_choose(NULL) == &rg_tnt2_device);   /* (neither of those: the TNT2's) */
+    CHECK(rg_choose("tnt2") == &rg_tnt2_device);
+    virge_ok = 1;
+    CHECK(rg_choose(NULL) == &rg_virge_device);  /* (the ViRGE/DX's before it) */
+    virge_ok = 0, tnt2_ok = 0;
     CHECK(rg_choose(NULL) == NULL);              /* (the memory device only by name, though it would probe) */
     CHECK(rg_choose("mem") == &rg_mem_device);
     CHECK(rg_choose("vbe") == &rg_vbe_device);   /* (the VBE device too: by name, or DOS-GL's fallback) */
