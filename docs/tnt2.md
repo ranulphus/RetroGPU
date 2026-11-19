@@ -1,7 +1,7 @@
 # The Riva TNT2: a plan
 
-**Status (2026-11-19): v0, for the owner's review. The card is in the P3 (bench B): a TNT2 M64 (NV5, 64-bit
-memory). Nothing built yet.**
+**Status (2026-11-19): v1, the owner's answers in (below). The card is in the P3 (bench B): a TNT2 M64 (NV5,
+64-bit memory). Nothing built yet.**
 
 The owner's order of 2026-11-12 (`gl/docs/backends.md`): the S3 ViRGE/DX first (`docs/virge.md`), then the Riva
 TNT2, then ATI's Rage 128 Pro, then perhaps the Radeon 7000 VE. Each card gets a plan of its own before its work
@@ -56,7 +56,7 @@ again (B0's rule).
 | **T2** | 3D: the 3D surfaces, the DX5 textured triangle (then DX6's two textures), texture upload (swizzled) in the chip's formats, Z clear. `NTRI` draws the conformance scenes' triangles straight through it against OpenGL's rules (as `VTRI` does) | `NTRI` within DOS-GL's conformance tolerances (D16) on the P3 |
 | **T3** | The TNT2 device on B1's interface | `DGL_DEVICE=tnt2` opens, clears and presents; GLOS's desktop on it (with GLOS's session) |
 | **T4** | GL's TNT2 back end: state, textures, triangles, the gaps listed (the software renderer, B2, for what the chip can't do) | DOS-GL's conformance on the P3 against OSMesa; GLOS's screensavers; Fifth Wheel and the ports on the P3 |
-| **T5** | Glide's TNT2 back end, if the owner wants it (as V5 for the ViRGE) | The Glide conformance suite with any approximations listed |
+| **T5** | Glide's TNT2 back end (the owner wants it, as V5 for the ViRGE) | The Glide conformance suite with any approximations listed; GTA and Screamer Rally replays with stated tolerances |
 | **T6** | Docs and the PRDs | The owner's review |
 
 **Before T0, a tick that needs no new code:** the VBE device's bench tier (B3, `gl/docs/backends.md`), DOS-GL's
@@ -67,10 +67,9 @@ software renderer full-screen through the TNT2's VBE BIOS and in a software GLOS
 (`tools/bench/run.py --pc bench-p3`). With no emulator, the Loop A tiers have no TNT2 cases, and a change to the TNT2
 code is checked on the P3 before a merge; the merge tier's other cases still run as usual.
 
-## Questions for the owner
+## The owner's answers (2026-11-19)
 
-1. **Glide on the TNT2** (T5): wanted, as for the ViRGE, or GL and GLOS's desktop only?
-2. **An 86Box model of the NV5:** none exists. Writing one (FIFO, objects, 2D, the triangle classes) would give
-   Loop A tiers and catch regressions without the P3, but is a project of its own (weeks). Silicon only for now?
-3. **The FIFO's DMA mode and AGP:** start with programmed I/O and measure; DMA or AGP only if the P3 shows the
-   CPU's writes limit it?
+1. **Glide on the TNT2:** yes (T5), as for the ViRGE.
+2. **An 86Box model of the NV5:** not now. Silicon only: every TNT2 change is checked on the P3; a model may be
+   reconsidered once the driver works.
+3. **The FIFO's feeding:** programmed I/O first; DMA or AGP only if the P3 shows the CPU's writes holding it back.
