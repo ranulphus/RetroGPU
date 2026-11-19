@@ -250,7 +250,14 @@ RetroGPU is MIT, so code is written from documentation and from MIT-licensed dri
   75.8 and 94.2 with `-mtex`. **`STEAL`** (`tests/tnt2/steal.c`: a tight loop on the time-stamp counter, gaps over
   400 cycles summed) under GLOS on the P3: 1.1% of the CPU lost (GLOS's 1 kHz tick, ~4,800 cycles each), so the
   game's time is the game's own.
-- **Still T4's:** GLOS's screensavers, Fifth Wheel and PrBoom-plus on the P3; the 0x55 object for the gaps.
+- **SDL programs on the P3** (DOSBench's tests, full screen): Fifth Wheel's FW1 at **167.7 fps** (2,969 frames, median
+  5.6 ms; frame 1500 right by eye), PrBoom-plus's PBD1 (Doom II demo1, GL) at **56.6 fps** (1,204 frames; frame 200
+  right by eye). First FW1 ran at 2-3 fps: DOS-GL's swap polls the device's idle test for up to 200 ms when the
+  program has a wait hook (SDL's), and the layer's idle test counted commands not yet told to the chip (kick_soon
+  waits for 4 KB) without telling it, so every frame waited the whole 200 ms; `tnt2_idle` now kicks first. GLQuake
+  (no wait hook) never showed it.
+- **Still T4's:** GLOS's screensavers on the TNT2 device need GLOS's desktop there (T3's item, GLOS's); under GLOS's
+  VBE desktop they draw through DOS-GL's software window (checked 2026-11-19).
 
 ## How it fits RetroGPU
 

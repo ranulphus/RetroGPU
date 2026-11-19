@@ -231,9 +231,14 @@ void tnt2_kick(void)
     }
 }
 
+/* Asked by whoever waits for the chip (DOS-GL's swap polls it with a wait hook, SDL programs): commands written
+ * but not yet told to the chip (kick_soon waits for 4 KB) go to it first, or it never gets there (Fifth Wheel
+ * waited out the swap's 200 ms every frame on the P3). */
 int tnt2_idle(void)
 {
-    return read_get() == ring_cur && ring_cur == ring_put && PGRAPH[0x0700 / 4] == 0;
+    if (ring_cur != ring_put)
+        tnt2_kick();
+    return read_get() == ring_put && PGRAPH[0x0700 / 4] == 0;
 }
 
 int tnt2_sync(uint32_t timeout_us)
