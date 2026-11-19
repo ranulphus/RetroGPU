@@ -5,6 +5,12 @@
                             retail OVL -> tests/conform/ref/voodoo/<t>/*.png
   run.py check [tests...]   run with MGA-Glide on the G100, compare against
                             the references -> out/conform/<t>/, summary.json
+  run.py check --bench PC [tests...]
+                            the same on a real PC through tools/bench/run.py
+                            (one job per test, one after another), compared
+                            the same way; the manifest's class is the PC's card
+                            (bench.local.toml: "tnt2" on the P3) ->
+                            out/conform/<t>/, summary-<pc>.json
 """
 import concurrent.futures as cf
 import json
@@ -26,6 +32,18 @@ MGA_OVL = os.path.join(ROOT, "build", "ow", "GLIDE2X.OVL")
 EXE = os.path.join(ROOT, "build", "ow", "dos", "CONFORM.EXE")
 REFDIR = os.path.join(GLIDE, "tests", "conform", "ref", "voodoo")
 CARD = os.environ.get("MGA_CARD", "g100")
+BENCH = None            # check --bench PC: (the PC, its card)
+if "--bench" in sys.argv:
+    _i = sys.argv.index("--bench")
+    BENCH = sys.argv[_i + 1]
+    del sys.argv[_i:_i + 2]
+    import tomllib
+    _cfg = tomllib.load(open(os.path.join(ROOT, "tools", "bench", "bench.toml"), "rb"))
+    _local = os.path.join(ROOT, "tools", "bench", "bench.local.toml")
+    if os.path.exists(_local):                  # (tools/bench/run.py's load_config: the PC's card)
+        for _pc, _v in tomllib.load(open(_local, "rb")).get("pc", {}).items():
+            _cfg["pc"].setdefault(_pc, {}).update(_v)
+    CARD = _cfg["pc"][BENCH].get("card", BENCH)
 CHIP = CARD[:-3] if CARD.endswith("pci") else CARD     # (a PCI card draws as its AGP twin: 86Box patch 0116)
 # Manifest entries keyed by card: the G400 family draws with the G200's
 # combine and blend capabilities, so it shares the G200's expectations.
@@ -43,7 +61,39 @@ def tests_from(args):
     return args or sorted(k for k in MANIFEST if not k.startswith("_"))
 
 
+def run_one_bench(test, ovl, outdir):
+    """A test on the bench PC: its frames (the runner's PNGs, named as the references) and serial log into outdir."""
+    import glob
+    cmd = [sys.executable, os.path.join(ROOT, "tools", "bench", "run.py"), "--pc", BENCH, "--name", "conf-" + test,
+           "--exe", EXE, "--args", test, "--ovl", ovl, "--timeout", "300", "--idle", "120"]
+    if os.environ.get("MGA_OPTS"):
+        cmd += ["--set", "MGAGLIDE=" + os.environ["MGA_OPTS"]]
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    runs = sorted(glob.glob(os.path.join(ROOT, "out", "bench", BENCH, "conf-%s-*" % test)), key=os.path.getmtime)
+    shutil.rmtree(outdir, ignore_errors=True)
+    os.makedirs(outdir)
+    if not runs:
+        return {"status": "SETUP-ERROR", "tests": []}
+    src = runs[-1]
+    for fn in os.listdir(src):
+        if fn == "serial.log" or (fn.startswith(test + "_") and fn.endswith(".png")):
+            shutil.copy2(os.path.join(src, fn), outdir)
+    r = json.load(open(os.path.join(src, "result.json")))
+    tests = []
+    try:
+        for line in open(os.path.join(src, "serial.log"), errors="replace"):
+            if line.startswith("HX-TEST "):
+                parts = line.strip().split(" ", 3)
+                if len(parts) >= 3:
+                    tests.append({"name": parts[1], "result": parts[2], "detail": parts[3] if len(parts) > 3 else ""})
+    except OSError:
+        pass
+    return {"status": r.get("status", "SETUP-ERROR"), "tests": tests}
+
+
 def run_one(test, ovl, outdir):
+    if BENCH:
+        return run_one_bench(test, ovl, outdir)
     cmd = [sys.executable, os.path.join(ROOT, "tools", "loopa", "run.py"), "--name", test,
            "--exe", EXE, "--args", test, "--ovl", ovl, "--out", outdir,
            "--timeout", "180", "--idle", "60", "--card", CARD]
@@ -119,7 +169,7 @@ def cmd_check(tests):
             frames["_"] = {"ok": False, "reason": "no reference"}
         return t, {"run": r["status"], "ok": ok, "frames": frames,
                    "tests": [x for x in r.get("tests", []) if x["result"] != "PASS"]}
-    with cf.ThreadPoolExecutor(JOBS) as ex:
+    with cf.ThreadPoolExecutor(1 if BENCH else JOBS) as ex:
         for t, res in ex.map(job, tests):
             summary[t] = res
             worst = max([f.get("frac", 1.0) for f in res["frames"].values() if f.get("gate", True)] or [0])
@@ -128,7 +178,7 @@ def cmd_check(tests):
                 "; ".join("%s %s" % (x["name"], x["detail"]) for x in res["tests"])))
     os.makedirs(os.path.join(ROOT, "out", "conform"), exist_ok=True)
     json.dump(summary, open(os.path.join(ROOT, "out", "conform", "summary.json"), "w"), indent=1)
-    json.dump(summary, open(os.path.join(ROOT, "out", "conform", "summary-%s.json" % CARD), "w"), indent=1)
+    json.dump(summary, open(os.path.join(ROOT, "out", "conform", "summary-%s.json" % (BENCH or CARD)), "w"), indent=1)
     return 0 if all(v["ok"] for v in summary.values()) else 1
 
 

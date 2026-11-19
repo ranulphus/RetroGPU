@@ -497,6 +497,16 @@ void tnt2_image(int x, int y, int w, int h, const void *px, int stride)
 static void crtc_w(int i, uint8_t v) { PCIO8[0x3D4] = (uint8_t)i; PCIO8[0x3D5] = v; }
 static uint8_t crtc_r(int i) { PCIO8[0x3D4] = (uint8_t)i; return PCIO8[0x3D5]; }
 
+/* The rows' length the display shows, in bytes (a multiple of 8): the CRTC's offset in 8-byte units, its low 8
+ * bits in CR13 and bits 10-8 in CR19's bits 7-5 (nv_hw.c's), the rest of CR19 kept. */
+void tnt2_set_pitch(int pitch_bytes)
+{
+    unsigned u = (unsigned)pitch_bytes >> 3;
+    crtc_w(0x1F, 0x57);
+    crtc_w(0x13, (uint8_t)(u & 0xFF));
+    crtc_w(0x19, (uint8_t)((crtc_r(0x19) & 0x1F) | ((u >> 8) & 7) << 5));
+}
+
 /* 32 x 32 pixels of A1R5G5B5 in instance memory at dword 0x1E00 (nv_setup.c's NV4 CURSOR; CR30, CR31 and CR2F
  * point there: 0x00, 0xBC, 0x00, nv_hw.c's), alpha 0 transparent. Built from the caller's masks and colours as
  * nv_cursor.c's ConvertCursor1555. */

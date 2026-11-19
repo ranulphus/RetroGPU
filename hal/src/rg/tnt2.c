@@ -224,9 +224,15 @@ static int open_screen(const rg_open *o, rg_opened *out)
     st.double_buffer = o->double_buffer != 0;
     st.depth_bits = o->depth_bits ? (bpp == 32 ? 24 : 16) : 0;
     graphics = 1;                               /* (about to leave text mode) */
-    if (vbe_set_mode(&st_mode, 0, &pitch_px) != 0) {
+    if (vbe_set_mode(&st_mode, o->pitch_px, &pitch_px) != 0) {
         rg_set_error("VBE mode %03x failed", st_mode.mode);
         return -1;                              /* (the caller closes: the screen goes back) */
+    }
+    if (o->pitch_px > 0 && pitch_px != o->pitch_px) {
+        /* (the BIOS kept its own: the CRTC's offset set directly; the surfaces below take the same pitch) */
+        RG_INFO("DGL-TNT2 pitch %d px: the BIOS gave %d, the CRTC's offset set", o->pitch_px, pitch_px);
+        pitch_px = o->pitch_px;
+        tnt2_set_pitch(pitch_px * bytes_of(bpp));
     }
     st.pitch_bytes = pitch_px * bytes_of(bpp);
     if (tnt2_accel_init() != 0) {

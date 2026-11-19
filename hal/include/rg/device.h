@@ -40,6 +40,8 @@ typedef struct {
                                        the card has done it (flip_poll), the screen that much behind (DGL_PRESENT_LAG) */
     uint32_t heap_kb;               /* the memory left after the buffers capped (DGL_TEXHEAP_KB), 0 none */
     unsigned glos_flags;            /* a GLOS window's start: RG_GLOS_HIDDEN, RG_GLOS_BARE, RG_GLOS_FULL (dglGlosHints) */
+    int pitch_px;                   /* the rows' length wanted, in pixels (0: the mode's own); Glide's 1024, the
+                                       Voodoo's 2048-byte stride its games assume (the TNT2 device's only, so far) */
     /* The user's hooks (each may be NULL): */
     void (*wait)(void);             /* before a retrace wait (the program's wait hook) */
     void (*yield)(void);            /* in long CPU work, such as reading a frame back (at most every few ms) */

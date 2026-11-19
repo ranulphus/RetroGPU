@@ -63,6 +63,7 @@ void tnt2_cursor_show(int on);
 void tnt2_cursor_move(int x, int y);
 int  tnt2_set_start(uint32_t byte_off);
 int  tnt2_vsync_wait(uint32_t timeout_us);
+void tnt2_set_pitch(int pitch_bytes);   /* the display's row length (CR13/CR19), when the BIOS's 4F06 won't */
 
 /* 3D (T2, bring-up): the 3D surfaces and the textured triangle (classes 0x53 and 0x54) on subchannels 4 and 7.
  * Vertices are Direct3D's TLVERTEX: window x and y in pixels, z in [0, 1], 1/w, colour and specular as A8R8G8B8

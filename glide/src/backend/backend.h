@@ -12,7 +12,7 @@
 #include <stdint.h>
 
 typedef struct mg_backend {
-    const char *name;                   /* "mga" */
+    const char *name;                   /* "mga", "tnt2" */
 
     /* The card: found and mapped (0), or -1 with the reason logged. Called by grGlideInit and the board queries,
      * so more than once. */
@@ -46,5 +46,6 @@ extern const mg_backend *mg_be;         /* the back end of the card found (sst.c
 extern volatile uint8_t *mg_vram;       /* its video memory mapped (texture records, the LFB): set after probe */
 
 extern const mg_backend mg_mga_backend; /* the Matrox cards (backend/mga) */
+extern const mg_backend mg_tnt2_backend; /* the Riva TNT and TNT2 (backend/tnt2) */
 
 #endif

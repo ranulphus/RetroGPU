@@ -18,13 +18,21 @@ void mg_fatal(const char *msg)
 const mg_backend *mg_be;
 volatile uint8_t *mg_vram;
 
-/* The card: the back end that finds one (the Matrox cards' today). */
+/* The card: the first back end that finds one, the Matrox cards' first. Asked again (the board queries), a
+ * back end other than the Matrox one answers for itself without the Matrox one's search. */
 int mg_device_open(void)
 {
-    if (mg_mga_backend.probe() != 0)
-        return -1;
-    mg_be = &mg_mga_backend;
-    return 0;
+    if (mg_be && mg_be != &mg_mga_backend)
+        return mg_be->probe();
+    if (mg_mga_backend.probe() == 0) {
+        mg_be = &mg_mga_backend;
+        return 0;
+    }
+    if (mg_tnt2_backend.probe() == 0) {
+        mg_be = &mg_tnt2_backend;
+        return 0;
+    }
+    return -1;
 }
 
 GR_ENTRY(void, grGlideInit, (void))
