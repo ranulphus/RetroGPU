@@ -13,6 +13,7 @@
 #include "backend/backend.h"
 #include "combine/eval.h"
 #include "tex/texmgr.h"
+#include "tex/texconv.h"
 #include "rg/device.h"
 #include "rg/tnt2_dev.h"
 #include "tnt2/tnt2.h"
@@ -254,7 +255,9 @@ static uint32_t byte_of(float f)
     return (uint32_t)i;
 }
 
-static void vertex(tnt2_vertex *o, const GrVertex *v, int32_t sx, int32_t sy, int wmode, int fog)
+static float clamp255(float f) { return f < 0 ? 0 : f > 255.0f ? 255.0f : f; }
+
+static void vertex(tnt2_vertex *o, const GrVertex *v, int32_t sx, int32_t sy, int wmode, int fog, int textured)
 {
     double z;
     float rgb[3], a;
@@ -274,18 +277,249 @@ static void vertex(tnt2_vertex *o, const GrVertex *v, int32_t sx, int32_t sy, in
     z = (z + 0.5) / 65535.0;                    /* (the chip's Z16 is SZ * 65535 truncated: z again) */
     o->sz = (float)(z > 1.0 ? 1.0 : z);
     o->rhw = v->oow > 0 ? v->oow : 1e-6f;
-    mg_cc_vertex(v, 0, rgb);
-    a = mg_ac_vertex(v, 0);
+    if (textured) {
+        rgb[0] = clamp255(v->r), rgb[1] = clamp255(v->g), rgb[2] = clamp255(v->b), a = clamp255(v->a);
+    } else {
+        mg_cc_vertex(v, 0, rgb);
+        a = mg_ac_vertex(v, 0);
+    }
     o->color = byte_of(a) << 24 | byte_of(rgb[0]) << 16 | byte_of(rgb[1]) << 8 | byte_of(rgb[2]);
     o->specular = (fog ? byte_of((float)(255.0 - mg_fog_vertex(v))) : 255u) << 24;
     o->tu = o->tv = 0;
     o->tu1 = o->tv1 = 0;
 }
 
+/* ---- Textured triangles: the multitexture object's two stages (G5) ----------------------------------------
+ * Stage 0 is TMU0's texture combine (its other, a second TMU's output, is zero); stage 1 the colour and alpha
+ * combines, out = in0*in1 + in2*in3 over inputs (source << 2 | alpha << 1 | inverse): the iterated values in the
+ * vertex colour (PRIMARY), the constant colour in COMBINE_FACTOR (CONSTANT), the texture through stage 0
+ * (PREVIOUS) or itself (TEXTURE0) for its alpha. The forms with a subtraction have no exact form (the combiner
+ * adds): drawn as the nearest that adds, said once. */
+enum { CS_ZERO = 1, CS_CONST = 2, CS_PRIM = 3, CS_PREV = 4, CS_TEX0 = 5 };
+#define CIN(src, alpha, inv) ((uint32_t)(src) << 2 | ((alpha) ? 2u : 0u) | ((inv) ? 1u : 0u))
+#define C_ONE  CIN(CS_ZERO, 0, 1)
+#define C_NONE CIN(CS_ZERO, 0, 0)
+
+static uint32_t cw(uint32_t a, uint32_t b, uint32_t c, uint32_t d) { return a | b << 8 | c << 16 | d << 24 | 1u << 29; }
+
+static int approx_said;
+static void approx(const char *what)
+{
+    if (!approx_said) {
+        approx_said = 1;
+        mg_log(MG_LOG_WARN, "tnt2: combine approximated (%s)", what);
+    }
+}
+
+static int src_local(void)
+{
+    if (mg.st.cc_local == GR_COMBINE_LOCAL_DEPTH)
+        approx("depth as the local colour");
+    return mg.st.cc_local == GR_COMBINE_LOCAL_CONSTANT ? CS_CONST : CS_PRIM;
+}
+static int src_other(void)
+{
+    return mg.st.cc_other == GR_COMBINE_OTHER_TEXTURE ? CS_PREV
+         : mg.st.cc_other == GR_COMBINE_OTHER_CONSTANT ? CS_CONST : CS_PRIM;
+}
+static int src_alocal(void)
+{
+    if (mg.st.ac_local == GR_COMBINE_LOCAL_DEPTH)
+        approx("depth as the local alpha");
+    return mg.st.ac_local == GR_COMBINE_LOCAL_CONSTANT ? CS_CONST : CS_PRIM;
+}
+static int src_aother(void)
+{
+    return mg.st.ac_other == GR_COMBINE_OTHER_TEXTURE ? CS_PREV
+         : mg.st.ac_other == GR_COMBINE_OTHER_CONSTANT ? CS_CONST : CS_PRIM;
+}
+
+/* A combine factor as an input; alpha: the alpha combine's (its inputs are alphas already). */
+static uint32_t factor_in(GrCombineFactor_t f, int alpha)
+{
+    int inv = (f & 8) != 0;
+    switch (f & 7) {
+    case GR_COMBINE_FACTOR_LOCAL: return alpha ? CIN(src_alocal(), 0, inv) : CIN(src_local(), 0, inv);
+    case GR_COMBINE_FACTOR_OTHER_ALPHA: return CIN(src_aother(), !alpha, inv);
+    case GR_COMBINE_FACTOR_LOCAL_ALPHA: return CIN(src_alocal(), !alpha, inv);
+    case GR_COMBINE_FACTOR_TEXTURE_ALPHA: return CIN(CS_TEX0, !alpha, inv);
+    case GR_COMBINE_FACTOR_TEXTURE_RGB: return CIN(CS_TEX0, 0, inv);
+    default: return CIN(CS_ZERO, 0, inv);               /* (ZERO; ONE as its inverse) */
+    }
+}
+
+/* A combine function over other O, local L and local alpha aL with factor F, as one stage's word. */
+static uint32_t fn_word(GrCombineFunction_t fn, uint32_t O, uint32_t L, uint32_t aL, uint32_t F, FxBool invert)
+{
+    uint32_t w;
+    switch (fn) {
+    case GR_COMBINE_FUNCTION_ZERO: w = cw(C_NONE, C_ONE, C_NONE, C_NONE); break;
+    case GR_COMBINE_FUNCTION_LOCAL: w = cw(L, C_ONE, C_NONE, C_NONE); break;
+    case GR_COMBINE_FUNCTION_LOCAL_ALPHA: w = cw(aL, C_ONE, C_NONE, C_NONE); break;
+    case GR_COMBINE_FUNCTION_SCALE_OTHER: w = cw(O, F, C_NONE, C_NONE); break;
+    case GR_COMBINE_FUNCTION_SCALE_OTHER_ADD_LOCAL: w = cw(O, F, L, C_ONE); break;
+    case GR_COMBINE_FUNCTION_SCALE_OTHER_ADD_LOCAL_ALPHA: w = cw(O, F, aL, C_ONE); break;
+    case GR_COMBINE_FUNCTION_SCALE_OTHER_MINUS_LOCAL_ADD_LOCAL: w = cw(O, F, L, F ^ 1u); break;   /* lerp: exact */
+    case GR_COMBINE_FUNCTION_SCALE_MINUS_LOCAL_ADD_LOCAL: w = cw(L, F ^ 1u, C_NONE, C_NONE); break;
+    case GR_COMBINE_FUNCTION_SCALE_OTHER_MINUS_LOCAL:
+        approx("f * (other - local)");
+        w = cw(O, F, C_NONE, C_NONE);
+        break;
+    case GR_COMBINE_FUNCTION_SCALE_OTHER_MINUS_LOCAL_ADD_LOCAL_ALPHA:
+        approx("f * (other - local) + local alpha");
+        w = cw(O, F, aL, F ^ 1u);
+        break;
+    case GR_COMBINE_FUNCTION_SCALE_MINUS_LOCAL_ADD_LOCAL_ALPHA:
+        approx("local alpha - f * local");
+        w = cw(aL, F ^ 1u, C_NONE, C_NONE);
+        break;
+    default: w = cw(L, C_ONE, C_NONE, C_NONE); break;
+    }
+    if (invert)
+        approx("an inverted combine");
+    return w;
+}
+
+/* TMU0's texture combine as stage 0 (T the texel; a second TMU's output, its other, is zero). */
+static void stage0_words(uint32_t *aw, uint32_t *cwd)
+{
+    const tex_unit *u = &tmu0;
+    GrCombineFunction_t rf = u->combine_set ? u->rgb_func : GR_COMBINE_FUNCTION_LOCAL;
+    GrCombineFunction_t af = u->combine_set ? u->alpha_func : GR_COMBINE_FUNCTION_LOCAL;
+    uint32_t T = CIN(CS_TEX0, 0, 0), Ta = CIN(CS_TEX0, 1, 0);
+    uint32_t rF = (u->rgb_factor & 7) == GR_COMBINE_FACTOR_LOCAL ? CIN(CS_TEX0, 0, (u->rgb_factor & 8) != 0)
+                : (u->rgb_factor & 7) == GR_COMBINE_FACTOR_LOCAL_ALPHA ? CIN(CS_TEX0, 1, (u->rgb_factor & 8) != 0)
+                : CIN(CS_ZERO, 0, (u->rgb_factor & 8) != 0);
+    uint32_t aF = ((u->alpha_factor & 7) == GR_COMBINE_FACTOR_LOCAL || (u->alpha_factor & 7) == GR_COMBINE_FACTOR_LOCAL_ALPHA)
+                ? CIN(CS_TEX0, 0, (u->alpha_factor & 8) != 0) : CIN(CS_ZERO, 0, (u->alpha_factor & 8) != 0);
+    /* (other zero: the forms reduce to the texel, its alpha, a fraction of either, or zero) */
+    switch (rf) {
+    case GR_COMBINE_FUNCTION_LOCAL: case GR_COMBINE_FUNCTION_SCALE_OTHER_ADD_LOCAL: *cwd = cw(T, C_ONE, C_NONE, C_NONE); break;
+    case GR_COMBINE_FUNCTION_LOCAL_ALPHA: case GR_COMBINE_FUNCTION_SCALE_OTHER_ADD_LOCAL_ALPHA:
+        *cwd = cw(Ta, C_ONE, C_NONE, C_NONE); break;
+    case GR_COMBINE_FUNCTION_SCALE_OTHER_MINUS_LOCAL_ADD_LOCAL: case GR_COMBINE_FUNCTION_SCALE_MINUS_LOCAL_ADD_LOCAL:
+        *cwd = cw(T, rF ^ 1u, C_NONE, C_NONE); break;
+    default: *cwd = cw(C_NONE, C_ONE, C_NONE, C_NONE); break;
+    }
+    switch (af) {
+    case GR_COMBINE_FUNCTION_LOCAL: case GR_COMBINE_FUNCTION_LOCAL_ALPHA: case GR_COMBINE_FUNCTION_SCALE_OTHER_ADD_LOCAL:
+    case GR_COMBINE_FUNCTION_SCALE_OTHER_ADD_LOCAL_ALPHA:
+        *aw = cw(T, C_ONE, C_NONE, C_NONE); break;
+    case GR_COMBINE_FUNCTION_SCALE_OTHER_MINUS_LOCAL_ADD_LOCAL: case GR_COMBINE_FUNCTION_SCALE_MINUS_LOCAL_ADD_LOCAL:
+        *aw = cw(T, aF ^ 1u, C_NONE, C_NONE); break;
+    default: *aw = cw(C_NONE, C_ONE, C_NONE, C_NONE); break;
+    }
+    if (u->combine_set && (u->rgb_invert || u->alpha_invert))
+        approx("an inverted texture combine");
+}
+
+static int log2i(int v) { int l = 0; while ((1 << l) < v) l++; return l; }
+
+static uint32_t tnt2_fmt(int hwfmt)
+{
+    return hwfmt == HW_TW15 ? TNT2_F_A1R5G5B5 : hwfmt == HW_TW12 ? TNT2_F_A4R4G4B4 : TNT2_F_R5G6B5;
+}
+
+/* The texel coordinates of a vertex (s, t over the TMU's q). */
+static void st_of(const GrVertex *v, double *s, double *t)
+{
+    double q = (mg.st.stw_hint & GR_STWHINT_W_DIFF_TMU0) ? v->tmuvtx[0].oow : v->oow;
+    if (q == 0)
+        q = 1e-9;
+    *s = v->tmuvtx[0].sow / q;
+    *t = v->tmuvtx[0].tow / q;
+}
+
+/* The level for the whole triangle (the Voodoo chooses per pixel): the large level's texels over the screen's
+ * pixels it covers, as a power of two, with the LOD bias; the large level when mipmapping is off. */
+static GrLOD_t level_for(const GrVertex *a, const GrVertex *b, const GrVertex *c)
+{
+    double sa, ta, sb, tb, sc, tc, tex, scr, k, lod;
+    int l;
+    if (tmu0.mipmap == GR_MIPMAP_DISABLE || tmu0.small <= tmu0.large)
+        return tmu0.large;
+    st_of(a, &sa, &ta); st_of(b, &sb, &tb); st_of(c, &sc, &tc);
+    k = (double)(256 >> tmu0.large) / 256.0;            /* (s and t in the large level's texels) */
+    tex = ((sb - sa) * (tc - ta) - (sc - sa) * (tb - ta)) * k * k;
+    scr = (b->x - a->x) * (c->y - a->y) - (c->x - a->x) * (b->y - a->y);
+    if (tex < 0) tex = -tex;
+    if (scr < 0) scr = -scr;
+    if (scr < 1e-6 || tex < 1e-6)
+        return tmu0.large;
+    lod = 0.5 * mg_ln(tex / scr) / 0.69314718055994531 + tmu0.lod_bias;
+    l = tmu0.large + (lod > 0 ? (int)(lod + 0.5) : 0);
+    return (GrLOD_t)(l > tmu0.small ? tmu0.small : l);
+}
+
+static void draw_textured(const GrVertex *a, const GrVertex *b, const GrVertex *c, tnt2_vertex *v, uint32_t blend,
+                          uint32_t control, uint32_t fogc)
+{
+    uint32_t w[16], off, format, filter;
+    tex_level_hw hw;
+    tex_variant var;
+    int n, bound, chroma = mg.st.chroma_mode == GR_CHROMAKEY_ENABLE;
+    double s[3], t[3], ks = 0, kt = 0, ms = 0, mt = 0;
+    memset(&var, 0, sizeof var);
+    if (chroma) {
+        var.kind = TV_CHROMA;
+        var.chroma = mg_color_to_argb(mg.st.chroma_value) & 0xFFFFFFu;
+    }
+    bound = tmu0.has_source && tex_bind_level(level_for(a, b, c), &var, &hw) == 0;
+    if (bound) {
+        uint32_t wrap_s = tmu0.clamp_s == GR_TEXTURECLAMP_CLAMP ? 3u : 1u, wrap_t = tmu0.clamp_t == GR_TEXTURECLAMP_CLAMP ? 3u : 1u;
+        uint32_t mag = tmu0.magf == GR_TEXTUREFILTER_BILINEAR ? 2u : 1u, min = tmu0.minf == GR_TEXTUREFILTER_BILINEAR ? 2u : 1u;
+        off = hw.org;
+        format = TNT2_F_DMA_A | TNT2_F_ORIGIN | tnt2_fmt(hw.hwfmt) | 1u << 12 | (uint32_t)hw.w_log2 << 16 |
+                 (uint32_t)hw.h_log2 << 20 | wrap_s << 24 | wrap_t << 28;
+        filter = mag << 28 | min << 24 | 0x1010u;
+        ks = (double)hw.logical_maxdim / (256.0 * (double)(1 << hw.w_log2));
+        kt = (double)hw.logical_maxdim / (256.0 * (double)(1 << hw.h_log2));
+    } else {
+        off = tnt2_tex_dummy_off(), format = TNT2_DUMMY_FORMAT, filter = TNT2_DUMMY_FILTER;
+    }
+    w[0] = w[1] = off, w[2] = w[3] = format, w[4] = w[5] = filter;
+    stage0_words(&w[6], &w[7]);
+    {
+        uint32_t L = CIN(src_local(), 0, 0), O = CIN(src_other(), 0, 0), aLc = CIN(src_alocal(), 1, 0);
+        uint32_t La = CIN(src_alocal(), 0, 0), Oa = CIN(src_aother(), 0, 0);
+        w[9] = fn_word(mg.st.cc_func, O, L, aLc, factor_in(mg.st.cc_factor, 0), mg.st.cc_invert);
+        w[8] = fn_word(mg.st.ac_func, Oa, La, La, factor_in(mg.st.ac_factor, 1), mg.st.ac_invert);
+        if (chroma && ((w[8] >> 8) & 0xFF) == C_ONE && ((w[8] >> 16) & 0xFF) == C_NONE)
+            w[8] = (w[8] & ~0xFF00u) | CIN(CS_TEX0, 0, 0) << 8;   /* (keyed texels' alpha 0 into the alpha) */
+    }
+    w[10] = mg_color_to_argb(mg.st.constant_color);
+    w[11] = blend & ~0xFu;                              /* (0x55's BLEND has no texture map field) */
+    w[12] = control | 0x3C000000u;                      /* (every channel written) */
+    if (chroma && !(control & TNT2_C_ALPHA_ON))
+        w[12] = (w[12] & ~0xFFFu) | TNT2_C_ALPHA_ON | TNT2_C_ALPHA_FUNC(TNT2_CMP_GREATER) | TNT2_C_ALPHA_REF(0);
+    w[13] = 0, w[14] = 0x111, w[15] = fogc;
+    tnt2_3d_mt_state(w);
+    /* Coordinates: s and t (0..256 over the larger side) in the bound level's texture, whole periods taken off
+     * when it repeats (the chip interpolates in floats). */
+    st_of(a, &s[0], &t[0]); st_of(b, &s[1], &t[1]); st_of(c, &s[2], &t[2]);
+    for (n = 0; n < 3; n++)
+        s[n] *= ks, t[n] *= kt;
+    if (bound && tmu0.clamp_s != GR_TEXTURECLAMP_CLAMP) {
+        ms = s[0] < s[1] ? s[0] : s[1];
+        ms = s[2] < ms ? s[2] : ms;
+        ms = ms > -1e9 && ms < 1e9 ? mga_floor(ms) : 0;
+    }
+    if (bound && tmu0.clamp_t != GR_TEXTURECLAMP_CLAMP) {
+        mt = t[0] < t[1] ? t[0] : t[1];
+        mt = t[2] < mt ? t[2] : mt;
+        mt = mt > -1e9 && mt < 1e9 ? mga_floor(mt) : 0;
+    }
+    for (n = 0; n < 3; n++) {
+        v[n].tu = v[n].tu1 = (float)(s[n] - ms);
+        v[n].tv = v[n].tv1 = (float)(t[n] - mt);
+    }
+    tnt2_tri_mt(&v[0], &v[1], &v[2]);
+}
+
 void tnt2_be_tri(const GrVertex *a, const GrVertex *b, const GrVertex *c)
 {
     int wmode = mg.st.depth_mode == GR_DEPTHBUFFER_WBUFFER || mg.st.depth_mode == GR_DEPTHBUFFER_WBUFFER_COMPARE_TO_BIAS;
-    int depth = mg.st.depth_mode != GR_DEPTHBUFFER_DISABLE && mg.has_aux, fog;
+    int depth = mg.st.depth_mode != GR_DEPTHBUFFER_DISABLE && mg.has_aux, fog, textured;
     int32_t ax, ay, bx, by, cx, cy;
     uint32_t blend, control, fogc;
     tnt2_vertex v[3];
@@ -323,8 +557,7 @@ void tnt2_be_tri(const GrVertex *a, const GrVertex *b, const GrVertex *c)
         }
         a = &d[0]; b = &d[1]; c = &d[2];
     }
-    if (uses_texture())
-        warn_once(2, "textures not drawn yet (a white texel)");
+    textured = uses_texture();
     mg_validate();
     fog = mg_fog_source() != GR_FOG_DISABLE;
     blend = TNT2_B_MSB | TNT2_B_PERSP | TNT2_B_GOURAUD | TNT2_TB_MODULATEALPHA;
@@ -353,21 +586,35 @@ void tnt2_be_tri(const GrVertex *a, const GrVertex *b, const GrVertex *c)
     if (mg.st.dither != GR_DITHER_DISABLE)
         control |= TNT2_C_DITHER;
     fogc = 0xFF000000u | ((mg.st.fog_mode & GR_FOG_ADD2) ? 0u : (mg_color_to_argb(mg.st.fog_color) & 0xFFFFFFu));
-    tnt2_3d_state(tnt2_tex_dummy_off(), TNT2_DUMMY_FORMAT, TNT2_DUMMY_FILTER, blend, control, fogc);
-    vertex(&v[0], a, ax, ay, wmode, fog);
-    vertex(&v[1], b, bx, by, wmode, fog);
-    vertex(&v[2], c, cx, cy, wmode, fog);
+    vertex(&v[0], a, ax, ay, wmode, fog, textured);
+    vertex(&v[1], b, bx, by, wmode, fog, textured);
+    vertex(&v[2], c, cx, cy, wmode, fog, textured);
     if (fog && (mg.st.fog_mode & GR_FOG_MULT2)) {
         int n;
         for (n = 0; n < 3; n++)
             v[n].color &= 0xFF000000u;          /* (MULT2: the fog term alone, f * the fog colour) */
     }
-    tnt2_tri(&v[0], &v[1], &v[2]);
+    if (textured)
+        draw_textured(a, b, c, v, blend, control, fogc);
+    else {
+        tnt2_3d_state(tnt2_tex_dummy_off(), TNT2_DUMMY_FORMAT, TNT2_DUMMY_FILTER, blend, control, fogc);
+        tnt2_tri(&v[0], &v[1], &v[2]);
+    }
     mg_stats.tris++;
     mg_stats.tri_drawn++;
 }
 
+/* A level the texture manager converted: swizzled into place (the chip's layout), then the triangle state sent
+ * again (the texture cache keeps texels it read: docs/tnt2.md). */
+static void tex_write(uint32_t org, const uint16_t *texels, int hw_w, int hw_h)
+{
+    const void *lv[1];
+    lv[0] = texels;
+    tnt2_tex_load(org, 2, log2i(hw_w), log2i(hw_h), 1, lv);
+    tnt2_3d_tex_written();
+}
+
 const mg_backend mg_tnt2_backend = {
     "tnt2", probe, win_open, win_close, fault, exit_restore, sync, busy, in_vblank, vcount, set_ramp, validate,
-    clear, swap, present_front, tnt2_be_tri
+    clear, swap, present_front, tnt2_be_tri, tex_write, 128
 };

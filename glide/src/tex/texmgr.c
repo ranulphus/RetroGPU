@@ -39,6 +39,10 @@ static struct { uint32_t off, size; } freelist[MAX_FREE];
 static int nfree;
 static uint32_t heap_lo, heap_hi, white_off;
 
+/* Blocks (a record's levels) start at the back end's alignment: the Matrox's HW_ALIGN, the TNT2's 128 bytes
+ * (its base level's); the levels within a block stay HW_ALIGN apart (the TNT2's rule for levels too). */
+static uint32_t block_align(void) { return mg_be && mg_be->tex_align ? mg_be->tex_align : HW_ALIGN; }
+
 void tex_heap_init(uint32_t start, uint32_t end)
 {
     int i;
@@ -50,7 +54,7 @@ void tex_heap_init(uint32_t start, uint32_t end)
         recs[i].hw_bytes = 0;
         memset(recs[i].hw_valid, 0, sizeof recs[i].hw_valid);
     }
-    heap_lo = (start + HW_ALIGN - 1) & ~(HW_ALIGN - 1);
+    heap_lo = (start + block_align() - 1) & ~(block_align() - 1);
     heap_hi = end;
     nfree = 1;
     freelist[0].off = heap_lo;
@@ -60,7 +64,7 @@ void tex_heap_init(uint32_t start, uint32_t end)
 static uint32_t heap_alloc(uint32_t bytes)
 {
     int i;
-    bytes = (bytes + HW_ALIGN - 1) & ~(HW_ALIGN - 1);
+    bytes = (bytes + block_align() - 1) & ~(block_align() - 1);
     for (i = 0; i < nfree; i++) {
         if (freelist[i].size >= bytes) {
             uint32_t off = freelist[i].off;
@@ -79,7 +83,7 @@ static uint32_t heap_alloc(uint32_t bytes)
 static void heap_free(uint32_t off, uint32_t bytes)
 {
     int i;
-    bytes = (bytes + HW_ALIGN - 1) & ~(HW_ALIGN - 1);
+    bytes = (bytes + block_align() - 1) & ~(block_align() - 1);
     for (i = 0; i < nfree && freelist[i].off < off; i++)
         ;
     if (nfree == MAX_FREE)
@@ -480,13 +484,12 @@ int tex_bind_level(GrLOD_t lod, const tex_variant *var, tex_level_hw *hw)
     }
     if (!r->hw_valid[lod]) {
         tex_level_hw *lv = &r->hw[lod];
-        int hw_w = 1 << lv->w_log2, hw_h = 1 << lv->h_log2, y, po = PROF_SWITCH(PROF_G_TEXDL);
+        int hw_w = 1 << lv->w_log2, hw_h = 1 << lv->h_log2, po = PROF_SWITCH(PROF_G_TEXDL);
         /* The level may still be read by queued draws. */
         mg_be->sync();
         lv->hwfmt = tex_convert_level(r->fmt, r->shadow + r->shadow_off[lod], w, h, staging, hw_w, hw_w, hw_h,
                                       clamp_key & 1, (clamp_key >> 1) & 1, &tmu0.tables, -1, scratch, var);
-        for (y = 0; y < hw_h; y++)
-            memcpy((void *)(mg_vram + lv->org + (uint32_t)(y * hw_w * 2)), staging + y * hw_w, (size_t)hw_w * 2);
+        mg_be->tex_write(lv->org, staging, hw_w, hw_h);
         r->hw_valid[lod] = 1;
         tex_vram_gen++;
         PROF_BACK(po);

@@ -40,6 +40,12 @@ typedef struct mg_backend {
     void (*swap)(int swap_interval);    /* grBufferSwap: drain, wait, show mg.back (the API turns the buffers) */
     void (*present_front)(void);        /* scaled fits: show what was drawn into the front buffer */
     void (*tri)(const GrVertex *a, const GrVertex *b, const GrVertex *c);
+
+    /* A texture level the texture manager converted (16-bit texels: 565, 1555 or 4444 as tex_convert_level's
+     * HW_TW16/15/12, hw_w x hw_h, rows hw_w apart) into video memory at org, in the card's layout: the Matrox's
+     * rows as they are, the TNT2's swizzled. The engine is done with the old texels (the caller synced). */
+    void (*tex_write)(uint32_t org, const uint16_t *texels, int hw_w, int hw_h);
+    uint32_t tex_align;                 /* where a texture's block starts: a multiple of this (0: the heap's 64) */
 } mg_backend;
 
 extern const mg_backend *mg_be;         /* the back end of the card found (sst.c) */

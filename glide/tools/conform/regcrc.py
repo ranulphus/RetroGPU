@@ -12,6 +12,7 @@ Glide's runner writes out/conform/<t>/ afresh for each card, so `snap` keeps a c
 every test of every card (or the cards named), the same MGL-REGCRC lines and every frame (t*_N.png) the same byte
 for byte. Exit status 0 when everything matches.
 """
+import json
 import os
 import re
 import shutil
@@ -71,13 +72,23 @@ def snaprun(src, dst, card, name):
     return 0
 
 
+def nocompare():
+    """The manifest's tests not compared (t23, the throughput benchmark: it draws for a time, so its writes vary)."""
+    m = json.load(open(os.path.join(ROOT, "glide", "tests", "conform", "manifest.json")))
+    return {k for k, v in m.items() if isinstance(v, dict) and v.get("nocompare")}
+
+
 def compare(base, new, cards):
+    skip = nocompare()
     if not cards:
         cards = sorted(d for d in os.listdir(new) if os.path.isdir(os.path.join(new, d)))
     bad = 0
     for card in cards:
         tests = sorted(t for t in os.listdir(os.path.join(new, card)) if os.path.isdir(os.path.join(new, card, t)))
         for t in tests:
+            if t in skip:
+                print("%-5s %-6s not compared (the manifest's nocompare)" % (card, t))
+                continue
             a, b = os.path.join(base, card, t), os.path.join(new, card, t)
             problems = []
             if not os.path.isdir(a):
