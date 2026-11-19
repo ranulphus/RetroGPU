@@ -1,7 +1,8 @@
 # The Riva TNT2: a plan
 
 **Status (2026-11-19): v1, the owner's answers in (below). The card is in the P3 (bench B): a TNT2 M64 (NV5,
-64-bit memory). Nothing built yet.**
+64-bit memory). T0 done (below); before it, DOS-GL's software renderer through the card's VBE BIOS passed all 35
+conformance tests there (B3's bench tier).**
 
 The owner's order of 2026-11-12 (`gl/docs/backends.md`): the S3 ViRGE/DX first (`docs/virge.md`), then the Riva
 TNT2, then ATI's Rage 128 Pro, then perhaps the Radeon 7000 VE. Each card gets a plan of its own before its work
@@ -39,6 +40,21 @@ RetroGPU is MIT, so code is written from documentation and from MIT-licensed dri
   methods; envytools' register database (`rnndb`, MIT) for the register names.
 - **Not used:** Linux's `rivafb` (GPL); NVIDIA's binary drivers; anything whose licence isn't stated.
 - 86Box has no NVIDIA model (only a timer helper), so it can't stand in for the chip (below).
+
+## What T0 found (the P3, 2026-11-19, `NPROBE`)
+
+- **PCI:** bus 1 device 0 (behind the AGP bridge), `10de:002d` revision 15h, subsystem `2206163e`, IRQ 10. BAR0
+  (registers) at `de000000`, BAR1 (frame buffer, prefetchable) at `da000000`.
+- **The chip:** `PMC_BOOT_0` = `20154000` (an NV5). `PMC_ENABLE` = `01110100`: the graphics engine (PGRAPH) is off
+  after the BIOS, so its status register reads back stale bus data (it returned the straps' value); T1 enables it.
+- **Memory:** `PFB_BOOT_0` = `28`: bits 1-0 = 0, 32 MB; bit 2 = 0, a 64-bit bus. That decoding (riva_hw.c's) is
+  confirmed: the M64 has a 64-bit bus, and the BIOS reports 32,768 KB. `PFB_CONFIG_0`/`_1` = `00001114`/`41016293`.
+- **Clocks:** the straps (`8000d447`) give a 14.318 MHz crystal; the core PLL 125 MHz, the memory PLL 150 MHz, the
+  pixel PLL 28.3 MHz (text mode's) as the BIOS left them.
+- **VBE:** 3.0, "NVidia Corporation" / "Riva TNT", 32 MB, 33 modes (the full list in the run's log).
+- **DOS-GL before any TNT2 code:** the software renderer full-screen through the VBE BIOS passes the whole conformance
+  suite (35 of 35 within the software renderer's tolerances), and in a software GLOS window on GLOS's VBE desktop
+  (800x600x16, mode 114h) TEXCUBE draws right; GLOS's `stars` saver runs there as an app.
 
 ## How it fits RetroGPU
 
