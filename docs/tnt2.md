@@ -62,6 +62,24 @@ RetroGPU is MIT, so code is written from documentation and from MIT-licensed dri
   suite (35 of 35 within the software renderer's tolerances), and in a software GLOS window on GLOS's VBE desktop
   (800x600x16, mode 114h) TEXCUBE draws right; GLOS's `stars` saver runs there as an app.
 
+## T1 so far (the P3, 2026-11-19)
+
+- **The register layer** (`hal/include/tnt2/tnt2.h`, `hal/src/tnt2/tnt2.c`, built as `libtnt2.a`): the chip found and
+  mapped (memory size from `PFB_BOOT_0`); `tnt2_accel_init` sets up the units, instance memory (the hash table and
+  the eight objects), PGRAPH and PFIFO as `nv_hw.c` does for an NV4 with no display state (the BIOS's mode stays),
+  and starts the command ring (32 KB at the top of video memory, less 128 KB, as the reference). Fill and
+  screen-to-screen copy through the GDI rectangle and blit objects, the target surface's format, pitch and offset.
+- **The clip object** doesn't clip solid rectangles or the blit (a fill drew outside it on the first run), so fills
+  and copies are clipped in software against the stored clip; the clip object is still set for what takes it.
+- **The timer:** `nv_hw.c` writes PTIMER through a dword pointer without dividing the offsets by 4 (so at 0x9800,
+  0x9840, 0x9500, 0x9400); the layer writes the NV4's timer registers those values fit (0x9200, 0x9210, 0x9140,
+  0x9100).
+- **`NTWOD`** (`tests/tnt2/ntwod.c`, against `tests/hal/sw2d.c`): at 16 and 8 bits (BIOS modes 111h and 101h), clear,
+  fills, fills in random clips, copies (overlapping too), copies on a surface off the screen of another pitch, and a
+  mixed run: all byte for byte the same as the software model on the P3's M64.
+- **Still T1's:** colour expansion (text, the mono bitmaps), image upload, the cursor, the display start, and
+  coordinates outside the surface (the methods' 16-bit x and y).
+
 ## How it fits RetroGPU
 
 As for the ViRGE: a **register layer** in `hal/` (the FIFO, the objects, 2D and 3D), a **device** on B1's interface

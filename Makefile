@@ -94,6 +94,11 @@ VIRGE_SRCS := hal/src/virge/chip.c hal/src/virge/engine2d.c hal/src/virge/cursor
 build/djgpp/libvirge.a: $(VIRGE_SRCS:%.c=build/djgpp/%.o)
 	@rm -f $@
 	$(DJAR) rcs $@ $^
+# The Riva TNT2 (docs/tnt2.md): its register layer, a library of its own as the ViRGE's is.
+TNT2_SRCS := hal/src/tnt2/tnt2.c
+build/djgpp/libtnt2.a: $(TNT2_SRCS:%.c=build/djgpp/%.o)
+	@rm -f $@
+	$(DJAR) rcs $@ $^
 # RetroGPU's device level (hal/include/rg, gl/docs/b1.md; docs/virge.md V3): the devices behind one table, the
 # Matrox one on the HAL, the ViRGE/DX's on its layer and the memory one (gl/docs/b2.md); RGDEV drives them through
 # the table alone.
@@ -107,6 +112,8 @@ DJ_SRC_RGDEV := tests/rg/rgdev.c tests/hal/sw2d.c build/djgpp/librg.a build/djgp
 DJ_SRC_VPROBE := tests/virge/vprobe.c
 # The Riva TNT2 (docs/tnt2.md): NPROBE (T0: PCI, the chip's ID, memory and clock registers, the BIOS's modes; reads only).
 DJ_SRC_NPROBE := tests/tnt2/nprobe.c
+# NTWOD (T1: the first 2D, fills and copies, against sw2d.c).
+DJ_SRC_NTWOD := tests/tnt2/ntwod.c tests/hal/sw2d.c build/djgpp/libtnt2.a
 DJ_SRC_VTWOD := tests/virge/vtwod.c tests/hal/sw2d.c build/djgpp/libvirge.a
 DJ_SRC_VTRI := tests/virge/vtri.c build/djgpp/libvirge.a
 build/djgpp/HOOKS.EXE: tests/hal/hooks.c
@@ -127,6 +134,8 @@ build/djgpp/FOGPROBE.EXE: tests/hal/fogprobe.c
 build/djgpp/CLOCKMON.EXE: tests/hal/clockmon.c
 build/djgpp/VPROBE.EXE: tests/virge/vprobe.c
 build/djgpp/NPROBE.EXE: tests/tnt2/nprobe.c
+build/djgpp/NTWOD.EXE: tests/tnt2/ntwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libtnt2.a
+build/djgpp/NTWOD.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/VTWOD.EXE: tests/virge/vtwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libvirge.a
 build/djgpp/VTWOD.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/VTRI.EXE: tests/virge/vtri.c build/djgpp/libvirge.a
