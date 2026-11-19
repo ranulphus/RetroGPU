@@ -118,8 +118,12 @@ RetroGPU is MIT, so code is written from documentation and from MIT-licensed dri
   0x102; untextured drawing through a 1x1 white texel modulated (Mesa's way).
 - **`NTRI0`** (`tests/tnt2/ntri0.c`): one Gouraud triangle at 640x480x16: nothing trapped, its coverage exactly
   OpenGL's (58,057 pixels, none outside, none missing) and the corners' colours right, at the first attempt.
-- **Next in T2:** textures (swizzled upload, the formats, filters, mipmaps), Z (clear, test, write), blending, fog,
-  culling; then `NTRI` with VTRI's scenes against OpenGL's rules.
+- **Textures:** `tnt2_tex_load` stores a texture's levels swizzled from the CPU (Mesa's layout: x and y bits
+  interleaved up to the shorter side, the longer side's high bits above; levels one after another). `NTRI0`'s
+  256x256 quad of a 64x64 R5G6B5 texture, NEAREST and DECAL, matches the texels under the pixel centres exactly
+  (0 of 65,536 pixels differ), so the layout and the texture's words are right.
+- **Next in T2:** the other formats, LINEAR and mipmaps, Z (clear, test, write), blending, fog, culling; then `NTRI`
+  with VTRI's scenes against OpenGL's rules.
 
 ## How it fits RetroGPU
 

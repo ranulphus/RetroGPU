@@ -596,6 +596,40 @@ void tnt2_tri(const tnt2_vertex *a, const tnt2_vertex *b, const tnt2_vertex *c)
     NEXT(0x102);
 }
 
+/* Textures are stored swizzled (Mesa's nv04_surface.c, get_swizzled_offset): in a level of w x h texels (powers
+ * of two), with k = log2(min(w, h)), the low 2k bits of a texel's index interleave x and y (x's bit i at bit 2i, y's
+ * at 2i + 1) and the longer side's higher bits sit above them. The levels follow one another from the base level,
+ * each as large as it is (nouveau_texture.c: levels over 16 bytes start on 64 bytes, which powers of two do). */
+static uint32_t swizzle(int x, int y, int log2w, int log2h)
+{
+    int k = log2w < log2h ? log2w : log2h, i;
+    uint32_t idx = 0;
+    for (i = 0; i < k; i++)
+        idx |= (((uint32_t)x >> i) & 1u) << (2 * i) | (((uint32_t)y >> i) & 1u) << (2 * i + 1);
+    idx |= ((uint32_t)x >> k) << (2 * k);       /* (one of these two is 0: the longer side's high bits) */
+    idx |= ((uint32_t)y >> k) << (2 * k);
+    return idx;
+}
+
+uint32_t tnt2_tex_load(uint32_t off, int cpp, int log2w, int log2h, int levels, const void *const *level_texels)
+{
+    int n, x, y;
+    for (n = 0; n < levels; n++) {
+        int lw = log2w > n ? log2w - n : 0, lh = log2h > n ? log2h - n : 0, w = 1 << lw, h = 1 << lh;
+        const uint8_t *src = (const uint8_t *)level_texels[n];
+        for (y = 0; y < h; y++)
+            for (x = 0; x < w; x++) {
+                volatile uint8_t *d = tnt2_fb + off + swizzle(x, y, lw, lh) * (uint32_t)cpp;
+                const uint8_t *s = src + ((long)y * w + x) * cpp;
+                int b;
+                for (b = 0; b < cpp; b++)
+                    d[b] = s[b];
+            }
+        off += (uint32_t)(w * h * cpp);
+    }
+    return off;
+}
+
 /* ---- the set-up (nv_hw.c's NVLoadStateExt for NV_ARCH_04, no display state) ---- */
 
 int tnt2_accel_init(void)

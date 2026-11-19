@@ -6,7 +6,10 @@
  *
  *   NTRI0
  *
- * HX-TEST lines: map, accel, mode, 3d-init, target, tri, coverage, colours. */
+ * Then a 256x256 quad (two triangles) textured with a 64x64 R5G6B5 texture, NEAREST, DECAL: every pixel must be
+ * exactly the texel under its centre, which checks the swizzled layout and the texture's words.
+ *
+ * HX-TEST lines: map, accel, mode, 3d-init, target, tri, coverage, colours, tex. */
 #include "hx.h"
 #include "mga/hal.h"
 #include "mga/sys.h"
@@ -137,6 +140,48 @@ int main(int argc, char **argv)
                 ok = 0;
         }
         hx_test("colours", ok, "%s", buf);
+    }
+    {
+        static uint16_t tex[64 * 64];
+        const void *lv[1] = { tex };
+        const uint32_t toff = 0x200000u;
+        tnt2_vertex q[4];
+        int i, bad = 0, bx = -1, by = -1;
+        uint16_t bgot = 0, bwant = 0;
+        for (i = 0; i < 64 * 64; i++) {          /* a different colour in each texel */
+            int tx = i % 64, ty = i / 64;
+            tex[i] = (uint16_t)((tx & 31) << 11 | ((ty * 3) & 63) << 5 | ((tx ^ ty) & 31));
+        }
+        tnt2_sync(1000000);
+        tnt2_tex_load(toff, 2, 6, 6, 1, lv);
+        tnt2_fill(0, 0, W, H, 0);
+        memset(q, 0, sizeof q);
+        q[0].sx = 100, q[0].sy = 100, q[0].tu = 0, q[0].tv = 0;
+        q[1].sx = 356, q[1].sy = 100, q[1].tu = 1, q[1].tv = 0;
+        q[2].sx = 356, q[2].sy = 356, q[2].tu = 1, q[2].tv = 1;
+        q[3].sx = 100, q[3].sy = 356, q[3].tu = 0, q[3].tv = 1;
+        for (i = 0; i < 4; i++)
+            q[i].sz = 0.5f, q[i].rhw = 1.0f, q[i].color = 0xFFFFFFFFu, q[i].specular = 0xFF000000u;
+        /* FORMAT: DMA_A, corner origins, R5G6B5, 1 level, 64x64 (log2 6, 6), repeat both ways. FILTER: nearest.
+         * BLEND: DECAL | MSB | Gouraud | perspective | ONE, ZERO. */
+        tnt2_3d_state(toff, 0x116615A1u, 0x11001010u, 0x120001A1u, 0x40182800u, 0);
+        tnt2_tri(&q[0], &q[1], &q[2]);
+        tnt2_tri(&q[0], &q[2], &q[3]);
+        if (tnt2_sync(1000000) != 0 || !trap_ok("tex")) {
+            hx_test("tex", 0, "the engine didn't go idle, or trapped");
+            goto out;
+        }
+        for (y = 100; y < 356; y++)
+            for (x = 100; x < 356; x++) {
+                uint16_t want = tex[((y - 100) / 4) * 64 + (x - 100) / 4], have = fb[y * pitch_px + x];
+                if (have != want) {
+                    if (!bad) bx = x, by = y, bgot = have, bwant = want;
+                    bad++;
+                }
+            }
+        hx_test("tex", bad == 0, "%d of 65536 pixels differ%s", bad, bad ? "" : " (the swizzle and the words right)");
+        if (bad)
+            hx_log("NTRI0-TEX first at %d,%d: %04x, want %04x", bx, by, bgot, bwant);
     }
 out:
     tnt2_sync(200000);
