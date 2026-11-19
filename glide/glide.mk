@@ -24,7 +24,7 @@ check-header:
 build/gen/stubs.c build/gen/api_names.c build/gen/api_ids.h build/gen/api_names.h build/gen/thunks.c build/gen/replay_gen.c build/gen/proxy_thunks.c build/gen/glapi_names.c build/gen/glapi_static.c: build/gen/stamp
 
 # ---- Runtime DLL ---------------------------------------------------------
-RT_SRCS := $(wildcard $(addprefix glide/src/,rt/*.c dll/*.c glide/*.c lfb/*.c tex/*.c combine/*.c trace/*.c))
+RT_SRCS := $(wildcard $(addprefix glide/src/,rt/*.c dll/*.c glide/*.c lfb/*.c tex/*.c backend/*.c backend/*/*.c trace/*.c))
 RT_OBJS := $(RT_SRCS:%.c=build/ow/%.obj) build/ow/gen/stubs.obj build/ow/gen/api_names.obj build/ow/gen/thunks.obj
 
 build/ow/glide2x.lnk: glide/glide2x.lnk.in glide/glide.mk
