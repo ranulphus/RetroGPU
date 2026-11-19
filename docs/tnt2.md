@@ -20,8 +20,8 @@ The TNT2 family is NVIDIA's NV5 (1999), the TNT's (NV4) successor with the same 
 - **The engine is driven through objects:** the host writes methods into a channel of the command FIFO (PFIFO),
   which hands them to the graphics engine (PGRAPH) for the object bound to each subchannel. Objects live in
   instance memory, found through a hash table (RAMHT). So the bring-up is the FIFO, the instance memory and the
-  objects first, then each object's methods. Programmed I/O into the channel first; the FIFO's DMA mode (and AGP)
-  only if measurements call for it.
+  objects first, then each object's methods. The FIFO reads the methods from a command ring in video memory (the
+  owner's answer 3); AGP only if measurements call for it.
 - **What it draws** (the DX5 and DX6 triangle classes): the chip sets triangles up itself from screen-space vertices
   (x, y, z, 1/w, colour, specular and fog, u, v: Direct3D's TLVERTEX), so the host's set-up is a vertex copy, not
   edge arithmetic as on the Matrox cards and the ViRGE. 16- and 32-bit colour, 16- or 24-bit Z with 8 bits of
@@ -94,4 +94,7 @@ code is checked on the P3 before a merge; the merge tier's other cases still run
 1. **Glide on the TNT2:** yes (T5), as for the ViRGE.
 2. **An 86Box model of the NV5:** not now. Silicon only: every TNT2 change is checked on the P3; a model may be
    reconsidered once the driver works.
-3. **The FIFO's feeding:** programmed I/O first; DMA or AGP only if the P3 shows the CPU's writes holding it back.
+3. **The FIFO's feeding:** first programmed I/O; then (the same day, once the reference was read: X.org's nv driver
+   feeds the NV4 family only through a command buffer, and its older programmed-I/O path was the Riva 128's) the
+   reference's way: a command ring in the card's own video memory, the CPU writing commands there and moving the
+   FIFO's put pointer. No AGP or system-memory DMA; AGP only if the P3 shows it matters.
