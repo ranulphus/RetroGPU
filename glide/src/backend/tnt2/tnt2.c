@@ -276,7 +276,11 @@ static void vertex(tnt2_vertex *o, const GrVertex *v, int32_t sx, int32_t sy, in
     }
     z = (z + 0.5) / 65535.0;                    /* (the chip's Z16 is SZ * 65535 truncated: z again) */
     o->sz = (float)(z > 1.0 ? 1.0 : z);
-    o->rhw = v->oow > 0 ? v->oow : 1e-6f;
+    {
+        /* (the chip's 1/w is the texture's perspective alone: the TMU's when it has its own, the STW hint) */
+        float q = (mg.st.stw_hint & GR_STWHINT_W_DIFF_TMU0) ? v->tmuvtx[0].oow : v->oow;
+        o->rhw = q > 0 ? q : 1e-6f;
+    }
     if (textured) {
         rgb[0] = clamp255(v->r), rgb[1] = clamp255(v->g), rgb[2] = clamp255(v->b), a = clamp255(v->a);
     } else {
@@ -541,6 +545,8 @@ static void draw_textured(const GrVertex *a, const GrVertex *b, const GrVertex *
         if (chroma && ((w[8] >> 8) & 0xFF) == C_ONE && ((w[8] >> 16) & 0xFF) == C_NONE)
             w[8] = (w[8] & ~0xFF00u) | CIN(CS_TEX0, 0, 0) << 8;   /* (keyed texels' alpha 0 into the alpha) */
     }
+    if (mg_fog_source() != GR_FOG_DISABLE && (mg.st.fog_mode & GR_FOG_MULT2))
+        w[9] = cw(C_NONE, C_ONE, C_NONE, C_NONE);       /* (MULT2: the fog term alone, f * the fog colour) */
     if (bound && hw.hwfmt == HW_TW16) {
         w[6] = opaque_alpha(w[6], 1), w[7] = opaque_alpha(w[7], 0);
         w[8] = opaque_alpha(w[8], 1), w[9] = opaque_alpha(w[9], 0);
@@ -609,7 +615,7 @@ static void split(const GrVertex *a, const GrVertex *b, const GrVertex *c, int d
         hi = fa > fb ? fa : fb, hi = fc > hi ? fc : hi;
         cut = hi - lo > 16.0;
     }
-    if (!cut || depth >= 3) {
+    if (!cut || depth >= 5) {
         if (mip && cut)
             la = level_at(&L, (a->x + b->x + c->x) / 3.0, (a->y + b->y + c->y) / 3.0);
         tri_one(a, b, c, la);
@@ -718,11 +724,6 @@ static void tri_one(const GrVertex *a, const GrVertex *b, const GrVertex *c, GrL
     vertex(&v[0], a, ax, ay, wmode, fog, 1);
     vertex(&v[1], b, bx, by, wmode, fog, 1);
     vertex(&v[2], c, cx, cy, wmode, fog, 1);
-    if (fog && (mg.st.fog_mode & GR_FOG_MULT2)) {
-        int n;
-        for (n = 0; n < 3; n++)
-            v[n].color &= 0xFF000000u;          /* (MULT2: the fog term alone, f * the fog colour) */
-    }
     /* (every triangle through the combiner: per pixel, so a product of two iterated values (a lerp by iterated
      * alpha) is exact too, where evaluating at the vertices is not; untextured, the white texel) */
     draw_textured(a, b, c, v, blend, control, fogc, lod);
