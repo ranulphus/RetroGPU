@@ -9,7 +9,11 @@
  * Then a 256x256 quad (two triangles) textured with a 64x64 R5G6B5 texture, NEAREST, DECAL: every pixel must be
  * exactly the texel under its centre, which checks the swizzled layout and the texture's words.
  *
- * HX-TEST lines: map, accel, mode, 3d-init, target, tri, coverage, colours, tex. */
+ * Then Z: three overlapping flat triangles at depths 0.3, 0.6 and 0.45 with LEQUAL and Z writes, each pixel's
+ * winner against the reference and a Z value read back; blending (source alpha 128 over a known colour); culling
+ * (a clockwise and a counter-clockwise triangle under each mode).
+ *
+ * HX-TEST lines: map, accel, mode, 3d-init, target, tri, coverage, colours, tex, zbuf, blend, cull. */
 #include "hx.h"
 #include "mga/hal.h"
 #include "mga/sys.h"
@@ -182,6 +186,94 @@ int main(int argc, char **argv)
         hx_test("tex", bad == 0, "%d of 65536 pixels differ%s", bad, bad ? "" : " (the swizzle and the words right)");
         if (bad)
             hx_log("NTRI0-TEX first at %d,%d: %04x, want %04x", bx, by, bgot, bwant);
+    }
+    {                                           /* Z */
+        static const uint32_t col[3] = { 0xFFF80000u, 0xFF00FC00u, 0xFF0000F8u };   /* (exact in R5G6B5) */
+        static const float z[3] = { 0.3f, 0.6f, 0.45f };
+        static const float pts[3][3][2] = { { { 120, 80 }, { 420, 90 }, { 200, 380 } },
+                                            { { 260, 60 }, { 560, 200 }, { 240, 420 } },
+                                            { { 80, 250 }, { 520, 300 }, { 330, 460 } } };
+        tnt2_vertex t[3][3];
+        int k, bad = 0, bx = -1, by = -1;
+        uint16_t zr;
+        tnt2_set_target(zoff, pitch_px * 2, 16);
+        tnt2_fill(0, 0, W, H, 0xFFFF);
+        tnt2_set_target(0, pitch_px * 2, 16);
+        tnt2_fill(0, 0, W, H, 0);
+        /* CONTROL: Z fixed | Z write | no culling | Z LEQUAL | Z enable | corner | alpha ALWAYS. */
+        tnt2_3d_state(tnt2_tex_dummy_off(), 0x110016A1u, 0x11001010u, 0x120001A4u, 0x41146800u, 0);
+        memset(t, 0, sizeof t);
+        for (k = 0; k < 3; k++) {
+            for (x = 0; x < 3; x++) {
+                t[k][x].sx = pts[k][x][0], t[k][x].sy = pts[k][x][1], t[k][x].sz = z[k], t[k][x].rhw = 1;
+                t[k][x].color = col[k], t[k][x].specular = 0xFF000000u;
+            }
+            tnt2_tri(&t[k][0], &t[k][1], &t[k][2]);
+        }
+        if (tnt2_sync(1000000) != 0 || !trap_ok("zbuf")) {
+            hx_test("zbuf", 0, "the engine didn't go idle, or trapped");
+            goto out;
+        }
+        for (y = 0; y < H; y++)
+            for (x = 0; x < W; x++) {
+                float best = 2;
+                uint16_t want = 0, have = fb[y * pitch_px + x];
+                for (k = 0; k < 3; k++)
+                    if (inside(t[k], x + 0.5, y + 0.5) && z[k] <= best) {
+                        best = z[k];
+                        want = (uint16_t)((col[k] >> 8 & 0xF800) | (col[k] >> 5 & 0x07E0) | (col[k] >> 3 & 0x001F));
+                    }
+                if (have != want) {
+                    if (!bad) bx = x, by = y;
+                    bad++;
+                }
+            }
+        zr = *(volatile uint16_t *)(tnt2_fb + zoff + (uint32_t)(150 * pitch_px * 2 + 200 * 2));   /* (in 0.3's only) */
+        hx_test("zbuf", bad == 0, "%d pixels differ (first at %d,%d); Z read at 200,150 (depth 0.3): %u (0.3 x 65535 = %u)",
+                bad, bx, by, zr, (unsigned)(0.3 * 65535 + 0.5));
+    }
+    {                                           /* blending: alpha 128 over a known colour */
+        tnt2_vertex b[3];
+        uint16_t p;
+        int r, g, bl;
+        tnt2_fill(0, 0, W, H, 0x001F);           /* (blue) */
+        memset(b, 0, sizeof b);
+        b[0].sx = 50, b[0].sy = 50; b[1].sx = 250, b[1].sy = 50; b[2].sx = 50, b[2].sy = 250;
+        for (x = 0; x < 3; x++)
+            b[x].sz = 0.5f, b[x].rhw = 1, b[x].color = 0x80F80000u, b[x].specular = 0xFF000000u;
+        /* BLEND: MODULATEALPHA | MSB | Gouraud | perspective | blend | SRC_ALPHA, ONE_MINUS_SRC_ALPHA. */
+        tnt2_3d_state(tnt2_tex_dummy_off(), 0x110016A1u, 0x11001010u, 0x651001A4u, 0x40182800u, 0);
+        tnt2_tri(&b[0], &b[1], &b[2]);
+        tnt2_sync(1000000);
+        p = fb[80 * pitch_px + 80];
+        r = p >> 11, g = (p >> 5) & 63, bl = p & 31;
+        hx_test("blend", r >= 14 && r <= 17 && g <= 1 && bl >= 14 && bl <= 17 && trap_ok("blend"),
+                "red alpha 128 over blue: %04x (r %d g %d b %d; about 15-16 and 15-16 expected)", p, r, g, bl);
+    }
+    {                                           /* culling: CW and CCW (on the screen, y down) under each mode */
+        static const uint32_t mode[3] = { 0x00100000u, 0x00200000u, 0x00300000u };   /* NONE, CW, CCW */
+        static const char *mname[3] = { "none", "cw", "ccw" };
+        char buf[160] = "";
+        tnt2_vertex cw[3], ccw[3];
+        int k;
+        memset(cw, 0, sizeof cw);
+        for (x = 0; x < 3; x++)
+            cw[x].sz = 0.5f, cw[x].rhw = 1, cw[x].color = 0xFFFFFFFFu, cw[x].specular = 0xFF000000u;
+        memcpy(ccw, cw, sizeof cw);
+        cw[0].sx = 300, cw[0].sy = 100; cw[1].sx = 400, cw[1].sy = 100; cw[2].sx = 300, cw[2].sy = 200;   /* (clockwise) */
+        ccw[0].sx = 450, ccw[0].sy = 100; ccw[1].sx = 450, ccw[1].sy = 200; ccw[2].sx = 550, ccw[2].sy = 100;
+        for (k = 0; k < 3; k++) {
+            int a, c;
+            tnt2_fill(0, 0, W, H, 0);
+            tnt2_3d_state(tnt2_tex_dummy_off(), 0x110016A1u, 0x11001010u, 0x120001A4u,
+                          0x40002800u | 0x00080000u | mode[k], 0);
+            tnt2_tri(&cw[0], &cw[1], &cw[2]);
+            tnt2_tri(&ccw[0], &ccw[1], &ccw[2]);
+            tnt2_sync(1000000);
+            a = fb[120 * pitch_px + 320] != 0, c = fb[120 * pitch_px + 470] != 0;
+            sprintf(buf + strlen(buf), "%s: cw %s ccw %s; ", mname[k], a ? "drawn" : "culled", c ? "drawn" : "culled");
+        }
+        hx_test("cull", trap_ok("cull"), "%s", buf);
     }
 out:
     tnt2_sync(200000);

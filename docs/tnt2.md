@@ -122,8 +122,13 @@ RetroGPU is MIT, so code is written from documentation and from MIT-licensed dri
   interleaved up to the shorter side, the longer side's high bits above; levels one after another). `NTRI0`'s
   256x256 quad of a 64x64 R5G6B5 texture, NEAREST and DECAL, matches the texels under the pixel centres exactly
   (0 of 65,536 pixels differ), so the layout and the texture's words are right.
-- **Next in T2:** the other formats, LINEAR and mipmaps, Z (clear, test, write), blending, fog, culling; then `NTRI`
-  with VTRI's scenes against OpenGL's rules.
+- **Z, blending, culling** (`NTRI0`, all on the first run): three overlapping flat triangles with LEQUAL and Z
+  writes leave every pixel's nearest one (the Z buffer cleared by a 2D fill of 0xFFFF); the chip stores 16-bit depth
+  as `sz` x 65535 truncated (0.3 reads back 19,660). Red at alpha 128 over blue with SRC_ALPHA, ONE_MINUS_SRC_ALPHA
+  gives half of each. CULL_MODE CW (2) culls triangles clockwise on the screen (y down), CCW (3) the others, NONE
+  (1) none: Direct3D's meaning, so OpenGL's default (counter-clockwise front faces, cull the back) is CW.
+- **Next in T2:** the other formats, LINEAR and mipmaps, fog, the 32-bit target; then `NTRI` with VTRI's scenes
+  against OpenGL's rules.
 
 ## How it fits RetroGPU
 
