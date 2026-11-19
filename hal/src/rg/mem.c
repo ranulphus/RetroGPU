@@ -210,8 +210,15 @@ static glos_handle window;
 static uint32_t palette332[256];        /* an 8-bit context's colours (RGB 3-3-2) for GLOS_DRAW_BLIT */
 unsigned long rg_mem_blits;             /* frames copied into the window */
 
-/* Any GLOS that speaks API 2.0 (GLOS_DRAW_BLIT draws into a window on any desktop). */
-static int window_ok(void) { return rg_glos_caps() != 0; }
+/* A GLOS desktop on the screen, of any card and depth (GLOS_DRAW_BLIT draws into a window on any desktop).
+   GLOS answers its caps without one too (AUDIO with a mixer, NET with the network up), and a program there
+   must take the screen, not open a window nobody sees (Echoes under GLOS 6619e13 with no `glos display on`:
+   "DOS-GL on Software" instead of the G200). A GLOS that doesn't say whether its desktop is up gives no
+   software windows: its programs go full screen, as before B3. */
+#ifndef GLOS_MACHINE_DESKTOP
+#define GLOS_MACHINE_DESKTOP 16         /* (proposed to GLOS 2026-11-19; until its api.h has it) */
+#endif
+static int window_ok(void) { return (rg_glos_caps() & GLOS_MACHINE_DESKTOP) != 0; }
 
 /* The usual sizes that fit in the desktop's work area with a frame and a title bar; 8, 16 or 32 bits a pixel
    (the context's: GLOS converts each frame to the screen's format). */

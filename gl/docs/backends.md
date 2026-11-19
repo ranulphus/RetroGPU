@@ -98,7 +98,11 @@ include the WARP, AGP, dual texture, the HAL's 2D engine and GLOS's GPU lock. Th
     `GLOS_DRAW_BLIT`, which converts it to the screen's format. 8-bit contexts give their RGB 3-3-2 palette. The
     Matrox window keeps its place on a Matrox card's 16-bit desktop. `DGL_DEVICE=mem` asks for the software
     window there too, for tests. A program GLOS doesn't take as an app (a session's) still goes full-screen on the
-    hardware. `dglGlosHints` (API 1.6) applies to both windows.
+    hardware. `dglGlosHints` (API 1.6) applies to both windows. **Only with a desktop on the screen**
+    (`GLOS_MACHINE_DESKTOP`, 2026-11-19): GLOS answers with no desktop up too (its mixer, its network), and B3 at
+    first took any answer for a desktop, so under GLOS 6619e13 with no `glos display on` every full-screen
+    program became an app with a window nobody saw (Echoes: "DOS-GL on Software" instead of the G200). A GLOS
+    that doesn't set the bit gives no software windows.
   - **Then full screen, the VBE device (2026-11-18, `hal/src/rg/vbe_soft.c`):** the software renderer on any card
     with a VBE 1.2 or later BIOS. Its buffers are system memory (`rg_sb_open`, shared with the memory device).
     Each swap copies the front buffer to the screen, through the linear framebuffer when the mode has one (VBE
