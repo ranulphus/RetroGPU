@@ -7,6 +7,7 @@
  * 565. In scaled modes (mg.present_scaled) writes to the front buffer are
  * shown once they are done. */
 #include "glide/mg.h"
+#include "backend/backend.h"
 #include "trace/trace.h"
 #include "mga/sys.h"
 #include <string.h>
@@ -100,7 +101,7 @@ static uint32_t expand565(uint16_t c)
 /* Colour-buffer rows in either depth (MGAGLIDE bpp=32 keeps 8888). */
 static uint8_t *crow(uint32_t off, uint32_t y)
 {
-    return (uint8_t *)mga_fb + off + y * (uint32_t)mg.pitch_px * (uint32_t)(mg.bpp / 8);
+    return (uint8_t *)mg_vram + off + y * (uint32_t)mg.pitch_px * (uint32_t)(mg.bpp / 8);
 }
 
 static uint16_t get565(const uint8_t *row, uint32_t x)
@@ -183,8 +184,8 @@ static void wrdepth(uint32_t x, uint32_t y, uint32_t z)
     hw_rect(x, y, &x0, &x1, &y0, &y1);
     for (Y = y0; Y < y1; Y++)
         for (X = x0; X < x1; X++) {
-            if (mg.zbits == 32) ((uint32_t *)(mga_fb + mg.aux_off))[Y * pitch + X] = z;
-            else ((uint16_t *)(mga_fb + mg.aux_off))[Y * pitch + X] = (uint16_t)z;
+            if (mg.zbits == 32) ((uint32_t *)(mg_vram + mg.aux_off))[Y * pitch + X] = z;
+            else ((uint16_t *)(mg_vram + mg.aux_off))[Y * pitch + X] = (uint16_t)z;
         }
 }
 
@@ -199,8 +200,8 @@ static uint32_t rdaux(uint32_t x, uint32_t y)
 {
     uint32_t X, Y, pitch = (uint32_t)mg.pitch_px;
     hw_centre(x, y, &X, &Y);
-    return mg.zbits == 32 ? ((const uint32_t *)(mga_fb + mg.aux_off))[Y * pitch + X]
-                          : ((const uint16_t *)(mga_fb + mg.aux_off))[Y * pitch + X];
+    return mg.zbits == 32 ? ((const uint32_t *)(mg_vram + mg.aux_off))[Y * pitch + X]
+                          : ((const uint16_t *)(mg_vram + mg.aux_off))[Y * pitch + X];
 }
 
 static int need_shadow(GrLock_t type, GrBuffer_t buffer, GrLfbWriteMode_t mode, GrOriginLocation_t origin, FxBool pipe)
@@ -227,7 +228,7 @@ GR_ENTRY(FxBool, grLfbLock, (GrLock_t type, GrBuffer_t buffer, GrLfbWriteMode_t 
         return FXFALSE;
     if (lk.active)
         grLfbUnlock(GR_LFB_WRITE_ONLY, lk.buffer);
-    engine_sync(200000);
+    mg_be->sync();
     if (origin == GR_ORIGIN_ANY)
         origin = mg.st.origin;
     if (writeMode == GR_LFBWRITEMODE_ANY)
@@ -244,7 +245,7 @@ GR_ENTRY(FxBool, grLfbLock, (GrLock_t type, GrBuffer_t buffer, GrLfbWriteMode_t 
     info->writeMode = writeMode;
     info->origin = origin;
     if (!lk.shadow) {
-        info->lfbPtr = (void *)(mga_fb + off);
+        info->lfbPtr = (void *)(mg_vram + off);
         info->strideInBytes = (FxU32)mg.pitch_px * 2u;
         return FXTRUE;
     }
@@ -387,8 +388,8 @@ static void wrpipe(uint32_t off, uint32_t x, uint32_t y, uint32_t src, uint16_t 
     hw_rect(x, y, &x0, &x1, &y0, &y1);
     for (Y = y0; Y < y1; Y++)
         for (X = x0; X < x1; X++)
-            pipe_pixel(src, depth, crow(off, Y), X, (uint16_t *)(mga_fb + mg.aux_off) + Y * pitch + X,
-                       (uint32_t *)(mga_fb + mg.aux_off) + Y * pitch + X);
+            pipe_pixel(src, depth, crow(off, Y), X, (uint16_t *)(mg_vram + mg.aux_off) + Y * pitch + X,
+                       (uint32_t *)(mg_vram + mg.aux_off) + Y * pitch + X);
 }
 
 /* Decode one written LFB value to ARGB8888 (+ depth). */
@@ -560,7 +561,7 @@ GR_ENTRY(FxBool, grLfbUnlock, (GrLock_t type, GrBuffer_t buffer))
     if (!lk.active)
         return FXFALSE;
     if (lk.shadow && (type & 1) == GR_LFB_WRITE_ONLY) {
-        engine_sync(200000);
+        mg_be->sync();
         write_back();
     }
     if ((type & 1) == GR_LFB_WRITE_ONLY && lk.buffer == GR_BUFFER_FRONTBUFFER)
@@ -575,7 +576,7 @@ GR_ENTRY(FxBool, grLfbReadRegion, (GrBuffer_t src_buffer, FxU32 src_x, FxU32 src
     uint32_t off, y, pitch;
     if (!mg.open || src_x + src_width > (FxU32)mg.width || src_y + src_height > (FxU32)mg.height)
         return FXFALSE;
-    engine_sync(200000);
+    mg_be->sync();
     off = mg_buffer_offset(src_buffer);
     pitch = (uint32_t)mg.pitch_px;
     for (y = 0; y < src_height; y++) {
@@ -590,12 +591,12 @@ GR_ENTRY(FxBool, grLfbReadRegion, (GrBuffer_t src_buffer, FxU32 src_x, FxU32 src
                            ? (mg.zbits == 32 ? aux_value32(rdaux(src_x + x, sy)) : (uint16_t)rdaux(src_x + x, sy))
                            : rd565(off, src_x + x, sy);
         } else if (src_buffer == GR_BUFFER_AUXBUFFER && mg.zbits == 32) {
-            const uint32_t *s = (const uint32_t *)(mga_fb + off) + sy * pitch + src_x;
+            const uint32_t *s = (const uint32_t *)(mg_vram + off) + sy * pitch + src_x;
             uint32_t x;
             for (x = 0; x < src_width; x++)
                 d[x] = aux_value32(s[x]);
         } else if (src_buffer == GR_BUFFER_AUXBUFFER || mg.bpp == 16) {
-            memcpy(d, (const uint16_t *)(mga_fb + off) + sy * pitch + src_x, src_width * 2);
+            memcpy(d, (const uint16_t *)(mg_vram + off) + sy * pitch + src_x, src_width * 2);
         } else {
             const uint8_t *cr = crow(off, sy);
             uint32_t x;
@@ -612,7 +613,7 @@ GR_ENTRY(FxBool, grLfbWriteRegion, (GrBuffer_t dst_buffer, FxU32 dst_x, FxU32 ds
     uint32_t off, x, y, pitch;
     if (!mg.open || dst_x + src_width > (FxU32)mg.width || dst_y + src_height > (FxU32)mg.height)
         return FXFALSE;
-    engine_sync(200000);
+    mg_be->sync();
     off = mg_buffer_offset(dst_buffer);
     pitch = (uint32_t)mg.pitch_px;
     for (y = 0; y < src_height; y++) {
@@ -621,7 +622,7 @@ GR_ENTRY(FxBool, grLfbWriteRegion, (GrBuffer_t dst_buffer, FxU32 dst_x, FxU32 ds
         uint16_t *zr;
         if (mg.st.origin == GR_ORIGIN_LOWER_LEFT)
             dy = (uint32_t)mg.height - 1 - dy;
-        zr = (uint16_t *)(mga_fb + off) + dy * pitch;
+        zr = (uint16_t *)(mg_vram + off) + dy * pitch;
         for (x = 0; x < src_width; x++) {
             uint32_t dx = dst_x + x;
             switch (src_format) {

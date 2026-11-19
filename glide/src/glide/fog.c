@@ -8,8 +8,6 @@
  * values, and triangles whose fog changes a lot are drawn in bands with a
  * local linear fit (draw.c). */
 #include "glide/mg.h"
-#include "mga/mmio.h"
-#include "mga/regs_mga.h"
 
 int mg_fog_source(void)
 {
@@ -53,18 +51,6 @@ double mg_fog_vertex(const GrVertex *v)
         return 0;
     }
     return f < 0 ? 0 : (f > 255 ? 255 : f);
-}
-
-/* FOGCOL for the current mode: ADD2 drops the fog colour term. */
-void mg_fog_emit_color(void)
-{
-    uint32_t c = (mg.st.fog_mode & GR_FOG_ADD2) ? 0 : (mg_color_to_argb(mg.st.fog_color) & 0xFFFFFF);
-    if (mg.fogcol_valid && c == mg.fogcol_hw)
-        return;
-    fifo_reserve(1);
-    MGA_WR32(MGAREG_FOGCOL, c);
-    mg.fogcol_hw = c;
-    mg.fogcol_valid = 1;
 }
 
 /* ---- Utility fog tables ------------------------------------------------ */

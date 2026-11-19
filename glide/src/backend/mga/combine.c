@@ -1,6 +1,6 @@
 /* combine.c - see combine.h. */
 #include "glide/mg.h"
-#include "combine/combine.h"
+#include "backend/mga/combine.h"
 #include "tex/texmgr.h"
 #include "mga/regs_mga.h"
 

@@ -1,8 +1,7 @@
-/* state.c - the Glide state mirror and its translation to MGA registers. */
+/* state.c - the Glide state mirror (its translation to a card: the back end's validate). */
 #include "glide/mg.h"
+#include "backend/backend.h"
 #include "tex/texmgr.h"
-#include "mga/mmio.h"
-#include "mga/regs_mga.h"
 #include <string.h>
 
 void mg_state_defaults(void)
@@ -78,34 +77,11 @@ uint32_t mg_buffer_offset(GrBuffer_t b)
     }
 }
 
-void mg_target_for(GrBuffer_t b)
-{
-    mga_target t;
-    t.color_off = mg_buffer_offset(b);
-    t.z_off = mg.aux_off;
-    t.pitch_px = mg.pitch_px;
-    t.bpp = mg.bpp;
-    t.zbits = mg.zbits;
-    engine_set_target(&t);
-}
-
 void mg_validate(void)
 {
     if (!mg.open)
         return;
-    if (mg.dirty & MG_DIRTY_TARGET)
-        mg_target_for(mg.render_buffer);
-    if (mg.dirty & (MG_DIRTY_TARGET | MG_DIRTY_CLIP)) {
-        int y0 = mg.st.clip_y0, y1 = mg.st.clip_y1;
-        if (mg.st.origin == GR_ORIGIN_LOWER_LEFT) {
-            y0 = mg.height - mg.st.clip_y1;
-            y1 = mg.height - mg.st.clip_y0;
-        }
-        engine_set_clip(mg_hx(mg.st.clip_x0), mg_hy(y0), mg_hx(mg.st.clip_x1), mg_hy(y1));
-    }
-    engine_set_maccess_flags((mg.st.dither == GR_DITHER_DISABLE ? MACCESS_NODITHER : 0) |
-                             (mg.fog_on ? MACCESS_FOGEN : 0));
-    mg.dirty = 0;
+    mg_be->validate();
 }
 
 /* ---- State entry points ------------------------------------------------ */

@@ -1,5 +1,6 @@
 /* texmgr.c - see texmgr.h. */
 #include "glide/mg.h"
+#include "backend/backend.h"
 #include "tex/texmgr.h"
 #include "tex/texfmt.h"
 #include "mga/sys.h"
@@ -145,7 +146,7 @@ void tex_reset(void)
     /* Resident 8x8 white TW16 texture for untextured fog/alpha paths. */
     white_off = heap_alloc(8 * 8 * 2);
     if (white_off) {
-        volatile uint16_t *p = (volatile uint16_t *)(mga_fb + white_off);
+        volatile uint16_t *p = (volatile uint16_t *)(mg_vram + white_off);
         for (i = 0; i < 64; i++)
             p[i] = 0xFFFF;
     }
@@ -424,7 +425,7 @@ static int ensure_block(int ri)
         if (victim < 0)
             return -1;
         if (recs[victim].last_frame == frame_clock)
-            engine_sync(200000);                /* it may still be referenced by queued draws */
+            mg_be->sync();                /* it may still be referenced by queued draws */
         rec_release_hw(&recs[victim]);
         off = heap_alloc(bytes);
     }
@@ -481,11 +482,11 @@ int tex_bind_level(GrLOD_t lod, const tex_variant *var, tex_level_hw *hw)
         tex_level_hw *lv = &r->hw[lod];
         int hw_w = 1 << lv->w_log2, hw_h = 1 << lv->h_log2, y, po = PROF_SWITCH(PROF_G_TEXDL);
         /* The level may still be read by queued draws. */
-        engine_sync(200000);
+        mg_be->sync();
         lv->hwfmt = tex_convert_level(r->fmt, r->shadow + r->shadow_off[lod], w, h, staging, hw_w, hw_w, hw_h,
                                       clamp_key & 1, (clamp_key >> 1) & 1, &tmu0.tables, -1, scratch, var);
         for (y = 0; y < hw_h; y++)
-            memcpy((void *)(mga_fb + lv->org + (uint32_t)(y * hw_w * 2)), staging + y * hw_w, (size_t)hw_w * 2);
+            memcpy((void *)(mg_vram + lv->org + (uint32_t)(y * hw_w * 2)), staging + y * hw_w, (size_t)hw_w * 2);
         r->hw_valid[lod] = 1;
         tex_vram_gen++;
         PROF_BACK(po);
