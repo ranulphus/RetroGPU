@@ -14,6 +14,8 @@
  * only by name. */
 #ifndef RG_DEVICE_H
 #define RG_DEVICE_H
+#include <stdarg.h>
+#include <stddef.h>
 #include "mga/types.h"
 
 /* A full-screen mode as a device offers it (DOS-GL's DGLMode, field for field). */
@@ -188,12 +190,21 @@ const rg_device *rg_choose(const char *want);       /* want: DGL_DEVICE (NULL or
 const rg_device *rg_choose_from(const rg_device *const *list, int n, const char *want);   /* (tests) */
 const rg_device *rg_window_device(void);            /* the device GLOS can give a window to, or NULL */
 const char *rg_error(void);                         /* why the last open, or the choice, failed */
-void rg_set_error(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+#if defined(__GNUC__)
+#  define RG_PRINTF(f, a) __attribute__((format(printf, f, a)))
+#else
+#  define RG_PRINTF(f, a)
+#endif
+void rg_set_error(const char *fmt, ...) RG_PRINTF(1, 2);
 /* The log: lines a device prints (its DGL- lines today) go to the program's
  * logger, set by the GL layer at its start; none until then. */
 void rg_set_log(void (*fn)(const char *line));
-void rg_logf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+void rg_logf(const char *fmt, ...) RG_PRINTF(1, 2);
 void rg_log_line(const char *line);                 /* one line, as it is */
+/* The formatter the log and the errors use (log.c): the C library's vsnprintf, but in Glide's Open Watcom runtime
+ * (no C library: glide/tools/abi/check_clib.py) none until the runtime gives its own (mg_vsnprintf); without one,
+ * the format string as it is. */
+void rg_set_format(int (*fn)(char *buf, size_t size, const char *fmt, va_list ap));
 /* Levels as DOS-GL's (dgl.h): 0 errors, 1 warnings (the default), 2 info,
  * 3 debug (DGL_DEBUG); lines above the level compile out. */
 #ifndef RG_LOG_LEVEL
@@ -204,9 +215,28 @@ void rg_log_line(const char *line);                 /* one line, as it is */
 #  endif
 #endif
 #define RG_ERR(...)  rg_logf(__VA_ARGS__)
+#if defined(__WATCOMC__)
+/* (Open Watcom calls a constant if's body unreachable, an error with -we: the levels by the preprocessor) */
+#  if RG_LOG_LEVEL >= 1
+#    define RG_WARN(...) rg_logf(__VA_ARGS__)
+#  else
+#    define RG_WARN(...) ((void)0)
+#  endif
+#  if RG_LOG_LEVEL >= 2
+#    define RG_INFO(...) rg_logf(__VA_ARGS__)
+#  else
+#    define RG_INFO(...) ((void)0)
+#  endif
+#  if RG_LOG_LEVEL >= 3
+#    define RG_DBG(...) rg_logf(__VA_ARGS__)
+#  else
+#    define RG_DBG(...) ((void)0)
+#  endif
+#else
 #define RG_WARN(...) do { if (RG_LOG_LEVEL >= 1) rg_logf(__VA_ARGS__); } while (0)
 #define RG_INFO(...) do { if (RG_LOG_LEVEL >= 2) rg_logf(__VA_ARGS__); } while (0)
 #define RG_DBG(...)  do { if (RG_LOG_LEVEL >= 3) rg_logf(__VA_ARGS__); } while (0)
+#endif
 extern const rg_device rg_mga_device, rg_virge_device, rg_tnt2_device, rg_vbe_device, rg_mem_device;
 
 #endif

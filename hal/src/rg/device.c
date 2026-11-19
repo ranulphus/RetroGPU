@@ -1,6 +1,7 @@
 /* device.c - RetroGPU's devices and the choice of one (rg/device.h;
  * gl/docs/b1.md). Built with the HAL for DJGPP, the host and the rig, not
- * into Glide's Open Watcom build. */
+ * into Glide's Open Watcom build (which takes its device itself; the log and
+ * the errors are log.c's). */
 #include "rg/device.h"
 #include <stdarg.h>
 #include <stdio.h>
@@ -13,39 +14,6 @@ static const rg_device *const devices[] = { &rg_mga_device, &rg_virge_device, &r
 #define NDEV ((int)(sizeof devices / sizeof devices[0]))
 
 
-static char error[160];
-static void (*log_fn)(const char *line);
-
-const char *rg_error(void) { return error; }
-
-void rg_set_error(const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(error, sizeof error, fmt, ap);
-    va_end(ap);
-}
-
-void rg_set_log(void (*fn)(const char *line)) { log_fn = fn; }
-
-void rg_log_line(const char *line)
-{
-    if (log_fn)
-        log_fn(line);
-}
-
-void rg_logf(const char *fmt, ...)
-{
-    char line[256];
-    va_list ap;
-    if (!log_fn)
-        return;
-    va_start(ap, fmt);
-    vsnprintf(line, sizeof line, fmt, ap);
-    va_end(ap);
-    log_fn(line);
-}
-
 const rg_device *rg_choose_from(const rg_device *const *list, int n, const char *want)
 {
     int i;
@@ -57,20 +25,22 @@ const rg_device *rg_choose_from(const rg_device *const *list, int n, const char 
         return NULL;
     }
     {
-        char why[sizeof error] = "";
+        char why[160] = "";
         for (i = 0; i < n; i++) {
             if (list[i]->flags & RG_DEV_BY_NAME)
                 continue;
-            error[0] = 0;
+            const char *e;
+            rg_set_error("%s", "");
             if (list[i]->probe() == 0)
                 return list[i];
-            if (error[0] && strlen(why) + strlen(error) + 3 < sizeof why) {
+            e = rg_error();
+            if (e[0] && strlen(why) + strlen(e) + 3 < sizeof why) {
                 if (why[0])
                     strcat(why, "; ");
-                strcat(why, error);             /* (each probe's reason, in order) */
+                strcat(why, e);                 /* (each probe's reason, in order) */
             }
         }
-        memcpy(error, why, sizeof error);
+        rg_set_error("%s", why);
     }
     return NULL;
 }

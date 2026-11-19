@@ -53,7 +53,7 @@ endif
 HAL_SRCS := $(addprefix $(MGAHAL)/hal/,src/debug/serial.c src/pci.c src/chip.c src/clocks.c src/vbe.c src/fifo.c \
               src/engine.c src/dac.c src/texhw.c src/present.c src/debug/regtrace.c src/setup/trap.c src/warp.c \
               src/blit.c src/cursor.c \
-              src/rg/device.c src/rg/glos.c src/rg/mga.c src/rg/mga_glos.c \
+              src/rg/device.c src/rg/log.c src/rg/glos.c src/rg/mga.c src/rg/mga_glos.c \
               src/virge/chip.c src/virge/engine2d.c src/virge/cursor.c src/virge/tri.c src/rg/virge.c \
               src/tnt2/tnt2.c src/rg/tnt2.c \
               src/rg/mem.c src/rg/vbe_soft.c src/soft/raster.c src/soft/texture.c port/djgpp.c)

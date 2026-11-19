@@ -16,7 +16,7 @@ UNIT_test_edges := $(UNIT_test_setupgold)
 # builds use: needs gcc-multilib (the dev container: tools/dev make tests-host).
 UNIT_test_fp :=
 UNIT_test_vram := hal/src/vram.c
-UNIT_test_rgdev := hal/src/rg/device.c
+UNIT_test_rgdev := hal/src/rg/device.c hal/src/rg/log.c
 UNIT_test_softcov := hal/src/soft/raster.c hal/src/soft/texture.c
 UNIT_test_softfmt := hal/src/soft/raster.c hal/src/soft/texture.c
 UNIT_test_softtile := hal/src/soft/raster.c hal/src/soft/texture.c

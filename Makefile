@@ -17,7 +17,10 @@ export WATCOM DJGPP_PREFIX MGA_CACHE OW_URL OW_SHA256 DJGPP_URL DJGPP_SHA256 CWS
 
 # ---- HAL -----------------------------------------------------------------
 HAL_COMMON := hal/src/debug/serial.c hal/src/debug/regtrace.c hal/src/pci.c hal/src/chip.c hal/src/clocks.c hal/src/vbe.c hal/src/fifo.c hal/src/engine.c hal/src/dac.c hal/src/texhw.c hal/src/present.c hal/src/setup/trap.c hal/src/vram.c hal/src/blit.c hal/src/cursor.c hal/src/warp.c
-HAL_OW     := $(HAL_COMMON) hal/port/ow_dos4g.c
+# Other vendors' cards in Glide's Open Watcom build (the device log, the Riva TNT2's device and layer: the TNT2's
+# Glide back end, glide/src/backend/tnt2); rg/device.c's list and the Matrox, ViRGE and memory devices stay DJGPP's.
+HAL_OW_RG  := hal/src/rg/log.c hal/src/rg/tnt2.c hal/src/tnt2/tnt2.c
+HAL_OW     := $(HAL_COMMON) $(HAL_OW_RG) hal/port/ow_dos4g.c
 HAL_DJGPP  := $(HAL_COMMON) hal/port/djgpp.c
 HAL_HOST   := $(HAL_COMMON) hal/port/host.c
 
@@ -102,7 +105,7 @@ build/djgpp/libtnt2.a: $(TNT2_SRCS:%.c=build/djgpp/%.o)
 # RetroGPU's device level (hal/include/rg, gl/docs/b1.md; docs/virge.md V3): the devices behind one table, the
 # Matrox one on the HAL, the ViRGE/DX's on its layer and the memory one (gl/docs/b2.md); RGDEV drives them through
 # the table alone.
-RG_SRCS := hal/src/rg/device.c hal/src/rg/glos.c hal/src/rg/mga.c hal/src/rg/mga_glos.c hal/src/rg/virge.c hal/src/rg/mem.c \
+RG_SRCS := hal/src/rg/device.c hal/src/rg/log.c hal/src/rg/glos.c hal/src/rg/mga.c hal/src/rg/mga_glos.c hal/src/rg/virge.c hal/src/rg/mem.c \
             hal/src/rg/vbe_soft.c hal/src/rg/tnt2.c
 $(RG_SRCS:%.c=build/djgpp/%.o): DJ_CFLAGS += -I$(GLOS)/include
 build/djgpp/librg.a: $(RG_SRCS:%.c=build/djgpp/%.o)

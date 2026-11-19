@@ -122,12 +122,22 @@ static int ring_put, ring_cur, ring_free;
 static uint32_t ring_laps;                      /* times the CPU has gone round (tnt2_mark's positions) */
 static const int ring_max = RING_DWORDS - 1;
 
+/* The CPU's write-combining buffers out to memory: a locked instruction (warp.c's wc_drain). */
+#if defined(__GNUC__) && defined(__i386__)
+static void wc_out(void) { __asm__ __volatile__("lock; orl $0, (%%esp)" ::: "memory"); }
+#elif defined(__WATCOMC__) && defined(__386__)
+void wc_out(void);
+#pragma aux wc_out = "lock or dword ptr [esp], 0" modify exact [];
+#else
+static void wc_out(void) { }
+#endif
+
 static void write_put(int put)
 {
     volatile uint8_t scratch = tnt2_fb[0];      /* (nv_local.h's WRITE_PUT: a read of video memory first, so the
                                                     ring's writes are out before the chip is told of them) */
     (void)scratch;
-    __asm__ __volatile__("lock; orl $0, (%%esp)" ::: "memory");
+    wc_out();
     FIFO[0x0010] = (uint32_t)put << 2;
 }
 
@@ -558,6 +568,10 @@ int tnt2_set_start(uint32_t byte_off)
 int tnt2_vsync_wait(uint32_t timeout_us)
 {
     uint32_t t0 = sys_time_us();
+#if defined(MGA_OW)
+    if (timeout_us < 110000u)
+        timeout_us = 110000u;                   /* (Watcom's clock is the BIOS tick: 55 ms steps, two at least) */
+#endif
     while (sys_inb(0x3DA) & 0x08)
         if (sys_time_us() - t0 >= timeout_us)
             return -1;
@@ -749,8 +763,9 @@ static uint32_t fbits(float f)
  * makes c the flat-shading vertex (OpenGL's: the last), as Mesa's. */
 void tnt2_tri(const tnt2_vertex *a, const tnt2_vertex *b, const tnt2_vertex *c)
 {
-    const tnt2_vertex *v[3] = { a, b, c };
+    const tnt2_vertex *v[3];
     int i;
+    v[0] = a, v[1] = b, v[2] = c;
     if (stale_3d) {
         if (t3d.set)
             send_target(0);
@@ -893,9 +908,11 @@ uint32_t tnt2_tex_load(uint32_t off, int cpp, int log2w, int log2h, int levels, 
         volatile uint32_t *d32;
         const uint32_t *s32;
         if (bytes > tmp_bytes) {
-            uint8_t *t = (uint8_t *)realloc(tmp, bytes);
+            uint8_t *t = (uint8_t *)sys_alloc(bytes);  /* (its old contents not needed: the port's, not realloc) */
             if (!t)
                 return off;
+            if (tmp)
+                sys_free(tmp);
             tmp = t, tmp_bytes = bytes;
         }
         for (x = 0; x < w; x++) {
@@ -968,9 +985,11 @@ uint32_t tnt2_tex_load_rgba8(uint32_t off, int fmt, int log2w, int log2h, int le
         volatile uint32_t *d32;
         const uint32_t *s32;
         if (bytes > tmp_bytes) {
-            uint8_t *t = (uint8_t *)realloc(tmp, bytes);
+            uint8_t *t = (uint8_t *)sys_alloc(bytes);  /* (its old contents not needed: the port's, not realloc) */
             if (!t)
                 return off;
+            if (tmp)
+                sys_free(tmp);
             tmp = t, tmp_bytes = bytes;
         }
         swizzle_tables(lw, lh);
