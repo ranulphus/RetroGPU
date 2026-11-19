@@ -212,7 +212,7 @@ int tnt2_sync(uint32_t timeout_us)
 #define RECT_EXPAND_TWO_COLOR_CLIP  0x0000CBE4u     /* clip, colour 0, colour 1, size in, size out, point, data */
 #define RECT_EXPAND_TWO_COLOR_DATA0 0x0000CC00u
 
-static int cur_bpp, cur_rop = -1;
+static int cur_bpp, cur_rop = -1, three_d;
 static uint32_t tgt_off;
 static int tgt_pitch;
 static int clip_x0, clip_y0, clip_x1 = 0x7FFF, clip_y1 = 0x7FFF;   /* (applied in software: below) */
@@ -244,7 +244,10 @@ void tnt2_set_target(uint32_t off, int pitch_bytes, int bpp)
     if (bpp != cur_bpp) {
         ring_start(PATTERN_FORMAT, 1); NEXT(other);
         ring_start(RECT_FORMAT, 1);    NEXT(other);
-        ring_start(LINE_FORMAT, 1);    NEXT(other);
+        if (!three_d) {                                 /* (subchannel 4 is the 3D surfaces' once 3D is on) */
+            ring_start(LINE_FORMAT, 1);
+            NEXT(other);
+        }
         cur_bpp = bpp;
     }
 }
@@ -496,6 +499,101 @@ int tnt2_vsync_wait(uint32_t timeout_us)
         if (sys_time_us() - t0 >= timeout_us)
             return -1;
     return 0;
+}
+
+/* ---- 3D (T2): the 3D surfaces (class 0x53) and the textured triangle (0x54), as Mesa's classic nouveau driver
+ * drives them (MIT; docs/tnt2.md lists what was taken). Objects as the X driver's 2D ones: instance words written
+ * here (class, patch valid; the DMA instances in word 2: VRAM, instance 0x1200) and found through RAMHT, so no DMA
+ * method is sent. Only methods the hardware itself handles are used: on the NV04 family the 3D surfaces' clip
+ * methods (0x2F8, 0x2FC) trap to a driver (nouveau emulates them), and with no interrupt handler here a trap would
+ * stall the engine; the 3D clip is written into PGRAPH instead (0x40053C-0x400548, as nouveau does). ---- */
+
+#define SUBCH(s, m) (((uint32_t)(s) << 13) | (uint32_t)(m))
+#define S3D 4                                   /* subchannel 4: the 3D surfaces (the line object's before) */
+#define TRI 7                                   /* subchannel 7: the textured triangle (the scaled image's before) */
+#define H_SURF3D 0x80000018u                    /* (RAMHT slots 8 and 9: the X driver's handles hash 0x80000010+i to i) */
+#define H_TTRI   0x80000019u
+#define DUMMY_TEX_OFF (tnt2.fb_usable + RING_DWORDS * 4u + SCRATCH_BYTES)   /* 1x1 A8R8G8B8 white, 128-byte aligned */
+
+uint32_t tnt2_tex_dummy_off(void) { return DUMMY_TEX_OFF; }
+
+uint32_t tnt2_3d_trap(uint32_t *addr, uint32_t *data)
+{
+    if (addr) *addr = PGRAPH[0x0704 / 4];       /* PGRAPH_TRAPPED_ADDR: the method (subchannel, method) */
+    if (data) *data = PGRAPH[0x0708 / 4];       /* PGRAPH_TRAPPED_DATA */
+    return PGRAPH[0x0100 / 4];                  /* PGRAPH_INTR */
+}
+
+int tnt2_3d_init(void)
+{
+    /* The objects: 0x53 at instance 0x120A (PRAMIN dwords 0x828-0x82B), 0x54 at 0x120B (0x82C-0x82F). */
+    PRAMIN[0x0828] = 0x01000053; PRAMIN[0x0829] = 0; PRAMIN[0x082A] = 0x12001200; PRAMIN[0x082B] = 0;
+    PRAMIN[0x082C] = 0x01000054; PRAMIN[0x082D] = 0; PRAMIN[0x082E] = 0x12001200; PRAMIN[0x082F] = 0;
+    PRAMIN[16] = H_SURF3D; PRAMIN[17] = 0x8001120A;
+    PRAMIN[18] = H_TTRI;   PRAMIN[19] = 0x8001120B;
+    tnt2_fb[DUMMY_TEX_OFF + 0] = 0xFF; tnt2_fb[DUMMY_TEX_OFF + 1] = 0xFF;
+    tnt2_fb[DUMMY_TEX_OFF + 2] = 0xFF; tnt2_fb[DUMMY_TEX_OFF + 3] = 0xFF;
+    three_d = 1;
+    ring_start(SUBCH(S3D, 0), 1); NEXT(H_SURF3D);
+    ring_start(SUBCH(TRI, 0), 1); NEXT(H_TTRI);
+    ring_start(SUBCH(TRI, 0x18C), 1); NEXT(H_SURF3D);     /* SURFACES: the 3D surfaces object (in hardware) */
+    return tnt2_sync(200000) == 0 && PGRAPH[0x0100 / 4] == 0 ? 0 : -1;   /* (PGRAPH_INTR: nothing trapped) */
+}
+
+/* The colour buffer at color_off and the Z buffer at zeta_off, both pitch_bytes apart (a multiple of 64; the
+ * Z buffer's bits a pixel are the colour's: 16-bit Z with 16-bit colour, 24-bit Z and 8 of stencil with 32), the
+ * 3D clip w x h. */
+void tnt2_3d_target(uint32_t color_off, uint32_t zeta_off, int pitch_bytes, int bpp, int w, int h)
+{
+    ring_start(SUBCH(S3D, 0x30C), 2);                   /* OFFSET_COLOR, OFFSET_ZETA */
+    NEXT(color_off);
+    NEXT(zeta_off);
+    ring_start(SUBCH(S3D, 0x300), 1);                   /* FORMAT: pitch-linear, R5G6B5 or X8R8G8B8 */
+    NEXT(bpp == 32 ? 0x105u : 0x103u);
+    ring_start(SUBCH(S3D, 0x308), 1);                   /* PITCH: zeta high, colour low */
+    NEXT(((uint32_t)pitch_bytes << 16) | (uint32_t)pitch_bytes);
+    tnt2_sync(1000000);                                 /* (the clip straight into PGRAPH, the engine idle) */
+    PGRAPH[0x053C / 4] = 0;
+    PGRAPH[0x0540 / 4] = 0;
+    PGRAPH[0x0544 / 4] = (uint32_t)w & 0x3FFFF;
+    PGRAPH[0x0548 / 4] = (uint32_t)h & 0x3FFFF;
+}
+
+/* The triangle object's whole state block (Mesa sends it before every run of triangles): COLORKEY, the texture's
+ * OFFSET, FORMAT and FILTER, BLEND, CONTROL, FOGCOLOR. */
+void tnt2_3d_state(uint32_t tex_off, uint32_t format, uint32_t filter, uint32_t blend, uint32_t control,
+                   uint32_t fogcolor)
+{
+    ring_start(SUBCH(TRI, 0x300), 7);
+    NEXT(0);
+    NEXT(tex_off);
+    NEXT(format);
+    NEXT(filter);
+    NEXT(blend);
+    NEXT(control);
+    NEXT(fogcolor);
+}
+
+static uint32_t fbits(float f)
+{
+    union { float f; uint32_t u; } c;
+    c.f = f;
+    return c.u;
+}
+
+/* Three vertices into slots 0-2, then DRAWPRIMITIVE(0) = 0x102: (c, a, b), a rotation that keeps the winding and
+ * makes c the flat-shading vertex (OpenGL's: the last), as Mesa's. */
+void tnt2_tri(const tnt2_vertex *a, const tnt2_vertex *b, const tnt2_vertex *c)
+{
+    const tnt2_vertex *v[3] = { a, b, c };
+    int i;
+    ring_start(SUBCH(TRI, 0x400), 24);
+    for (i = 0; i < 3; i++) {
+        NEXT(fbits(v[i]->sx)); NEXT(fbits(v[i]->sy)); NEXT(fbits(v[i]->sz)); NEXT(fbits(v[i]->rhw));
+        NEXT(v[i]->color); NEXT(v[i]->specular); NEXT(fbits(v[i]->tu)); NEXT(fbits(v[i]->tv));
+    }
+    ring_start(SUBCH(TRI, 0x600), 1);
+    NEXT(0x102);
 }
 
 /* ---- the set-up (nv_hw.c's NVLoadStateExt for NV_ARCH_04, no display state) ---- */

@@ -114,6 +114,8 @@ DJ_SRC_VPROBE := tests/virge/vprobe.c
 DJ_SRC_NPROBE := tests/tnt2/nprobe.c
 # NTWOD (T1: the first 2D, fills and copies, against sw2d.c).
 DJ_SRC_NTWOD := tests/tnt2/ntwod.c tests/hal/sw2d.c build/djgpp/libtnt2.a
+# NTRI0 (T2's bring-up: the 3D objects and one Gouraud triangle).
+DJ_SRC_NTRI0 := tests/tnt2/ntri0.c build/djgpp/libtnt2.a
 DJ_SRC_VTWOD := tests/virge/vtwod.c tests/hal/sw2d.c build/djgpp/libvirge.a
 DJ_SRC_VTRI := tests/virge/vtri.c build/djgpp/libvirge.a
 build/djgpp/HOOKS.EXE: tests/hal/hooks.c
@@ -136,6 +138,7 @@ build/djgpp/VPROBE.EXE: tests/virge/vprobe.c
 build/djgpp/NPROBE.EXE: tests/tnt2/nprobe.c
 build/djgpp/NTWOD.EXE: tests/tnt2/ntwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libtnt2.a
 build/djgpp/NTWOD.EXE: DJ_CFLAGS += -Itests/hal
+build/djgpp/NTRI0.EXE: tests/tnt2/ntri0.c build/djgpp/libtnt2.a
 build/djgpp/VTWOD.EXE: tests/virge/vtwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libvirge.a
 build/djgpp/VTWOD.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/VTRI.EXE: tests/virge/vtri.c build/djgpp/libvirge.a

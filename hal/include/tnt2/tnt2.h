@@ -59,4 +59,22 @@ void tnt2_cursor_move(int x, int y);
 int  tnt2_set_start(uint32_t byte_off);
 int  tnt2_vsync_wait(uint32_t timeout_us);
 
+/* 3D (T2, bring-up): the 3D surfaces and the textured triangle (classes 0x53 and 0x54) on subchannels 4 and 7.
+ * Vertices are Direct3D's TLVERTEX: window x and y in pixels, z in [0, 1], 1/w, colour and specular as A8R8G8B8
+ * (specular's top byte the fog factor), u and v. tnt2_3d_state takes the triangle object's words as the chip has
+ * them (docs/tnt2.md): the texture's offset, FORMAT, FILTER, BLEND, CONTROL and the fog colour. tnt2_3d_trap:
+ * PGRAPH's interrupt status (nonzero: a method trapped, and the engine waits), with the trapped method and data. */
+typedef struct {
+    float sx, sy, sz, rhw;
+    uint32_t color, specular;
+    float tu, tv;
+} tnt2_vertex;
+int      tnt2_3d_init(void);
+void     tnt2_3d_target(uint32_t color_off, uint32_t zeta_off, int pitch_bytes, int bpp, int w, int h);
+void     tnt2_3d_state(uint32_t tex_off, uint32_t format, uint32_t filter, uint32_t blend, uint32_t control,
+                       uint32_t fogcolor);
+void     tnt2_tri(const tnt2_vertex *a, const tnt2_vertex *b, const tnt2_vertex *c);
+uint32_t tnt2_tex_dummy_off(void);      /* a 1x1 white A8R8G8B8 texel in VRAM, for untextured triangles */
+uint32_t tnt2_3d_trap(uint32_t *addr, uint32_t *data);
+
 #endif

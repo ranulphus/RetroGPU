@@ -100,6 +100,27 @@ RetroGPU is MIT, so code is written from documentation and from MIT-licensed dri
   (all as written).
 - **Still T1's:** the cursor and a page flip seen on the P3's screen (the owner's eyes, as the ViRGE's mode test).
 
+## T2 so far (the P3, 2026-11-19)
+
+- **References:** Mesa's classic nouveau driver for the NV04 family (Mesa 20.3.5, `src/mesa/drivers/dri/nouveau/nv04_*`
+  and `nv04_3d.xml.h`: MIT, Francisco Jerez and the Nouveau Project) for the 3D objects' methods, state words and the
+  texture layout; the Linux kernel's nouveau NV04 graphics engine (`nvkm/engine/gr/nv04.c`, MIT, Stephane Marchesin)
+  for the objects in instance memory and which methods the hardware handles itself.
+- **What only a driver does on the NV04 family:** many object-binding methods and the 3D surfaces' clip methods
+  (0x2F8, 0x2FC) trap to the driver (nouveau emulates them in its interrupt handler); with no interrupt handler here
+  a trap would stall the engine. So the layer sends only methods the hardware takes: the objects' DMA instances are
+  written into their instance words (VRAM, instance 0x1200), as the X driver's 2D objects are, and the 3D clip goes
+  straight into PGRAPH (0x40053C-0x400548) with the engine idle, as nouveau's emulation does. The textured triangle's
+  SURFACES method is the hardware's own.
+- **The bring-up:** the 3D surfaces (0x53) on subchannel 4 and the textured triangle (0x54) on 7, through RAMHT
+  slots 8 and 9; the surfaces' offsets, format (R5G6B5 or X8R8G8B8, pitch-linear) and pitch; the triangle's state
+  block (the texture, BLEND, CONTROL, fog colour); vertices as Direct3D's TLVERTEX into slots 0-2 and DRAWPRIMITIVE
+  0x102; untextured drawing through a 1x1 white texel modulated (Mesa's way).
+- **`NTRI0`** (`tests/tnt2/ntri0.c`): one Gouraud triangle at 640x480x16: nothing trapped, its coverage exactly
+  OpenGL's (58,057 pixels, none outside, none missing) and the corners' colours right, at the first attempt.
+- **Next in T2:** textures (swizzled upload, the formats, filters, mipmaps), Z (clear, test, write), blending, fog,
+  culling; then `NTRI` with VTRI's scenes against OpenGL's rules.
+
 ## How it fits RetroGPU
 
 As for the ViRGE: a **register layer** in `hal/` (the FIFO, the objects, 2D and 3D), a **device** on B1's interface
