@@ -89,7 +89,7 @@ check-clib: build/ow/GLIDE2X.OVL
 	$(PYTHON) glide/tools/abi/check_clib.py build/ow/GLIDE2X.map
 
 # ---- Host trace replay (glide/tools/hreplay) --------------------------------------
-HR_SRCS := $(RT_SRCS) $(HAL_HOST) tests/unit/refrast.c glide/tools/hreplay/hreplay.c
+HR_SRCS := $(RT_SRCS) $(HAL_HOST) $(HAL_OW_RG) tests/unit/refrast.c glide/tools/hreplay/hreplay.c
 HR_GEN  := build/gen/thunks.c build/gen/stubs.c build/gen/api_names.c build/gen/replay_gen.c build/gen/glapi_static.c
 build/host32/hreplay: $(HR_SRCS) $(HR_GEN) $(wildcard glide/src/*/*.h hal/include/mga/*.h tests/unit/*.h tests/shim/*.h)
 	@mkdir -p $(dir $@)
