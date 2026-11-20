@@ -61,6 +61,13 @@ static void pat_init(void)
 
 static uint32_t row_off(uint32_t y) { return (y * 37u + lk.seed) & 1023u; }
 
+/* The shadow as the last write-back left it: in 555 and 888 modes the pattern holds values a game can't write
+ * (above), so it can stay the same from lock to lock, and a lock then fills again only the rows the write-back found
+ * written (GTA's two 555 locks a frame refilled 480 rows each: ~9 ms a frame on the P3). Valid only after a complete
+ * write-back of a lock in the same mode, stride and size; anything else that writes the shadow clears it. */
+static struct { int valid; GrLfbWriteMode_t mode; uint32_t stride, w, h; } fill;
+static uint8_t touched[2048];
+
 static const uint16_t *srow16(uint32_t y)
 {
     return (lk.mode == GR_LFBWRITEMODE_555 ? pat16_555 : pat16) + row_off(y);
@@ -220,15 +227,55 @@ static int need_shadow(GrLock_t type, GrBuffer_t buffer, GrLfbWriteMode_t mode, 
            mg.bpp != 16;
 }
 
+/* Counts for MGL-LFB (with MGL-STAT): locks, written pixels through the pipeline, those that read the
+ * destination (blending) or the depth buffer, rows with writes, and the blend and chroma state last seen. */
+static struct { uint32_t locks, px, dst_reads, z_reads, rows, blend, chroma; } lfb_n;
+
+#ifdef MGA_PROF
+/* (profiling builds, once at the first pipeline lock) what the write-back's parts cost on this PC, in cycles:
+ * a 16-bit store to video memory (13,000 in rows of 640 of the back buffer: one frame may show them), a
+ * 1280-byte memcmp in system memory, and one row's fill from the patterns. */
+static void lfb_measure(void)
+{
+    static int done;
+    uint32_t i, n = 13000, row = (uint32_t)mg.pitch_px * 2u, sum = 0;
+    uint64_t t0, t1, t2, t3;
+    volatile uint16_t *v = (volatile uint16_t *)(mg_vram + mg_buffer_offset(GR_BUFFER_BACKBUFFER));
+    if (done || !shadow || shadow_size < 2u * SHADOW_STRIDE16)
+        return;
+    done = 1;
+    fill.valid = 0;                                     /* (row 1 written below) */
+    t0 = prof_rdtsc();
+    for (i = 0; i < n; i++)
+        v[(i / 640u) * (row / 2u) + i % 640u] = (uint16_t)i;
+    t1 = prof_rdtsc();
+    for (i = 0; i < 480; i++)
+        sum += !memcmp(shadow, shadow + SHADOW_STRIDE16, 1280);
+    t2 = prof_rdtsc();
+    for (i = 0; i < 480; i++)
+        memcpy(shadow + SHADOW_STRIDE16, srow16(i), 1280);
+    t3 = prof_rdtsc();
+    mg_line("MGL-LFBCOST vram_store16=%lu memcmp1280=%lu rowfill1280=%lu (cycles each; %lu)",
+            (unsigned long)((t1 - t0) / n), (unsigned long)((t2 - t1) / 480), (unsigned long)((t3 - t2) / 480),
+            (unsigned long)sum);
+}
+#endif
+
 static FxBool lock(GrLock_t type, GrBuffer_t buffer, GrLfbWriteMode_t writeMode, GrOriginLocation_t origin,
                    FxBool pixelPipeline, GrLfbInfo_t *info)
 {
     uint32_t off;
+    lfb_n.locks++;
     if (!mg.open || !info)
         return FXFALSE;
     if (lk.active)
         grLfbUnlock(GR_LFB_WRITE_ONLY, lk.buffer);
-    mg_be->sync();
+    {
+        int ps = PROF_SWITCH(PROF_G_LFBSYNC);
+        mg_be->sync();
+        PROF_BACK(ps);
+        MGA_UNUSED(ps);
+    }
     if (origin == GR_ORIGIN_ANY)
         origin = mg.st.origin;
     if (writeMode == GR_LFBWRITEMODE_ANY)
@@ -253,6 +300,7 @@ static FxBool lock(GrLock_t type, GrBuffer_t buffer, GrLfbWriteMode_t writeMode,
         uint32_t stride = is32(writeMode) ? SHADOW_STRIDE32 : SHADOW_STRIDE16;
         uint32_t need = stride * (uint32_t)mg.height, x, y;
         if (need > shadow_size) {
+            fill.valid = 0;
             sys_free(shadow);
             shadow = (uint8_t *)sys_alloc(need);
             shadow_size = shadow ? need : 0;
@@ -261,9 +309,9 @@ static FxBool lock(GrLock_t type, GrBuffer_t buffer, GrLfbWriteMode_t writeMode,
                 return FXFALSE;
             }
         }
-        lk.seed = lk.seed * 1664525u + 1013904223u + mg.frame;
         if ((type & 1) == GR_LFB_READ_ONLY) {
             /* Read locks through a shadow: convert the buffer out. */
+            fill.valid = 0;
             for (y = 0; y < (uint32_t)mg.height; y++) {
                 uint32_t sy = origin == GR_ORIGIN_LOWER_LEFT ? (uint32_t)mg.height - 1 - y : y;
                 uint16_t *d = (uint16_t *)(shadow + y * SHADOW_STRIDE16);
@@ -280,11 +328,27 @@ static FxBool lock(GrLock_t type, GrBuffer_t buffer, GrLfbWriteMode_t writeMode,
         }
         if (!pat_ready)
             pat_init();
-        for (y = 0; y < (uint32_t)mg.height; y++) {
-            if (stride == SHADOW_STRIDE32)
-                memcpy(shadow + y * stride, srow32(y), (uint32_t)mg.width * 4u);
-            else
-                memcpy(shadow + y * stride, srow16(y), (uint32_t)mg.width * 2u);
+#ifdef MGA_PROF
+        if (pixelPipeline)
+            lfb_measure();
+#endif
+        {
+            int keep = fill.valid && fill.mode == writeMode && fill.stride == stride && fill.w == (uint32_t)mg.width &&
+                       fill.h == (uint32_t)mg.height && (writeMode == GR_LFBWRITEMODE_555 ||
+                                                         writeMode == GR_LFBWRITEMODE_888);
+            if (!keep)
+                lk.seed = lk.seed * 1664525u + 1013904223u + mg.frame;
+            for (y = 0; y < (uint32_t)mg.height; y++) {
+                if (keep && !touched[y])
+                    continue;
+                if (stride == SHADOW_STRIDE32)
+                    memcpy(shadow + y * stride, srow32(y), (uint32_t)mg.width * 4u);
+                else
+                    memcpy(shadow + y * stride, srow16(y), (uint32_t)mg.width * 2u);
+            }
+            memset(touched, 0, sizeof touched);
+            fill.valid = 0;                     /* (until this lock's write-back has seen every row) */
+            fill.mode = writeMode, fill.stride = stride, fill.w = (uint32_t)mg.width, fill.h = (uint32_t)mg.height;
         }
         MGA_UNUSED(x);
         info->lfbPtr = shadow;
@@ -344,6 +408,15 @@ static int blend_factor(GrAlphaBlendFnc_t f, int is_src, int own, int other, int
 }
 
 
+void mg_lfb_stat_line(void)
+{
+    mg_line("MGL-LFB locks=%lu px=%lu dst_reads=%lu z_reads=%lu rows=%lu blend=%lx chroma=%lu",
+            (unsigned long)lfb_n.locks, (unsigned long)lfb_n.px, (unsigned long)lfb_n.dst_reads,
+            (unsigned long)lfb_n.z_reads, (unsigned long)lfb_n.rows, (unsigned long)lfb_n.blend,
+            (unsigned long)lfb_n.chroma);
+    memset(&lfb_n, 0, sizeof lfb_n);
+}
+
 /* One pipeline pixel: src is ARGB8888; depth is a Glide depth value. */
 static void pipe_pixel(uint32_t src, uint16_t depth, uint8_t *row, uint32_t px, uint16_t *z16, uint32_t *z32)
 {
@@ -358,6 +431,7 @@ static void pipe_pixel(uint32_t src, uint16_t depth, uint8_t *row, uint32_t px, 
     if (s->depth_mode != GR_DEPTHBUFFER_DISABLE && mg.has_aux) {
         int wmode = s->depth_mode == GR_DEPTHBUFFER_WBUFFER || s->depth_mode == GR_DEPTHBUFFER_WBUFFER_COMPARE_TO_BIAS;
         uint32_t dv = mg_depth_clear_value(depth), cur = mg.zbits == 32 ? *z32 : *z16;
+        lfb_n.z_reads++;
         if (!cmp_pass(wmode ? reversed(s->depth_func) : s->depth_func, dv, cur))
             return;
         if (s->depth_mask) {
@@ -371,6 +445,7 @@ static void pipe_pixel(uint32_t src, uint16_t depth, uint8_t *row, uint32_t px, 
         out = src;
     } else {
         uint32_t d = load_argb(row, px);
+        lfb_n.dst_reads++;
         for (k = 0; k < 24; k += 8) {
             int sc = (int)((src >> k) & 0xFF), dc = (int)((d >> k) & 0xFF), v;
             int fs = blend_factor(s->blend_src, 1, sc, dc, sa, 255);
@@ -420,10 +495,39 @@ static uint32_t decode_lfb(uint32_t v, uint16_t *depth)
     }
 }
 
+/* Whether a row is still the pattern. Open Watcom's memcmp goes a byte at a time (5,216 cycles for 1280 bytes on
+ * the P3, about 4 a byte, ~11 ms a frame of GTA's two pipeline locks), so there it is a dword at a time; n is even,
+ * and x86 reads the pattern rows' half-dword-aligned dwords. */
+static int same_row(const void *a, const void *b, uint32_t n)
+{
+#if defined(__WATCOMC__)
+    const uint32_t *p = (const uint32_t *)a, *q = (const uint32_t *)b;
+    uint32_t i, w = n >> 2;
+    for (i = 0; i < w; i++)
+        if (p[i] != q[i])
+            return 0;
+    return !(n & 2) || ((const uint16_t *)a)[n / 2 - 1] == ((const uint16_t *)b)[n / 2 - 1];
+#else
+    return !memcmp(a, b, n);
+#endif
+}
+
+/* The pixel pipeline when it leaves a pixel as written (no chroma key, no depth test, colour written, blending
+ * ONE/ZERO, not scaled): the write-back then converts and stores each written pixel directly, with the alpha test
+ * still applied, the same result as pipe_pixel's without its calls (GTA's HUD: ~400 cycles a pixel saved). */
+static int pipe_plain(void)
+{
+    const mg_state *s = &mg.st;
+    return s->chroma_mode != GR_CHROMAKEY_ENABLE && !(s->depth_mode != GR_DEPTHBUFFER_DISABLE && mg.has_aux) &&
+           s->color_mask_rgb && s->blend_src == GR_BLEND_ONE && s->blend_dst == GR_BLEND_ZERO && !mg.scaled;
+}
+
 static void write_back(void)
 {
     uint32_t off = mg_buffer_offset(lk.buffer), x, y;
-    int depth_buf = lk.buffer == GR_BUFFER_AUXBUFFER;
+    int depth_buf = lk.buffer == GR_BUFFER_AUXBUFFER, plain = lk.pipe && pipe_plain(), w32 = is32(lk.mode);
+    const mg_state *st = &mg.st;
+    int alpha_test = st->alpha_test_func != GR_CMP_ALWAYS;
     for (y = 0; y < (uint32_t)mg.height; y++) {
         uint32_t dy = lk.origin == GR_ORIGIN_LOWER_LEFT ? (uint32_t)mg.height - 1 - y : y;
         if (lk.pipe) {
@@ -433,8 +537,42 @@ static void write_back(void)
             const uint16_t *p16 = srow16(y);
             /* Untouched rows skipped whole, as below (each pixel equal to the pattern is skipped anyway): GTA's two
              * pipeline locks a frame write a few rows. */
-            if (is32(lk.mode) ? !memcmp(s32, p32, (uint32_t)mg.width * 4u) : !memcmp(s16, p16, (uint32_t)mg.width * 2u))
+            if (is32(lk.mode) ? same_row(s32, p32, (uint32_t)mg.width * 4u) : same_row(s16, p16, (uint32_t)mg.width * 2u))
                 continue;
+            lfb_n.rows++;
+            touched[y & 2047u] = 1;
+            lfb_n.blend = (uint32_t)mg.st.blend_src << 8 | (uint32_t)mg.st.blend_dst;
+            lfb_n.chroma = mg.st.chroma_mode == GR_CHROMAKEY_ENABLE;
+            if (plain) {
+                /* (the mode tested once a row; 16-bit rows two pixels to a dword until one differs) */
+                uint8_t *row = crow(off, dy);
+                uint32_t w = (uint32_t)mg.width, xe;
+                for (x = 0; x < w; x = xe) {
+                    uint32_t v, argb;
+                    uint16_t d;
+                    xe = x + 1;
+                    if (w32) {
+                        if ((v = s32[x]) == p32[x])
+                            continue;
+                    } else {
+#if defined(__WATCOMC__)
+                        if (!(x & 1) && x + 1 < w &&
+                            ((const uint32_t *)s16)[x / 2] == *(const uint32_t *)(p16 + x)) {
+                            xe = x + 2;
+                            continue;
+                        }
+#endif
+                        if ((v = s16[x]) == p16[x])
+                            continue;
+                    }
+                    lfb_n.px++;
+                    argb = decode_lfb(v, &d);
+                    if (alpha_test && !cmp_pass(st->alpha_test_func, argb >> 24, st->alpha_test_ref))
+                        continue;
+                    store_argb(row, x, argb);
+                }
+                continue;
+            }
             for (x = 0; x < (uint32_t)mg.width; x++) {
                 uint32_t v, sv;
                 uint16_t d;
@@ -445,6 +583,7 @@ static void write_back(void)
                 }
                 if (v == sv)
                     continue;
+                lfb_n.px++;
                 {
                     uint32_t argb = decode_lfb(v, &d);   /* before d is read: argument order is unspecified */
                     wrpipe(off, x, dy, argb, d);
@@ -454,8 +593,9 @@ static void write_back(void)
         }
         if (is32(lk.mode)) {
             const uint32_t *s = (const uint32_t *)(shadow + y * SHADOW_STRIDE32), *pr = srow32(y);
-            if (!memcmp(s, pr, (uint32_t)mg.width * 4u))
+            if (same_row(s, pr, (uint32_t)mg.width * 4u))
                 continue;                                   /* untouched row */
+            touched[y & 2047u] = 1;
             for (x = 0; x < (uint32_t)mg.width; x++) {
                 uint32_t v = s[x], sv = pr[x];
                 uint16_t c;
@@ -478,8 +618,9 @@ static void write_back(void)
             }
         } else {
             const uint16_t *s = (const uint16_t *)(shadow + y * SHADOW_STRIDE16), *pr = srow16(y);
-            if (!memcmp(s, pr, (uint32_t)mg.width * 2u))
+            if (same_row(s, pr, (uint32_t)mg.width * 2u))
                 continue;                                   /* untouched row */
+            touched[y & 2047u] = 1;
             for (x = 0; x < (uint32_t)mg.width; x++) {
                 uint16_t v = s[x], sv = pr[x];
                 if (v == sv)
@@ -493,6 +634,7 @@ static void write_back(void)
             }
         }
     }
+    fill.valid = mg.height <= 2048 && fill.h == (uint32_t)mg.height;   /* (every row seen: rows to refill known) */
 }
 
 /* Tracing: the pixels written through the current lock, as spans
@@ -577,8 +719,12 @@ GR_ENTRY(FxBool, grLfbUnlock, (GrLock_t type, GrBuffer_t buffer))
         return FXFALSE;
     po = PROF_SWITCH(PROF_G_LFB);
     if (lk.shadow && (type & 1) == GR_LFB_WRITE_ONLY) {
+        int ps = PROF_SWITCH(PROF_G_LFBSYNC);
         mg_be->sync();
+        PROF_SWITCH(PROF_G_LFBWB);
         write_back();
+        PROF_BACK(ps);
+        MGA_UNUSED(ps);
     }
     if ((type & 1) == GR_LFB_WRITE_ONLY && lk.buffer == GR_BUFFER_FRONTBUFFER)
         mg_present_front();

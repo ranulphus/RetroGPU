@@ -132,6 +132,7 @@ typedef struct {
 } mg_stats_t;
 extern mg_stats_t mg_stats;
 void mg_frame_end(void);
+void mg_lfb_stat_line(void);            /* (lfb.c: MGL-LFB, with each MGL-STAT) */
 #ifdef MGA_REGCRC
 void mg_regcrc(const char *at);         /* (REGCRC=1 builds: the MGL-REGCRC line, sst.c) */
 #endif
@@ -151,7 +152,9 @@ enum {
     PROF_G_VERT,                /* within a triangle: setup vertices, alpha, fog and validation */
     PROF_G_LOD,                 /* within a triangle: the level planes and the bands */
     PROF_G_WARP,                /* within a triangle: the WARP's vertices */
-    PROF_G_LFB                  /* grLfbLock and grLfbUnlock: syncs, shadows, write-back, the pixel pipeline */
+    PROF_G_LFB,                 /* grLfbLock and grLfbUnlock: the shadow's fill and the rest */
+    PROF_G_LFBSYNC,             /* within them: waiting for the engine */
+    PROF_G_LFBWB                /* within them: the write-back (the pixel pipeline) */
 };
 
 /* FPU control for entry points that do float maths (see fp.h). */
