@@ -321,6 +321,7 @@ int rg_mga_window_ok(void) { return 0; }
 int rg_mga_window_modes(rg_mode *out, int max) { (void)out; (void)max; return 0; }
 int rg_mga_glos_open(const rg_open *o, rg_opened *out) { (void)o; (void)out; return -1; }
 void rg_mga_glos_show(uint32_t off) { (void)off; }
+int rg_mga_glos_shown(void) { return 0; }
 void rg_mga_glos_slow(void) { }
 void rg_mga_glos_close(void) { }
 
