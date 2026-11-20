@@ -24,6 +24,7 @@ typedef struct {
     tex_level_hw hw[9];
     uint8_t  hw_valid[9];
     uint32_t hw_pal_gen, hw_ncc_gen, hw_var;
+    uint32_t *hw_pal;                       /* palettised: the palette its levels were converted with (1 KB) */
     int      hw_clamp;
     uint32_t last_frame;
 } tex_rec;
@@ -118,6 +119,8 @@ static void rec_free(int i)
     tex_rec *r = &recs[i];
     rec_release_hw(r);
     sys_free(r->shadow);
+    if (r->hw_pal)
+        sys_free(r->hw_pal);
     memset(r, 0, sizeof *r);
     if (tmu0.rec == i)
         tmu0.rec = -1;
@@ -474,9 +477,20 @@ int tex_bind_level(GrLOD_t lod, const tex_variant *var, tex_level_hw *hw)
     palettised = r->fmt == GR_TEXFMT_P_8 || r->fmt == GR_TEXFMT_AP_88;
     nccfmt = r->fmt == GR_TEXFMT_YIQ_422 || r->fmt == GR_TEXFMT_AYIQ_8422;
     tex_dims(lod, r->aspect, &w, &h);
-    if ((palettised && r->hw_pal_gen != tmu0.pal_gen) || (nccfmt && r->hw_ncc_gen != tmu0.ncc_gen) ||
+    /* A palettised texture is converted again only when the palette differs from the one its levels were made
+     * with: games that load a palette before each texture they draw (Screamer Rally: ~80 a frame, each texture
+     * with its own) would otherwise convert every texture at every draw (the generation alone changes each time). */
+    if ((palettised && r->hw_pal_gen != tmu0.pal_gen &&
+         (!r->hw_pal || memcmp(r->hw_pal, tmu0.tables.palette, sizeof tmu0.tables.palette))) ||
+        (nccfmt && r->hw_ncc_gen != tmu0.ncc_gen) ||
         ((w < 8 || h < 8) && r->hw_clamp != clamp_key) || r->hw_var != vkey) {
         memset(r->hw_valid, 0, sizeof r->hw_valid);
+        if (palettised) {
+            if (!r->hw_pal)
+                r->hw_pal = (uint32_t *)sys_alloc(sizeof tmu0.tables.palette);
+            if (r->hw_pal)
+                memcpy(r->hw_pal, tmu0.tables.palette, sizeof tmu0.tables.palette);
+        }
         r->hw_pal_gen = tmu0.pal_gen;
         r->hw_ncc_gen = tmu0.ncc_gen;
         r->hw_clamp = clamp_key;

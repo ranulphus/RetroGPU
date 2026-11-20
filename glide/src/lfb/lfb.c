@@ -220,8 +220,8 @@ static int need_shadow(GrLock_t type, GrBuffer_t buffer, GrLfbWriteMode_t mode, 
            mg.bpp != 16;
 }
 
-GR_ENTRY(FxBool, grLfbLock, (GrLock_t type, GrBuffer_t buffer, GrLfbWriteMode_t writeMode,
-                             GrOriginLocation_t origin, FxBool pixelPipeline, GrLfbInfo_t *info))
+static FxBool lock(GrLock_t type, GrBuffer_t buffer, GrLfbWriteMode_t writeMode, GrOriginLocation_t origin,
+                   FxBool pixelPipeline, GrLfbInfo_t *info)
 {
     uint32_t off;
     if (!mg.open || !info)
@@ -431,6 +431,10 @@ static void write_back(void)
             const uint16_t *s16 = (const uint16_t *)(shadow + y * SHADOW_STRIDE16);
             const uint32_t *p32 = srow32(y);
             const uint16_t *p16 = srow16(y);
+            /* Untouched rows skipped whole, as below (each pixel equal to the pattern is skipped anyway): GTA's two
+             * pipeline locks a frame write a few rows. */
+            if (is32(lk.mode) ? !memcmp(s32, p32, (uint32_t)mg.width * 4u) : !memcmp(s16, p16, (uint32_t)mg.width * 2u))
+                continue;
             for (x = 0; x < (uint32_t)mg.width; x++) {
                 uint32_t v, sv;
                 uint16_t d;
@@ -555,11 +559,23 @@ void tr_lfb_unlock_spans(GrLock_t type, GrBuffer_t buffer)
     tr_end();
 }
 
+GR_ENTRY(FxBool, grLfbLock, (GrLock_t type, GrBuffer_t buffer, GrLfbWriteMode_t writeMode,
+                             GrOriginLocation_t origin, FxBool pixelPipeline, GrLfbInfo_t *info))
+{
+    int po = PROF_SWITCH(PROF_G_LFB);
+    FxBool r = lock(type, buffer, writeMode, origin, pixelPipeline, info);
+    PROF_BACK(po);
+    MGA_UNUSED(po);
+    return r;
+}
+
 GR_ENTRY(FxBool, grLfbUnlock, (GrLock_t type, GrBuffer_t buffer))
 {
+    int po;
     MGA_UNUSED(buffer);
     if (!lk.active)
         return FXFALSE;
+    po = PROF_SWITCH(PROF_G_LFB);
     if (lk.shadow && (type & 1) == GR_LFB_WRITE_ONLY) {
         mg_be->sync();
         write_back();
@@ -567,6 +583,8 @@ GR_ENTRY(FxBool, grLfbUnlock, (GrLock_t type, GrBuffer_t buffer))
     if ((type & 1) == GR_LFB_WRITE_ONLY && lk.buffer == GR_BUFFER_FRONTBUFFER)
         mg_present_front();
     lk.active = 0;
+    PROF_BACK(po);
+    MGA_UNUSED(po);
     return FXTRUE;
 }
 

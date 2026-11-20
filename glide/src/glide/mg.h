@@ -137,8 +137,8 @@ void mg_regcrc(const char *at);         /* (REGCRC=1 builds: the MGL-REGCRC line
 #endif
 
 /* Glide's profiling stages (MGA_PROF builds, hal/include/mga/prof.h): the
- * MGL-PROF line at each MGL-STAT. Time in LFB and texture API calls stays
- * in app. */
+ * MGL-PROF line at each MGL-STAT. Time in texture API calls stays in app;
+ * the LFB's locks are lfb. */
 #include "mga/prof.h"
 enum {
     PROF_G_VTX = PROF_CLIENT,   /* draw calls: vertices, culling, plans, bands (setup excluded) */
@@ -150,7 +150,8 @@ enum {
     PROF_G_FAST,                /* within a triangle: the fast path (draw.c), all of it */
     PROF_G_VERT,                /* within a triangle: setup vertices, alpha, fog and validation */
     PROF_G_LOD,                 /* within a triangle: the level planes and the bands */
-    PROF_G_WARP                 /* within a triangle: the WARP's vertices */
+    PROF_G_WARP,                /* within a triangle: the WARP's vertices */
+    PROF_G_LFB                  /* grLfbLock and grLfbUnlock: syncs, shadows, write-back, the pixel pipeline */
 };
 
 /* FPU control for entry points that do float maths (see fp.h). */

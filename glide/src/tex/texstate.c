@@ -155,7 +155,9 @@ GR_ENTRY(void, guAlphaSource, (GrAlphaSource_t mode))
 }
 
 /* ---- gu* texture allocator -------------------------------------------- */
-#define GU_MAX 512
+/* As many mipmaps as 3dfx's Glide 2 keeps (MAX_MIPMAPS_PER_SST): GTA allocates 552 (its sprite cache, 2 MB), and with
+ * 512 its last 40 got GR_NULL_MIPMAP_HANDLE, so the objects in them were drawn with whatever texture was bound. */
+#define GU_MAX 1024
 static GrMipMapInfo gu_info[GU_MAX];
 static GuNccTable gu_ncc[GU_MAX];
 static int gu_count, gu_current = -1;

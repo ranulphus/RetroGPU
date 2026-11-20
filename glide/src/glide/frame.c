@@ -26,7 +26,7 @@ static void ut_exit(int code)
 
 #ifdef MGA_PROF
 /* MGL-PROF: each stage's cycles since the last line in units of 1024 (the
- * game's own time, LFB and texture API calls are app; the first line also
+ * game's own time and texture API calls are app; the first line also
  * holds start-up), then register writes, FIFOSTATUS reads, stage switches
  * and the cycles one switch costs, which the stages above include. */
 static void prof_line(void)
@@ -47,10 +47,10 @@ static void prof_line(void)
         sw += prof_n[i];
 #define K(s) ((uint32_t)(prof_cyc[s] >> 10))
     mg_line("MGL-PROF app=%u fifo=%u splane=%u sinc=%u strap=%u vtx=%u texbind=%u texdl=%u drain=%u vsync=%u "
-            "swap=%u fast=%u vert=%u lod=%u warp=%u wr=%u fiford=%u sw=%u ovh=%u", K(PROF_APP), K(PROF_FIFO),
+            "swap=%u fast=%u vert=%u lod=%u warp=%u lfb=%u wr=%u fiford=%u sw=%u ovh=%u", K(PROF_APP), K(PROF_FIFO),
             K(PROF_SPLANE), K(PROF_SINC), K(PROF_STRAP), K(PROF_G_VTX), K(PROF_G_TEXBIND), K(PROF_G_TEXDL),
             K(PROF_G_DRAIN), K(PROF_G_VSYNC), K(PROF_G_SWAP), K(PROF_G_FAST), K(PROF_G_VERT), K(PROF_G_LOD),
-            K(PROF_G_WARP), prof_wr, prof_fifo_rd, sw, ovh);
+            K(PROF_G_WARP), K(PROF_G_LFB), prof_wr, prof_fifo_rd, sw, ovh);
 #undef K
     prof_reset(prof_cur);
 }
