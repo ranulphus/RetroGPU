@@ -1,0 +1,34 @@
+RetroGPU local patch 0136: VERR and VERW read no descriptor past the table's limit.
+
+op0F00_common's VERR and VERW worked out `valid` from the selector against the
+GDT's or LDT's limit and then read the descriptor's access word anyway, past
+the limit too. The result was right (valid stays 0), but the read was made:
+where the table ends a page early, it page-faulted, and a program that VERRs
+a stray value (HDPMI's regression test IRQ0TSTP VERRs a real-mode segment,
+2C5Eh, as a selector) was killed. Silicon checks the limit first and touches
+no memory for a selector past it (SDM, VERR/VERW: ZF cleared). LAR and LSL
+already read only when valid. Found by GLOS's memory diet (2026-11-20), whose
+LDT is a sparse window since; V86TEST case Z.
+
+--- a/src/cpu/x86_ops_pmode.h	2026-11-20 22:16:14.927692845 +0000
++++ b/src/cpu/x86_ops_pmode.h	2026-11-20 22:16:14.929167533 +0000
+@@ -281,7 +281,8 @@
+                 return 0; /*Null selector*/
+             cpl_override = 1;
+             valid        = (sel & ~7) < ((sel & 4) ? ldt.limit : gdt.limit);
+-            desc         = readmemw(0, ((sel & 4) ? ldt.base : gdt.base) + (sel & ~7) + 4);
++            /* RetroGPU 0136: past the table's limit there is no descriptor to read (LAR and LSL already skip it) */
++            desc         = valid ? readmemw(0, ((sel & 4) ? ldt.base : gdt.base) + (sel & ~7) + 4) : 0;
+             cpl_override = 0;
+             if (cpu_state.abrt)
+                 return 1;
+@@ -312,7 +313,8 @@
+                 return 0; /*Null selector*/
+             cpl_override = 1;
+             valid        = (sel & ~7) < ((sel & 4) ? ldt.limit : gdt.limit);
+-            desc         = readmemw(0, ((sel & 4) ? ldt.base : gdt.base) + (sel & ~7) + 4);
++            /* RetroGPU 0136: past the table's limit there is no descriptor to read (LAR and LSL already skip it) */
++            desc         = valid ? readmemw(0, ((sel & 4) ? ldt.base : gdt.base) + (sel & ~7) + 4) : 0;
+             cpl_override = 0;
+             if (cpu_state.abrt)
+                 return 1;

@@ -157,6 +157,32 @@ try_wr8:
         incl    %eax
         ret
 
+        .globl  try_verr
+try_verr:
+        movl    4(%esp), %edx
+        movl    $9f, fixup_eip
+        xorl    %eax, %eax
+        verr    %dx
+        setz    %al
+        movl    $0, fixup_eip
+        ret
+9:      movl    kfault_vec, %eax
+        orl     $0x100, %eax
+        ret
+
+        .globl  try_verw
+try_verw:
+        movl    4(%esp), %edx
+        movl    $9f, fixup_eip
+        xorl    %eax, %eax
+        verw    %dx
+        setz    %al
+        movl    $0, fixup_eip
+        ret
+9:      movl    kfault_vec, %eax
+        orl     $0x100, %eax
+        ret
+
         .globl  try_rd_cr4
 try_rd_cr4:
         movl    $9f, fixup_eip

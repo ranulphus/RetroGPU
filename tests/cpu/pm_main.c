@@ -37,6 +37,7 @@ typedef unsigned char u8;
 #define SEL_USTACK16 0x4B
 #define SEL_LIMBIG  0x50                        /* case V: 4 GB data */
 #define SEL_LIMSMALL 0x58                       /* case V: 4 KB data */
+#define SEL_ZLDT    0x60                        /* case Z: an LDT that ends a page early */
 
 #define TEST_LIN    0x007F0000u                 /* a page in the 4-8 MB table for mapping tests */
 
@@ -56,6 +57,7 @@ extern char stub_base[];
 extern u32 enter_user(struct uregs *u);
 extern void df_entry(void);
 extern u32 try_wr8(u32 addr, u32 v);
+extern u32 try_verr(u32 sel), try_verw(u32 sel);   /* ZF (0 or 1), or 100h + the vector of a fault */
 extern u32 try_rd_cr4(u32 *v);
 extern u32 try_wr_cr4(u32 v);
 extern u32 fpu_fault(void);
@@ -959,6 +961,34 @@ static void open_user_pages(void)
     wr_cr3(rd_cr3());
 }
 
+/* Z: VERR and VERW of a selector past the LDT's limit read no descriptor (SDM: ZF cleared, nothing touched). The
+   LDT's two entries end its page and the next page isn't present, so a descriptor read past the limit faults
+   (86Box until RetroGPU 0136: GLOS's memory diet found it, 2026-11-20). */
+static void case_z(void)
+{
+    u32 base = TEST_LIN + 0x1000 - 16, *ldt = (u32 *)base, next = *pte1(TEST_LIN + 0x1000), in, r, w;
+    *pte1(TEST_LIN) = bi->spare_a | 3;
+    *pte1(TEST_LIN + 0x1000) = 0;
+    invlpg(TEST_LIN);
+    invlpg(TEST_LIN + 0x1000);
+    ldt[0] = ldt[1] = 0;
+    ldt[2] = 0x0000FFFFu;                               /* entry 1: flat data, DPL 0, present */
+    ldt[3] = 0x00CF9200u;
+    set_desc(SEL_ZLDT, base, 15, 0x82, 0x00);
+    __asm__ volatile("lldt %w0" :: "r"(SEL_ZLDT));
+    in = try_verr(0x0C);                                /* entry 1 (TI, RPL 0): inside the limit */
+    r = try_verr(0x14);                                 /* entry 2: past it, on the page that isn't there */
+    w = try_verw(0x14);
+    __asm__ volatile("lldt %w0" :: "r"(0));
+    *pte1(TEST_LIN + 0x1000) = next;
+    *pte1(TEST_LIN) = 0;
+    invlpg(TEST_LIN + 0x1000);
+    invlpg(TEST_LIN);
+    res("Z-verr-inside-ldt", in == 1, "result=%x (expect 1: ZF set, readable data)", in);
+    res("Z-verr-past-ldt-limit", r == 0, "result=%x (expect 0: ZF clear, no fault; 10E: a page fault)", r);
+    res("Z-verw-past-ldt-limit", w == 0, "result=%x (expect 0: ZF clear, no fault; 10E: a page fault)", w);
+}
+
 u32 pm_main(struct bootinfo *b)
 {
     u32 cr0, cr4_init = 0;
@@ -1002,6 +1032,7 @@ u32 pm_main(struct bootinfo *b)
     case_w();
     case_x();
     case_y();
+    case_z();
     res("monitor", df_count == 0, "double faults=%u spurious irqs=%u", df_count, spurious);
 
     if (cr4_ok) try_wr_cr4(cr4_init);

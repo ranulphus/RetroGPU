@@ -148,7 +148,8 @@ monitor depends on.
   - a load past a segment's limit, from code the dynarec has compiled (case V);
   - single-stepping onto an instruction that faults (case W);
   - EFLAGS.ID after an IRETD, on CPUs with and without CPUID (case X);
-  - DR0-DR3 execute and data breakpoints (case Y).
+  - DR0-DR3 execute and data breakpoints (case Y);
+  - VERR and VERW of a selector past the LDT's limit, its next page not present (case Z).
 
 It found six places where 86Box differed, and GLOS's tests found more. Local patches fix them:
 - **0106:** a VME-redirected INT pushes IF = VIF and IOPL = 3.
@@ -177,6 +178,11 @@ It found six places where 86Box differed, and GLOS's tests found more. Local pat
   triggered. While a data breakpoint is enabled, or an execute breakpoint is near the code being run, the
   dynarec interprets; with DR7 clear, compiled code is unchanged. The Pentium II's CPUID now reports DE, as
   silicon does. V86TEST case Y.
+- **0136:** VERR and VERW read no descriptor past the GDT's or LDT's limit. They worked the result out from the
+  limit (right) but read the descriptor anyway, so where the table ended a page early the read page-faulted
+  (silicon touches nothing: ZF is cleared). Found by GLOS's memory diet (2026-11-20): HDPMI's regression test
+  IRQ0TSTP VERRs a real-mode segment as a selector, past a one-page LDT. LAR and LSL already read only when
+  valid. V86TEST case Z.
 
 - **0116:** PCI versions of the G200, G400 and G450 (GLOS's D38: a 486 with a Matrox card). 86Box has the
   Matrox G-series as AGP cards only, though its Matrox code already handles a card without AGP (the
