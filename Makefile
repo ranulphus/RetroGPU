@@ -126,6 +126,9 @@ DJ_SRC_NTRI := tests/tnt2/ntri.c build/djgpp/libtnt2.a
 DJ_SRC_NTRI32 := tests/tnt2/ntri32.c build/djgpp/libtnt2.a
 DJ_SRC_NSHOW := tests/tnt2/nshow.c build/djgpp/libtnt2.a
 DJ_SRC_STEAL := tests/tnt2/steal.c
+# The ATI Rage 128 Pro (docs/rage128.md): RPROBE (R0: PCI and AGP, the configuration, memory, CRTC and engine
+# registers, the PLLs, the video BIOS's PLL table, the BIOS's modes; reads only, but for the clock index, put back).
+DJ_SRC_RPROBE := tests/r128/rprobe.c
 DJ_SRC_VTWOD := tests/virge/vtwod.c tests/hal/sw2d.c build/djgpp/libvirge.a
 DJ_SRC_VTRI := tests/virge/vtri.c build/djgpp/libvirge.a
 # VFLIP (V5's W1: when the chip takes a display start, for someone watching: steady colour or black flashes).
@@ -155,6 +158,7 @@ build/djgpp/NTRI.EXE: tests/tnt2/ntri.c build/djgpp/libtnt2.a
 build/djgpp/NTRI32.EXE: tests/tnt2/ntri32.c build/djgpp/libtnt2.a
 build/djgpp/NSHOW.EXE: tests/tnt2/nshow.c build/djgpp/libtnt2.a
 build/djgpp/STEAL.EXE: tests/tnt2/steal.c
+build/djgpp/RPROBE.EXE: tests/r128/rprobe.c
 build/djgpp/VTWOD.EXE: tests/virge/vtwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libvirge.a
 build/djgpp/VTWOD.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/VTRI.EXE: tests/virge/vtri.c build/djgpp/libvirge.a
