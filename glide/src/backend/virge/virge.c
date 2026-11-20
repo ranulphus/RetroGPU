@@ -76,6 +76,7 @@ static void fill16(uint32_t off, int x, int y, int w, int h, uint32_t v)
     virge_set_target(off, pitch_bytes, 16);
     virge_set_clip(0, 0, mg.rw, mg.rh);
     virge_fill(x, y, w, h, v);
+    virge_sync(500000);                 /* (2D and 3D in turn: a triangle drawn into a fill once survived it, t27) */
 }
 
 static FxBool win_open(int w, int h, GrColorFormat_t color_format, GrOriginLocation_t origin_location,
@@ -170,6 +171,7 @@ static void validate(void)
 
 static void clear(int x0, int y0, int x1, int y1, GrColor_t color, FxU16 depth)
 {
+    sync_said();                        /* (a triangle still drawing when the 2D fill's registers are written) */
     if (mg.st.color_mask_rgb)
         fill16(mg_buffer_offset(mg.render_buffer), x0, y0, x1 - x0, y1 - y0, mg_argb_to_555(mg_color_to_argb(color)));
     if (mg.has_aux && mg.st.depth_mask && mg.st.depth_mode != GR_DEPTHBUFFER_DISABLE)
@@ -462,6 +464,9 @@ void virge_be_tri(const GrVertex *a, const GrVertex *b, const GrVertex *c)
     mg_validate();
     fogged = mg_fog_source() == GR_FOG_WITH_TABLE;
     mip = mg_uses_texture() && tmu0.has_source && tmu0.mipmap != GR_MIPMAP_DISABLE && tmu0.small > tmu0.large;
+    /* (untextured combines are worked out at the vertices: products of iterated values cut finer, see mg_split) */
+    if (!mg_uses_texture())
+        mip |= MG_SPLIT_COMBINE;
     /* Clipped to the clip window when it reaches past it (the engine's coordinates are unsigned). */
     x0 = (float)mg.st.clip_x0, y0 = (float)mg.st.clip_y0, x1 = (float)mg.st.clip_x1, y1 = (float)mg.st.clip_y1;
     inside = a->x >= x0 && b->x >= x0 && c->x >= x0 && a->x <= x1 && b->x <= x1 && c->x <= x1 &&
@@ -497,7 +502,7 @@ static void tri_one(const GrVertex *a, const GrVertex *b, const GrVertex *c, GrL
     tex_variant var;
     int wmode = s->depth_mode == GR_DEPTHBUFFER_WBUFFER || s->depth_mode == GR_DEPTHBUFFER_WBUFFER_COMPARE_TO_BIAS;
     int depth = s->depth_mode != GR_DEPTHBUFFER_DISABLE && mg.has_aux;
-    int textured, fog, blend = VIRGE_BLEND_NONE, n, half = 0, persp;
+    int textured, fog, blend = VIRGE_BLEND_NONE, n, half = 0, persp, mult2;
     char asrc;
     cplan cp;
     double st[3][2], ks = 0, kt = 0;
@@ -559,6 +564,8 @@ static void tri_one(const GrVertex *a, const GrVertex *b, const GrVertex *c, GrL
         warn_once(14, "fog with the vertex's alpha blend: drawn without fog");
         fog = 0;
     }
+    /* (MULT2: the fog term alone, f * the fog colour: a black triangle under the engine's fog) */
+    mult2 = fog && (s->fog_mode & GR_FOG_MULT2);
 
     /* The texture's words. */
     if (textured || fog) {
@@ -582,7 +589,7 @@ static void tri_one(const GrVertex *a, const GrVertex *b, const GrVertex *c, GrL
         t.linear = textured ? bilinear : 0;
         persp = textured && !(qa == qb && qb == qc);     /* (the texture's own 1/w under the STW hint) */
         t.persp = persp;
-        t.env = !textured ? VIRGE_TEXENV_MODULATE
+        t.env = !textured || mult2 ? VIRGE_TEXENV_MODULATE
               : cp.kind == K_MODULATE ? VIRGE_TEXENV_MODULATE
               : cp.kind == K_REFLECT ? VIRGE_TEXENV_REFLECTION
               : cp.kind == K_GOURAUD ? VIRGE_TEXENV_MODULATE : VIRGE_TEXENV_DECAL;
@@ -624,6 +631,8 @@ static void tri_one(const GrVertex *a, const GrVertex *b, const GrVertex *c, GrL
             mg_cc_vertex(p, 0, rgb);
         if (cp.kind == K_DECAL)
             rgb[0] = rgb[1] = rgb[2] = 255.0f;              /* (DECAL lit for fog: the texel as it is) */
+        if (mult2)
+            rgb[0] = rgb[1] = rgb[2] = 0;
         al = asrc == 'v' ? mg_ac_vertex(p, 0) : 255.0f;
         if (half > 0)
             al = 128.0f;

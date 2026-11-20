@@ -27,6 +27,10 @@ int     mg_minified_at(const mg_lod_planes *L, double px, double py);
  * A triangle whose vertices' fog factors differ by more than a sixteenth (fogged), or that wants different levels
  * (mip), is split in four in screen space, up to five deep; each piece is drawn by draw with its centroid's level. */
 typedef void (*mg_tri_level_fn)(const GrVertex *a, const GrVertex *b, const GrVertex *c, GrLOD_t lod);
+/* In mip: also cut where the core's colour or alpha combine (worked out at the vertices: combine/eval.c) at an edge's
+ * midpoint differs from the average at its ends by more than 8 levels: products of iterated values (a lerp by
+ * iterated alpha) iterated linearly in pieces small enough. */
+#define MG_SPLIT_COMBINE 0x100
 void mg_split(const GrVertex *a, const GrVertex *b, const GrVertex *c, int fogged, int mip, mg_tri_level_fn draw);
 
 #endif

@@ -3,6 +3,7 @@
  * its own until the TNT2 is back on a bench to check the switch. */
 #include "backend/share.h"
 #include "tex/texmgr.h"
+#include "combine/eval.h"
 #include "mga/fp.h"
 
 int32_t mg_snap16(float v)
@@ -117,11 +118,33 @@ static void split(const GrVertex *a, const GrVertex *b, const GrVertex *c, int d
     GrVertex ab, bc, ca;
     mg_lod_planes L;
     GrLOD_t la = tmu0.large;
-    int cut = 0;
+    int cut = 0, comb = mip & MG_SPLIT_COMBINE;
+    mip &= ~MG_SPLIT_COMBINE;
+    if (comb && depth < 5) {
+        /* (the combine at each edge's midpoint against the average of its ends) */
+        const GrVertex *e[3][2];
+        int k, ch;
+        e[0][0] = a, e[0][1] = b, e[1][0] = b, e[1][1] = c, e[2][0] = c, e[2][1] = a;
+        for (k = 0; k < 3 && !cut; k++) {
+            GrVertex m;
+            float p[3], q[3], r[3], pa, qa, ra;
+            mid(&m, e[k][0], e[k][1]);
+            mg_cc_vertex(e[k][0], 0, p), mg_cc_vertex(e[k][1], 0, q), mg_cc_vertex(&m, 0, r);
+            pa = mg_ac_vertex(e[k][0], 0), qa = mg_ac_vertex(e[k][1], 0), ra = mg_ac_vertex(&m, 0);
+            for (ch = 0; ch < 3; ch++) {
+                float d = r[ch] - (p[ch] + q[ch]) * 0.5f;
+                cut |= d > 8.0f || d < -8.0f;
+            }
+            {
+                float d = ra - (pa + qa) * 0.5f;
+                cut |= d > 8.0f || d < -8.0f;
+            }
+        }
+    }
     if (mip) {
         mg_lod_setup(&L, a, b, c);
         la = mg_level_at(&L, a->x, a->y);
-        cut = mg_level_at(&L, b->x, b->y) != la || mg_level_at(&L, c->x, c->y) != la;
+        cut |= mg_level_at(&L, b->x, b->y) != la || mg_level_at(&L, c->x, c->y) != la;
     }
     if (fogged && !cut) {
         double fa = mg_fog_vertex(a), fb = mg_fog_vertex(b), fc = mg_fog_vertex(c), lo, hi;
@@ -136,6 +159,7 @@ static void split(const GrVertex *a, const GrVertex *b, const GrVertex *c, int d
         return;
     }
     mid(&ab, a, b), mid(&bc, b, c), mid(&ca, c, a);
+    mip |= comb;
     split(a, &ab, &ca, depth + 1, fogged, mip, draw);
     split(&ab, b, &bc, depth + 1, fogged, mip, draw);
     split(&ca, &bc, c, depth + 1, fogged, mip, draw);

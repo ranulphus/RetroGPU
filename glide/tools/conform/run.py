@@ -32,6 +32,11 @@ MGA_OVL = os.path.join(ROOT, "build", "ow", "GLIDE2X.OVL")
 EXE = os.path.join(ROOT, "build", "ow", "dos", "CONFORM.EXE")
 REFDIR = os.path.join(GLIDE, "tests", "conform", "ref", "voodoo")
 CARD = os.environ.get("MGA_CARD", "g100")
+MACHINE = None          # check --machine M: Loop A's board (486dx4, bf6...; run.py's default otherwise)
+if "--machine" in sys.argv:
+    _i = sys.argv.index("--machine")
+    MACHINE = sys.argv[_i + 1]
+    del sys.argv[_i:_i + 2]
 BENCH = None            # check --bench PC: (the PC, its card)
 if "--bench" in sys.argv:
     _i = sys.argv.index("--bench")
@@ -97,6 +102,8 @@ def run_one(test, ovl, outdir):
     cmd = [sys.executable, os.path.join(ROOT, "tools", "loopa", "run.py"), "--name", test,
            "--exe", EXE, "--args", test, "--ovl", ovl, "--out", outdir,
            "--timeout", "180", "--idle", "60", "--card", CARD]
+    if MACHINE:
+        cmd += ["--machine", MACHINE]
     if os.environ.get("MGA_OPTS"):             # runtime options for every test, e.g. "bpp=32"
         cmd += ["--pre", "SET MGAGLIDE=" + os.environ["MGA_OPTS"]]
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -128,6 +135,13 @@ def cmd_ref(tests):
             print("ref %-6s %-10s %d frames" % (t, st, n))
 
 
+def class_entry(entry):
+    """A manifest entry's settings for this card: its "class" map by chip, then by class (e.g. "virge": the
+    ViRGE/DX's own edges, gates or tolerances, each with its "why")."""
+    by = entry.get("class", {})
+    return by.get(CHIP, by.get(CARD_CLASS, {}))
+
+
 def cmd_check(tests):
     summary = {}
 
@@ -138,6 +152,7 @@ def cmd_check(tests):
         cfg.update(MANIFEST.get(t, {}))
         if WARP:
             cfg.update(cfg.get("warp", {}))     # the WARP's own edges (docs/g400-warp.md)
+        cfg.update(class_entry(cfg))            # the card class's own (other vendors' cards: their reasons beside)
         frames = {}
         refd = os.path.join(REFDIR, t)
         ok = r["status"] == "PASS"
@@ -155,6 +170,7 @@ def cmd_check(tests):
                     continue
                 fc = dict(cfg)
                 fc.update(cfg.get("frames", {}).get(fn, {}))
+                fc.update(class_entry(cfg.get("frames", {}).get(fn, {})))
                 cells = fc.get("cells")
                 if cells and isinstance(cells.get("approx"), dict):
                     fc["cells"] = dict(cells, approx=cells["approx"].get(CHIP, cells["approx"].get(CARD_CLASS, [])))
