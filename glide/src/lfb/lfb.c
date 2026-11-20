@@ -111,25 +111,38 @@ static uint8_t *crow(uint32_t off, uint32_t y)
     return (uint8_t *)mg_vram + off + y * (uint32_t)mg.pitch_px * (uint32_t)(mg.bpp / 8);
 }
 
+/* A 555 screen (mg.screen555): green's sixth bit dropped going in, its top bit repeated coming out. */
+static uint16_t c565_to_555(uint16_t c) { return (uint16_t)(((c >> 1) & 0x7FE0) | (c & 0x001F)); }
+static uint16_t c555_to_565(uint16_t c)
+{
+    return (uint16_t)(((c & 0x7FE0) << 1) | ((c >> 4) & 0x0020) | (c & 0x001F));
+}
+
 static uint16_t get565(const uint8_t *row, uint32_t x)
 {
-    return mg.bpp == 32 ? argb_to_565(((const uint32_t *)row)[x]) : ((const uint16_t *)row)[x];
+    if (mg.bpp == 32)
+        return argb_to_565(((const uint32_t *)row)[x]);
+    return mg.screen555 ? c555_to_565(((const uint16_t *)row)[x]) : ((const uint16_t *)row)[x];
 }
 
 static void put565(uint8_t *row, uint32_t x, uint16_t c)
 {
     if (mg.bpp == 32) ((uint32_t *)row)[x] = expand565(c);
-    else ((uint16_t *)row)[x] = c;
+    else ((uint16_t *)row)[x] = mg.screen555 ? c565_to_555(c) : c;
 }
 
 static uint32_t load_argb(const uint8_t *row, uint32_t x)
 {
-    return mg.bpp == 32 ? ((const uint32_t *)row)[x] & 0xFFFFFFu : expand565(((const uint16_t *)row)[x]);
+    if (mg.bpp == 32)
+        return ((const uint32_t *)row)[x] & 0xFFFFFFu;
+    return expand565(mg.screen555 ? c555_to_565(((const uint16_t *)row)[x]) : ((const uint16_t *)row)[x]);
 }
 
 static void store_argb(uint8_t *row, uint32_t x, uint32_t argb)
 {
     if (mg.bpp == 32) ((uint32_t *)row)[x] = argb & 0xFFFFFFu;
+    else if (mg.screen555)
+        ((uint16_t *)row)[x] = (uint16_t)(((argb >> 9) & 0x7C00) | ((argb >> 6) & 0x03E0) | ((argb >> 3) & 0x001F));
     else ((uint16_t *)row)[x] = argb_to_565(argb);
 }
 
@@ -213,6 +226,8 @@ static uint32_t rdaux(uint32_t x, uint32_t y)
 
 static int need_shadow(GrLock_t type, GrBuffer_t buffer, GrLfbWriteMode_t mode, GrOriginLocation_t origin, FxBool pipe)
 {
+    if (mg.screen555)
+        return 1;                /* (the ViRGE: 555 pixels at the BIOS's pitch, not the Voodoo's 2048-byte stride) */
     if ((type & 1) == GR_LFB_READ_ONLY) {
         if (buffer == GR_BUFFER_AUXBUFFER)
             return mg.zbits != 16 || origin == GR_ORIGIN_LOWER_LEFT || mg.scaled;
@@ -759,7 +774,7 @@ GR_ENTRY(FxBool, grLfbReadRegion, (GrBuffer_t src_buffer, FxU32 src_x, FxU32 src
             uint32_t x;
             for (x = 0; x < src_width; x++)
                 d[x] = aux_value32(s[x]);
-        } else if (src_buffer == GR_BUFFER_AUXBUFFER || mg.bpp == 16) {
+        } else if (src_buffer == GR_BUFFER_AUXBUFFER || (mg.bpp == 16 && !mg.screen555)) {
             memcpy(d, (const uint16_t *)(mg_vram + off) + sy * pitch + src_x, src_width * 2);
         } else {
             const uint8_t *cr = crow(off, sy);

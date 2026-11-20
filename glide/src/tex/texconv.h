@@ -5,6 +5,7 @@
 #include "mga/types.h"
 
 enum { HW_TW16 = 3, HW_TW15 = 2, HW_TW12 = 4 };    /* TEXCTL texformat codes */
+#define TEX_NO565 (-2)          /* tex_convert_level's force_hwfmt: classified as usual, but no HW_TW16 (a 1555 level) */
 
 typedef struct {
     uint32_t palette[256];     /* 0x00RRGGBB, alpha ignored (Voodoo Graphics) */

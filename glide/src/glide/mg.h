@@ -56,6 +56,7 @@ typedef struct {
     mga_vbe_mode mode;
     int         width, height, pitch_px;
     int         bpp;                 /* colour depth: 16, or 32 with MGAGLIDE bpp=32 */
+    int         screen555;           /* 16-bit pixels are RGB555, not 565 (the ViRGE/DX: its 3D engine's only one) */
     int         scaled;              /* MGAGLIDE res=WxH: rendering larger than the game's size */
     double      sx, sy;              /* hardware pixels per game pixel */
     int         nbuffers, has_aux;
@@ -102,6 +103,7 @@ void mg_warp_stop(void);           /* draw.c: the WARP suspended, its DMA stream
 uint32_t mg_color_to_argb(GrColor_t c);
 GrColor_t mg_argb_to_color(uint32_t argb);
 uint32_t mg_argb_to_565(uint32_t argb);
+uint32_t mg_argb_to_555(uint32_t argb);         /* (a 555 screen's clears: mg.screen555) */
 /* buffer.c */
 void mg_target_for(GrBuffer_t b);
 uint32_t mg_buffer_offset(GrBuffer_t b);

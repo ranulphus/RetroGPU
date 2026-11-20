@@ -68,6 +68,11 @@ uint32_t mg_argb_to_565(uint32_t argb)
     return ((argb >> 8) & 0xF800) | ((argb >> 5) & 0x07E0) | ((argb >> 3) & 0x001F);
 }
 
+uint32_t mg_argb_to_555(uint32_t argb)
+{
+    return ((argb >> 9) & 0x7C00) | ((argb >> 6) & 0x03E0) | ((argb >> 3) & 0x001F);
+}
+
 uint32_t mg_buffer_offset(GrBuffer_t b)
 {
     switch (b) {

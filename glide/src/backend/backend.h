@@ -46,6 +46,8 @@ typedef struct mg_backend {
      * rows as they are, the TNT2's swizzled. The engine is done with the old texels (the caller synced). */
     void (*tex_write)(uint32_t org, const uint16_t *texels, int hw_w, int hw_h);
     uint32_t tex_align;                 /* where a texture's block starts: a multiple of this (0: the heap's 64) */
+    int tex_square;                     /* 1: each level's slot square (the larger side), padded as the texture repeats */
+    int tex_no565;                      /* 1: no 565 texels (opaque levels as 1555 with the alpha bit set) */
 } mg_backend;
 
 extern const mg_backend *mg_be;         /* the back end of the card found (sst.c) */
@@ -53,5 +55,6 @@ extern volatile uint8_t *mg_vram;       /* its video memory mapped (texture reco
 
 extern const mg_backend mg_mga_backend; /* the Matrox cards (backend/mga) */
 extern const mg_backend mg_tnt2_backend; /* the Riva TNT and TNT2 (backend/tnt2) */
+extern const mg_backend mg_virge_backend; /* the S3 ViRGE/DX and /GX (backend/virge) */
 
 #endif

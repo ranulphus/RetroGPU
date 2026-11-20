@@ -419,6 +419,8 @@ static int ensure_block(int ri)
         tex_dims(l, r->aspect, &w, &h);
         if (w < 8) w = 8;
         if (h < 8) h = 8;
+        if (mg_be->tex_square && w != h)
+            w = h = w > h ? w : h;      /* (square slots: the ViRGE's textures) */
         bytes += ((uint32_t)(w * h * 2) + HW_ALIGN - 1) & ~(HW_ALIGN - 1);
     }
     off = heap_alloc(bytes);
@@ -443,6 +445,8 @@ static int ensure_block(int ri)
         tex_dims(l, r->aspect, &w, &h);
         if (w < 8) w = 8;
         if (h < 8) h = 8;
+        if (mg_be->tex_square && w != h)
+            w = h = w > h ? w : h;
         r->hw[l].org = off;
         r->hw[l].w_log2 = log2i(w);
         r->hw[l].h_log2 = log2i(h);
@@ -483,7 +487,7 @@ int tex_bind_level(GrLOD_t lod, const tex_variant *var, tex_level_hw *hw)
     if ((palettised && r->hw_pal_gen != tmu0.pal_gen &&
          (!r->hw_pal || memcmp(r->hw_pal, tmu0.tables.palette, sizeof tmu0.tables.palette))) ||
         (nccfmt && r->hw_ncc_gen != tmu0.ncc_gen) ||
-        ((w < 8 || h < 8) && r->hw_clamp != clamp_key) || r->hw_var != vkey) {
+        ((w < 8 || h < 8 || (mg_be->tex_square && w != h)) && r->hw_clamp != clamp_key) || r->hw_var != vkey) {
         memset(r->hw_valid, 0, sizeof r->hw_valid);
         if (palettised) {
             if (!r->hw_pal)
@@ -502,7 +506,8 @@ int tex_bind_level(GrLOD_t lod, const tex_variant *var, tex_level_hw *hw)
         /* The level may still be read by queued draws. */
         mg_be->sync();
         lv->hwfmt = tex_convert_level(r->fmt, r->shadow + r->shadow_off[lod], w, h, staging, hw_w, hw_w, hw_h,
-                                      clamp_key & 1, (clamp_key >> 1) & 1, &tmu0.tables, -1, scratch, var);
+                                      clamp_key & 1, (clamp_key >> 1) & 1, &tmu0.tables,
+                                      mg_be->tex_no565 ? TEX_NO565 : -1, scratch, var);
         mg_be->tex_write(lv->org, staging, hw_w, hw_h);
         r->hw_valid[lod] = 1;
         tex_vram_gen++;

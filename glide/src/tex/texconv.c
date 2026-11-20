@@ -165,7 +165,8 @@ int tex_convert_level(GrTextureFormat_t fmt, const void *src, int w, int h,
     if (fmt == GR_TEXFMT_RGB_565) native = HW_TW16;
     else if (fmt == GR_TEXFMT_ARGB_1555) native = HW_TW15;
     else if (fmt == GR_TEXFMT_ARGB_4444) native = HW_TW12;
-    if (native >= 0 && (force_hwfmt < 0 || force_hwfmt == native) && !(var && var->kind)) {
+    if (native >= 0 && (force_hwfmt == -1 || force_hwfmt == native || (force_hwfmt == TEX_NO565 && native != HW_TW16)) &&
+        !(var && var->kind)) {
         for (y = 0; y < hw_h; y++) {
             const uint16_t *row = s16 + src_index(y, h, clamp_t) * w;
             for (x = 0; x < hw_w; x++)
@@ -190,8 +191,11 @@ int tex_convert_level(GrTextureFormat_t fmt, const void *src, int w, int h,
         }
         bleed_keyed(scratch, w, h, clamp_s, clamp_t);
         hwfmt = HW_TW15;
-    } else
+    } else {
         hwfmt = force_hwfmt >= 0 ? force_hwfmt : tex_classify(scratch, w * h);
+        if (force_hwfmt == TEX_NO565 && hwfmt == HW_TW16)
+            hwfmt = HW_TW15;                            /* (opaque: every alpha bit set) */
+    }
     for (y = 0; y < hw_h; y++) {
         const uint32_t *row = scratch + src_index(y, h, clamp_t) * w;
         for (x = 0; x < hw_w; x++)
