@@ -146,12 +146,41 @@ static int read_get(void)
     return (int)(FIFO[0x0011] >> 2);
 }
 
+/* The ring round where the chip stopped (a diagnostic): `before` dwords before its read pointer and `after` from it,
+ * each line "ring N: value", to out. A header is (count << 18) | (subchannel << 13) | method. */
+void tnt2_ring_dump(int before, int after, void (*out)(const char *line))
+{
+    static const char hex[] = "0123456789abcdef";
+    char line[32];
+    int get = read_get(), i, j;
+    for (i = -before; i < after; i++) {
+        int k = get + i;
+        uint32_t v;
+        if (k < 0) k += RING_DWORDS;
+        if (k >= (int)RING_DWORDS) k -= RING_DWORDS;
+        v = ring[k];
+        memcpy(line, "ring ", 5);
+        for (j = 0; j < 4; j++)
+            line[5 + j] = (char)('0' + (k / (j == 0 ? 1000 : j == 1 ? 100 : j == 2 ? 10 : 1)) % 10);
+        line[9] = i == 0 ? '*' : ' ';
+        line[10] = ' ';
+        for (j = 0; j < 8; j++)
+            line[11 + j] = hex[(v >> (28 - 4 * j)) & 15u];
+        line[19] = 0;
+        out(line);
+    }
+}
+
+static int trap_check(void);
+
 static void ring_wait(int size)
 {
     int get;
     uint32_t t0 = sys_time_us();
     size++;
     while (ring_free < size) {
+        if (sys_time_us() - t0 > 20000u)
+            trap_check();                               /* (a trapped chip resumed rather than written over) */
         get = read_get();
         if (ring_put >= get) {
             ring_free = ring_max - ring_cur;
@@ -255,12 +284,18 @@ int tnt2_sync(uint32_t timeout_us)
 {
     uint32_t t0 = sys_time_us();
     tnt2_kick();
-    while (read_get() != ring_put)
+    while (read_get() != ring_put) {
+        if (sys_time_us() - t0 > 20000u)
+            trap_check();
         if (sys_time_us() - t0 > timeout_us)
             return -1;
-    while (PGRAPH[0x0700 / 4])                          /* PGRAPH_STATUS */
+    }
+    while (PGRAPH[0x0700 / 4]) {                        /* PGRAPH_STATUS */
+        if (sys_time_us() - t0 > 20000u)
+            trap_check();
         if (sys_time_us() - t0 > timeout_us)
             return -1;
+    }
     return 0;
 }
 
@@ -561,6 +596,39 @@ void tnt2_cursor_show(int on)
     crtc_w(0x31, (uint8_t)((crtc_r(0x31) & 0xFE) | (on ? 1 : 0)));
 }
 
+/* The palette as a gamma ramp in direct-colour modes: the RAMDAC's general control (PRAMDAC 0x600) bits 4-5 send
+ * each colour component through the VGA DAC, indexed by its value (nv_hw.c sets 0x30 for any depth above 8; X's
+ * NVDACLoadPalette expands the 5- and 6-bit fields to 8 bits, so a 256-entry ramp serves every depth). The DAC's
+ * entries are 8-bit when the general control's bit 20 is set (taken, as nv_hw.c's direct-colour modes have it),
+ * else 6-bit. tnt2_ramp_off puts the general control back as it was. */
+static uint32_t ramp_general;
+static int ramp_on;
+
+void tnt2_set_ramp(const uint8_t ramp[256])
+{
+    int i, shift;
+    if (!ramp_on) {
+        ramp_general = tnt2_regs[0x680600 / 4];
+        ramp_on = 1;
+    }
+    tnt2_regs[0x680600 / 4] = ramp_general | 0x30u;
+    shift = (ramp_general & 0x00100000u) ? 0 : 2;
+    sys_outb(0x3C6, 0xFF);
+    sys_outb(0x3C8, 0);
+    for (i = 0; i < 256; i++) {
+        uint8_t v = (uint8_t)(ramp[i] >> shift);
+        sys_outb(0x3C9, v), sys_outb(0x3C9, v), sys_outb(0x3C9, v);
+    }
+}
+
+void tnt2_ramp_off(void)
+{
+    if (ramp_on) {
+        tnt2_regs[0x680600 / 4] = ramp_general;
+        ramp_on = 0;
+    }
+}
+
 /* (PRAMDAC 0x300 keeps 12 bits of each coordinate, signed: the P3's M64 read -5 back as 0xFFB.) */
 void tnt2_cursor_move(int x, int y)
 {
@@ -658,6 +726,65 @@ static int st3d_set;
 static uint32_t mt3d[16];               /* the multitexture object's words, sent while it is the one in use */
 static int mt3d_set, tri_obj;           /* tri_obj: 0x54 or 0x55, the object bound to subchannel 7 */
 
+/* ---- Traps. With no interrupt handler, a method the chip traps on (PGRAPH_INTR set) stops the engine for good, and
+ * the CPU then waits on a full ring. When a wait has gone 20 ms without progress the trap is said (the first one: the
+ * registers, the words the layer last sent, the ring round the chip's read pointer, through tnt2_set_diag's output),
+ * then acknowledged as nouveau's handler does (INTR written back, PGRAPH's FIFO access on again: the method dropped),
+ * and the 3D state is sent again before the next triangle. A trap then costs its triangle, not the program. ---- */
+
+static void (*diag_out)(const char *line);
+static unsigned traps;
+
+void tnt2_set_diag(void (*out)(const char *line)) { diag_out = out; }
+unsigned tnt2_traps(void) { return traps; }
+
+static char *hex8(char *p, uint32_t v)
+{
+    static const char hex[] = "0123456789abcdef";
+    int j;
+    *p++ = ' ';
+    for (j = 0; j < 8; j++)
+        *p++ = hex[(v >> (28 - 4 * j)) & 15u];
+    return p;
+}
+
+static void diag_words(const char *label, const uint32_t *w, int n)
+{
+    char line[200], *p = line;
+    int i;
+    while (*label && p < line + 24)
+        *p++ = *label++;
+    for (i = 0; i < n && p < line + sizeof line - 10; i++)
+        p = hex8(p, w[i]);
+    *p = 0;
+    diag_out(line);
+}
+
+static int trap_check(void)
+{
+    uint32_t intr = PGRAPH[0x0100 / 4];
+    if (!intr)
+        return 0;
+    if (traps++ == 0 && diag_out) {
+        uint32_t r[6], t[8];
+        r[0] = intr, r[1] = PGRAPH[0x0108 / 4], r[2] = PGRAPH[0x0104 / 4];      /* INTR, NSOURCE, NSTATUS */
+        r[3] = PGRAPH[0x0704 / 4], r[4] = PGRAPH[0x0708 / 4];                   /* TRAPPED_ADDR, TRAPPED_DATA */
+        r[5] = (uint32_t)tri_obj;
+        diag_words("tnt2-trap regs", r, 6);
+        t[0] = t3d.color, t[1] = t3d.zeta, t[2] = (uint32_t)t3d.pitch, t[3] = (uint32_t)t3d.bpp;
+        t[4] = (uint32_t)t3d.w, t[5] = (uint32_t)t3d.h, t[6] = (uint32_t)t3d.set, t[7] = (uint32_t)stale_3d;
+        diag_words("tnt2-trap target", t, 8);
+        diag_words("tnt2-trap clip", clip_now, 4);
+        diag_words("tnt2-trap mt3d", mt3d, 16);
+        diag_words("tnt2-trap st3d", st3d, 6);
+        tnt2_ring_dump(64, 40, diag_out);
+    }
+    PGRAPH[0x0100 / 4] = intr;
+    PGRAPH[0x0720 / 4] = 1;                             /* PGRAPH_FIFO: access on again */
+    stale_3d = 1;
+    return 1;
+}
+
 static void forget_3d(void)
 {
     t3d.set = 0, st3d_set = 0, mt3d_set = 0;
@@ -730,6 +857,12 @@ static void use_obj(int obj)
  * Mesa sends it before every run of triangles. So the layer keeps both and sends them again when 2D has run. */
 void tnt2_3d_target(uint32_t color_off, uint32_t zeta_off, int pitch_bytes, int bpp, int w, int h)
 {
+    /* The depth surface where the colour one is (no depth buffer, drawing to the buffer at 0: Glide's
+     * grRenderBuffer(FRONT), a single-buffered context) is an invalid state to the chip: the next vertex trapped
+     * (INVALID_STATE, Screamer Rally on the P3) and the engine stopped. Depth then goes just past the colour buffer,
+     * never written (no depth writes without a depth buffer). */
+    if (zeta_off == color_off)
+        zeta_off = color_off + (uint32_t)pitch_bytes * (uint32_t)h;
     if (t3d.set && !stale_3d && t3d.color == color_off && t3d.zeta == zeta_off && t3d.pitch == pitch_bytes &&
         t3d.bpp == bpp && t3d.w == w && t3d.h == h)
         return;                                         /* (the same, and nothing 2D since: nothing to send) */

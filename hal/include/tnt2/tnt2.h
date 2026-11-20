@@ -32,6 +32,9 @@ int  tnt2_accel_init(void);
 int  tnt2_sync(uint32_t timeout_us);    /* every command done: 0, or -1 on time-out */
 int  tnt2_idle(void);                   /* 1: every command written so far is done (no wait) */
 void tnt2_kick(void);                   /* the ring's written commands to the chip now */
+void tnt2_ring_dump(int before, int after, void (*out)(const char *line));  /* (diagnostic: round the chip's GET) */
+void tnt2_set_diag(void (*out)(const char *line));   /* where a trap's first report goes (NULL: nowhere) */
+unsigned tnt2_traps(void);                  /* traps acknowledged since the layer started */
 /* A place in the command stream, and whether the chip has done everything before it (a fence without notifiers). */
 uint32_t tnt2_mark(void);
 int  tnt2_mark_done(uint32_t mark);
@@ -64,6 +67,8 @@ void tnt2_cursor_move(int x, int y);
 int  tnt2_set_start(uint32_t byte_off);
 int  tnt2_vsync_wait(uint32_t timeout_us);
 void tnt2_set_pitch(int pitch_bytes);   /* the display's row length (CR13/CR19), when the BIOS's 4F06 won't */
+void tnt2_set_ramp(const uint8_t ramp[256]);    /* the palette as a gamma ramp in direct colour (PRAMDAC 0x600) */
+void tnt2_ramp_off(void);                       /* ... and the RAMDAC as it was before (before text mode) */
 
 /* 3D (T2, bring-up): the 3D surfaces and the textured triangle (classes 0x53 and 0x54) on subchannels 4 and 7.
  * Vertices are Direct3D's TLVERTEX: window x and y in pixels, z in [0, 1], 1/w, colour and specular as A8R8G8B8

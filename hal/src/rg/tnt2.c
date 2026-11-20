@@ -158,6 +158,9 @@ static int swap(int vsync)
         return 0;
     show = st.front_is_a ? st.back_off : st.front_off;
     tnt2_kick();
+    /* The start before the retrace: the chip takes it at the retrace's start, so one written after the wait
+     * showed a frame late while the next frame was drawn into the buffer on screen (seen with Glide's games). */
+    tnt2_set_start(show);
     if (vsync) {
         uint32_t t0 = sys_time_us();
         if (st_hooks.wait)
@@ -165,7 +168,6 @@ static int swap(int vsync)
         tnt2_vsync_wait(50000);
         retrace_us += sys_time_us() - t0;
     }
-    tnt2_set_start(show);
     st.front_is_a = !st.front_is_a;
     return RG_SWAP_TARGET;
 }
