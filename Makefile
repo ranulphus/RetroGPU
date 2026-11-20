@@ -17,9 +17,11 @@ export WATCOM DJGPP_PREFIX MGA_CACHE OW_URL OW_SHA256 DJGPP_URL DJGPP_SHA256 CWS
 
 # ---- HAL -----------------------------------------------------------------
 HAL_COMMON := hal/src/debug/serial.c hal/src/debug/regtrace.c hal/src/pci.c hal/src/chip.c hal/src/clocks.c hal/src/vbe.c hal/src/fifo.c hal/src/engine.c hal/src/dac.c hal/src/texhw.c hal/src/present.c hal/src/setup/trap.c hal/src/vram.c hal/src/blit.c hal/src/cursor.c hal/src/warp.c
-# Other vendors' cards in Glide's Open Watcom build (the device log, the Riva TNT2's device and layer: the TNT2's
-# Glide back end, glide/src/backend/tnt2); rg/device.c's list and the Matrox, ViRGE and memory devices stay DJGPP's.
-HAL_OW_RG  := hal/src/rg/log.c hal/src/rg/tnt2.c hal/src/tnt2/tnt2.c
+# Other vendors' cards in Glide's Open Watcom build (the device log; the Riva TNT2's and the ViRGE/DX's devices and
+# layers: Glide's back ends in glide/src/backend/tnt2 and virge); rg/device.c's list and the Matrox and memory devices
+# stay DJGPP's.
+HAL_OW_RG  := hal/src/rg/log.c hal/src/rg/tnt2.c hal/src/tnt2/tnt2.c \
+              hal/src/rg/virge.c hal/src/virge/chip.c hal/src/virge/engine2d.c hal/src/virge/cursor.c hal/src/virge/tri.c
 HAL_OW     := $(HAL_COMMON) $(HAL_OW_RG) hal/port/ow_dos4g.c
 HAL_DJGPP  := $(HAL_COMMON) hal/port/djgpp.c
 HAL_HOST   := $(HAL_COMMON) hal/port/host.c
@@ -126,6 +128,8 @@ DJ_SRC_NSHOW := tests/tnt2/nshow.c build/djgpp/libtnt2.a
 DJ_SRC_STEAL := tests/tnt2/steal.c
 DJ_SRC_VTWOD := tests/virge/vtwod.c tests/hal/sw2d.c build/djgpp/libvirge.a
 DJ_SRC_VTRI := tests/virge/vtri.c build/djgpp/libvirge.a
+# VFLIP (V5's W1: when the chip takes a display start, for someone watching: steady colour or black flashes).
+DJ_SRC_VFLIP := tests/virge/vflip.c build/djgpp/libvirge.a
 build/djgpp/HOOKS.EXE: tests/hal/hooks.c
 build/djgpp/SCALE.EXE: tests/hal/scale.c
 build/djgpp/HELLO.EXE: tests/shim/hello.c
@@ -154,6 +158,7 @@ build/djgpp/STEAL.EXE: tests/tnt2/steal.c
 build/djgpp/VTWOD.EXE: tests/virge/vtwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libvirge.a
 build/djgpp/VTWOD.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/VTRI.EXE: tests/virge/vtri.c build/djgpp/libvirge.a
+build/djgpp/VFLIP.EXE: tests/virge/vflip.c build/djgpp/libvirge.a
 build/djgpp/RGDEV.EXE: tests/rg/rgdev.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/librg.a build/djgpp/libvirge.a build/djgpp/libtnt2.a
 build/djgpp/RGDEV.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/STACKPG.EXE: tests/shim/stackpg.c
