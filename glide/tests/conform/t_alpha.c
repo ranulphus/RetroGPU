@@ -3,6 +3,7 @@
 #include "ct.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 static uint16_t tb[64 * 64];
 
@@ -211,6 +212,13 @@ static void t22(void)
             gl.grGammaCorrectionValue(gammas[i]);
         gl.grBufferSwap(1);
         gl.grSstIdle();
+        if (getenv("CT_HOLD")) {
+            /* (CT_HOLD=N: each frame held N seconds, for someone at a real PC's screen) */
+            volatile const uint32_t *ticks = (volatile const uint32_t *)0x46C;
+            uint32_t t0 = *ticks;
+            while (*ticks - t0 < (uint32_t)atoi(getenv("CT_HOLD")) * 182u / 10u)
+                ;
+        }
         {   /* let the display refresh a few times before capturing */
             int f;
             for (f = 0; f < 6; f++) {

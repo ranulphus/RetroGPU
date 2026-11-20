@@ -36,6 +36,30 @@ static void log_line(const char *line) { mg_line("%s", line); }
 
 /* ---- The card --------------------------------------------------------------------------------------------- */
 
+/* Every sync the back end waits on: a time-out logged with what PGRAPH says (its interrupt, the method it trapped
+ * on and its data, NSOURCE and NSTATUS), the first few times, and counted for MGL-WINCLOSE. */
+static unsigned sync_timeouts;
+static unsigned long vs_waits, vs_cyc, vs_fails, vs_short;  /* the swaps' retrace waits (MGL-WINCLOSE) */
+
+/* (the time-stamp counter's low half: the BIOS tick under Watcom is too coarse to time a retrace wait) */
+#if defined(__WATCOMC__)
+uint32_t tsc_lo(void);
+#pragma aux tsc_lo = 0x0F 0x31 value [eax] modify exact [eax edx];   /* (rdtsc: the code is built for a 386) */
+#else
+static uint32_t tsc_lo(void) { uint32_t lo, hi; __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi)); return lo; }
+#endif
+
+static void sync_said(const char *where)
+{
+    if (tnt2_sync(500000) != 0) {
+        uint32_t addr, data, intr = tnt2_3d_trap(&addr, &data);
+        if (++sync_timeouts <= 8)
+            mg_line("MGL-W tnt2 sync timed out (%s, frame %u): intr=%08lx trapped=%08lx data=%08lx nsource=%08lx "
+                    "nstatus=%08lx", where, mg.frame, (unsigned long)intr, (unsigned long)addr, (unsigned long)data,
+                    (unsigned long)tnt2_regs[0x400108 / 4], (unsigned long)tnt2_regs[0x400104 / 4]);
+    }
+}
+
 static int probe(void)
 {
     static int said;
@@ -78,6 +102,7 @@ static FxBool win_open(int w, int h, GrColorFormat_t color_format, GrOriginLocat
         return FXFALSE;
     }
     mg_vram = tnt2_fb;
+    tnt2_set_diag(log_line);                    /* (a trap's report: the registers, the state words, the ring) */
     mg.bpp = 16;
     mg.scaled = 0, mg.sx = mg.sy = 1.0;
     mg.present_scaled = 0;
@@ -106,7 +131,7 @@ static FxBool win_open(int w, int h, GrColorFormat_t color_format, GrOriginLocat
     if (mg.has_aux)
         fill16(mg.aux_off, 0, 0, mg.rw, mg.rh, 0);         /* (as the Matrox cards: depth 0) */
     mg.dirty = ~0u;
-    tnt2_sync(500000);
+    sync_said("open");
     tnt2_set_start(mg.buf_off[mg.front]);
     mg_gamma_apply();
     mg.fogcol_valid = 0;
@@ -119,26 +144,24 @@ static FxBool win_open(int w, int h, GrColorFormat_t color_format, GrOriginLocat
 
 static void win_close(void)
 {
-    tnt2_sync(500000);
+    sync_said("close");
+    tnt2_ramp_off();
     rg_tnt2_device.close();
     mg.open = 0;
     sys_unhook_faults();
     sys_unhook_exit();
-    mg_line("MGL-WINCLOSE frames=%u", mg.frame);
+    mg_line("MGL-WINCLOSE frames=%u sync_timeouts=%u traps=%u vsync_waits=%lu avg_kcycles=%lu failed=%lu under_100k=%lu",
+            mg.frame, sync_timeouts, tnt2_traps(), vs_waits, vs_waits ? vs_cyc / vs_waits / 1000ul : 0ul, vs_fails, vs_short);
 }
 
-static void fault(void) { rg_tnt2_device.close(); }
-static void exit_restore(void) { tnt2_sync(500000); rg_tnt2_device.close(); }
-static void sync(void) { tnt2_sync(500000); }
+static void fault(void) { tnt2_ramp_off(); rg_tnt2_device.close(); }
+static void exit_restore(void) { tnt2_sync(500000); tnt2_ramp_off(); rg_tnt2_device.close(); }
+static void sync(void) { sync_said("sync"); }
 static int busy(void) { return !tnt2_idle(); }
 static int in_vblank(void) { return (sys_inb(0x3DA) & 0x08) != 0; }
 static unsigned vcount(void) { return 0; }       /* (the NV5's raster position: not read yet) */
 
-static void set_ramp(const uint8_t ramp[256])
-{
-    (void)ramp;
-    warn_once(1, "gamma not applied (the RAMDAC's palette in direct colour: not done yet)");
-}
+static void set_ramp(const uint8_t ramp[256]) { tnt2_set_ramp(ramp); }
 
 /* ---- State ------------------------------------------------------------------------------------------------ */
 
@@ -168,12 +191,22 @@ static void clear(int x0, int y0, int x1, int y1, GrColor_t color, FxU16 depth)
 static void swap(int swap_interval)
 {
     int i;
-    tnt2_sync(500000);
-    PROF_BACK(PROF_G_VSYNC);
-    for (i = 0; i < swap_interval; i++)
-        tnt2_vsync_wait(50000);
-    PROF_BACK(PROF_G_SWAP);
+    sync_said("swap");
+    /* The start first, then the retrace: the TNT2 takes its display start at the retrace's start, so a start
+     * written after the wait (the Matrox order) showed one frame late, and the game drew a whole frame into the
+     * buffer on screen (Screamer Rally blanking before each frame, GTA's tearing on the P3). */
     tnt2_set_start(mg.buf_off[mg.back]);
+    PROF_BACK(PROF_G_VSYNC);
+    for (i = 0; i < swap_interval; i++) {
+        uint32_t t0 = tsc_lo(), dt;
+        if (tnt2_vsync_wait(50000) != 0)
+            vs_fails++;
+        dt = tsc_lo() - t0;
+        vs_waits++, vs_cyc += dt;
+        if (dt < 100000u)
+            vs_short++;
+    }
+    PROF_BACK(PROF_G_SWAP);
 }
 
 static void present_front(void) { }             /* (no scaled fits) */
