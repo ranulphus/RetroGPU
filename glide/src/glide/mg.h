@@ -104,6 +104,7 @@ uint32_t mg_color_to_argb(GrColor_t c);
 GrColor_t mg_argb_to_color(uint32_t argb);
 uint32_t mg_argb_to_565(uint32_t argb);
 uint32_t mg_argb_to_555(uint32_t argb);         /* (a 555 screen's clears: mg.screen555) */
+int      mg_clip_to_window(GrVertex *poly, int n);  /* (clip.c: a polygon to the clip window, in place; room for 16) */
 /* buffer.c */
 void mg_target_for(GrBuffer_t b);
 uint32_t mg_buffer_offset(GrBuffer_t b);

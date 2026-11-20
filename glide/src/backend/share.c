@@ -83,6 +83,25 @@ GrLOD_t mg_level_at(const mg_lod_planes *L, double px, double py)
     return (GrLOD_t)(l < tmu0.large ? tmu0.large : l > tmu0.small ? tmu0.small : l);
 }
 
+int mg_minified_at(const mg_lod_planes *L, double px, double py)
+{
+    double dx = px - L->x0, dy = py - L->y0, S, T, Q, u, v, gx, gy, g;
+    if (!L->valid)
+        return 0;
+    S = L->s0 + L->sx * dx + L->sy * dy, T = L->t0 + L->tx * dx + L->ty * dy, Q = L->q0 + L->qx * dx + L->qy * dy;
+    if (Q <= 1e-12)
+        return 0;
+    u = S / Q, v = T / Q;
+    gx = (L->sx - u * L->qx) * (L->sx - u * L->qx) + (L->tx - v * L->qx) * (L->tx - v * L->qx);
+    gy = (L->sy - u * L->qy) * (L->sy - u * L->qy) + (L->ty - v * L->qy) * (L->ty - v * L->qy);
+    g = (gx > gy ? gx : gy) / (Q * Q);
+    if (!(g > 0))
+        return 0;
+    /* (lambda in quarter levels, as mg_level_at's, with the bias) */
+    return mga_ifloor(2.0 * mg_ln(g) / 0.69314718055994531) +
+           (int)(tmu0.lod_bias * 4.0f + (tmu0.lod_bias >= 0 ? 0.5f : -0.5f)) > 0;
+}
+
 static void mid(GrVertex *o, const GrVertex *a, const GrVertex *b)
 {
     const float *p = (const float *)a, *q = (const float *)b;

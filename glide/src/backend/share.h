@@ -19,6 +19,9 @@ int mg_uses_texture(void);
 typedef struct { double s0, sx, sy, t0, tx, ty, q0, qx, qy, x0, y0; int valid; } mg_lod_planes;
 void    mg_lod_setup(mg_lod_planes *L, const GrVertex *a, const GrVertex *b, const GrVertex *c);
 GrLOD_t mg_level_at(const mg_lod_planes *L, double px, double py);
+/* Whether the texture is minified there (lambda with the bias above zero: the Voodoo's minification filter), for
+ * chips that filter a triangle one way. */
+int     mg_minified_at(const mg_lod_planes *L, double px, double py);
 
 /* What the Voodoo works out per pixel and these chips per vertex or per triangle: table fog's factor and the level.
  * A triangle whose vertices' fog factors differ by more than a sixteenth (fogged), or that wants different levels

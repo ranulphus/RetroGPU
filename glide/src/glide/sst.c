@@ -32,6 +32,10 @@ int mg_device_open(void)
         mg_be = &mg_tnt2_backend;
         return 0;
     }
+    if (mg_virge_backend.probe() == 0) {
+        mg_be = &mg_virge_backend;
+        return 0;
+    }
     return -1;
 }
 

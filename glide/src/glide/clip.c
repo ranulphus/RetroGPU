@@ -28,6 +28,19 @@ static int clip_axis(GrVertex *out, const GrVertex *in, int n, int axis, float b
     return m;
 }
 
+/* A polygon (n vertices, room for 16 at poly) clipped to the clip window in the game's coordinates, in place: its
+ * new vertex count (0 when nothing is inside). For back ends whose triangles must lie on the target (the ViRGE's:
+ * its engine's coordinates are unsigned). */
+int mg_clip_to_window(GrVertex *poly, int n)
+{
+    GrVertex q[16];
+    n = clip_axis(q, poly, n, 0, (float)mg.st.clip_x0, 1);
+    n = clip_axis(poly, q, n, 0, (float)mg.st.clip_x1, 0);
+    n = clip_axis(q, poly, n, 1, (float)mg.st.clip_y0, 1);
+    n = clip_axis(poly, q, n, 1, (float)mg.st.clip_y1, 0);
+    return n;
+}
+
 GR_ENTRY(void, guDrawTriangleWithClip, (const GrVertex *a, const GrVertex *b, const GrVertex *c))
 {
     GrVertex p[16], q[16];
