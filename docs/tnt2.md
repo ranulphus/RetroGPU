@@ -289,7 +289,32 @@ RetroGPU is MIT, so code is written from documentation and from MIT-licensed dri
 - **The replays on the P3** (GLPLAY with the traces through `tools/bench/run.py --replay`, against the emulated
   Voodoo's frames at the replays' tolerances, 40 levels and 5%): GTA's frames 60, 150, 240 and 295 with no pixel
   out; Screamer Rally's 60, 150, 200 and 240 at most 0.05% out. **T5's exit is met.**
-- **Still T5's:** gamma (the RAMDAC's palette in direct colour); the retail games on the P3, watched.
+
+## T5's last part: gamma and the retail games (the P3, 2026-11-20)
+
+- **Gamma:** the DAC applies its palette to direct colour when PRAMDAC's general control (0x680600) has bits 4-5
+  set; bit 20 says an 8-bit DAC (else 6 bits). `tnt2_set_ramp` loads Glide's ramp there and `tnt2_ramp_off` puts
+  the register back. t22 held on screen (`CT_HOLD`) looked as described (the owner).
+- **The games, watched by the owner.** What the live runs found, none of which a replay could show:
+  - **GTA's sprites kept changing, on every card:** our gu allocator held 512 mipmaps, GTA allocates 552 (its
+    sprite cache, 2 MB), and the last 40 got GR_NULL_MIPMAP_HANDLE. The recording held 22,333
+    `guTexSource(-1)`, so the Voodoo replayed the same fault. Now 1024, as 3dfx's Glide (`MAX_MIPMAPS_PER_SST`).
+  - **Tearing and a blank before each frame (TNT2 only):** the chip takes the display start at the retrace's
+    start, so a start written after the retrace wait (the Matrox order) showed a frame late while the next frame
+    was drawn into the buffer on screen. Glide's back end and the device now write the start, then wait.
+  - **Screamer Rally at 0.2 fps:** it loads a palette before each texture it draws (about 80 a frame), and each
+    load converted every palettised texture again. A texture is converted again only when the palette differs
+    from the one its levels were made with.
+  - **Screamer Rally hung at its menus:** a trap at a triangle's first vertex (NSOURCE METHOD_CNT, NSTATUS
+    INVALID_STATE) stops the engine for good with no interrupt handler, and the ring wait then wrote over
+    commands the chip hadn't read. The layer now reports the first trap (registers, the state words it last
+    sent, the ring round the read pointer) and acknowledges it as nouveau's handler does (INTR written back,
+    PGRAPH_FIFO on, the method dropped, the state sent again). The name screen still traps (39 times in a run,
+    in a font texture's quads): **cause open**, the game carries on.
+- **After the fixes:** GTA right on the G400 and the TNT2, and smoother on the TNT2; Screamer Rally "pretty
+  perfect" into the race on the TNT2 (the owner).
+- **Profiles on the P3** (the `ow-prof` runtime's MGL-PROF): GTA about 14 fps, most of each frame outside our
+  drawing (the game, its two pipeline LFB locks a frame, its texture calls); Screamer Rally's race about 38 fps.
 
 ## How it fits RetroGPU
 
