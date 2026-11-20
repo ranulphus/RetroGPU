@@ -60,6 +60,22 @@ the display mode and how the picture is shown (`display=`, `fit=`).
 | `fb_mb`, `tmu_mb`, `tmus` | `2`, `2`, `1` | Reported frame-buffer and texture memory, TMU count |
 | `voodoo2` | `0` | Report a Voodoo 2 (also enables iterated-Z fog) |
 
+## Behaviour on the S3 ViRGE/DX
+
+The ViRGE/DX's 3D engine draws 16 bits only as RGB555 and has fewer modes than the Voodoo; the back end
+(`glide/docs/backend.md`) approximates the rest, each kind said once in the log (`virge: ...`):
+
+| Glide | On the ViRGE/DX |
+|---|---|
+| The screen | 15-bit (565 writes lose green's sixth bit); every LFB lock through the converting shadow |
+| Blends other than SRC_ALPHA, ONE_MINUS_SRC_ALPHA and ONE, ZERO | a 50% blend; `g100_additive=1` skips them |
+| The alpha test | the texel's: a keyed texture variant; the vertex's: the triangle kept or dropped whole |
+| Colour combines with an add and a factor, a subtraction, a lerp by the texel's alpha, the specular forms | the nearest of DECAL, MODULATE and REFLECTION (conformance t13's listed cells) |
+| The texel's alpha times the vertex's | one of the two |
+| Fog together with the vertex's alpha blend | the blend without fog |
+| Mipmapping | the Voodoo's level for each piece of a triangle, one filter a piece |
+| Gamma | not applied (the DAC in 15-bit) |
+
 ## Behaviour on the G100
 
 | Option | Default | Effect |

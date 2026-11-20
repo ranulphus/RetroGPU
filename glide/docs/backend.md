@@ -23,6 +23,17 @@ nothing changes on a Matrox card), then the TNT2's.
 |---|---|---|
 | `mga` | `backend/mga/{card,draw,combine}.c` | The runtime's Matrox code as it was: the HAL, the WARP, CPU setup, LOD bands, keyed variants |
 | `tnt2` | `backend/tnt2/tnt2.c` | The TNT2 device (`hal/src/rg/tnt2.c`) and layer (`hal/src/tnt2`): the multitexture triangle object's two-stage combiner |
+| `virge` | `backend/virge/virge.c` | The ViRGE/DX device (`hal/src/rg/virge.c`) and layer (`hal/src/virge`): the host's set-up, DECAL, MODULATE and REFLECTION, a 15-bit screen (V5 of `docs/virge.md`) |
+
+`backend/share.{c,h}` holds what the back ends on the CPU's set-up share: the Voodoo's level model, the split by
+level, table fog and non-affine combines, and the snap. The TNT2 back end still has its own copies, until it can be
+checked against them on the card. `mg_device_open` tries the Matrox back end first, then the TNT2's, then the
+ViRGE's.
+
+The table's texture options: `tex_align` (where a block starts), `tex_square` (each level's slot square at its larger
+side, padded as the texture repeats: the ViRGE's square-only textures) and `tex_no565` (no 565 texels: opaque levels
+as 1555 with the alpha bit set). A back end whose screen is 15-bit sets `mg.screen555`: the LFB's pixels are then
+converted and every lock goes through the shadow.
 
 ## How the Matrox move was checked
 
