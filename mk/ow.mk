@@ -30,6 +30,13 @@ FORCE:
 # DLL and HAL code: no stack probes, no default-library references.
 OW_DLLFLAGS := -bd -s -zl
 
+# A header a dependency file still names but that has moved or gone (glide/src/combine/combine.h, moved to
+# glide/src/backend/mga with the back-end seam): nothing to make, so the objects that named it are rebuilt and their
+# dependency files written afresh, rather than make stopping on an old tree (gcc's -MP gives such targets; Watcom's
+# dependency files don't). A header that exists is untouched by these.
+glide/src/%.h: ;
+hal/include/%.h: ;
+
 build/ow/%.obj: %.c build/ow/regcrc_mode | build/gen/stamp
 	@mkdir -p $(dir $@)
 	$(Q)echo "  WCC     $<"
