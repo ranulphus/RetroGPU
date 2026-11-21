@@ -199,8 +199,10 @@ static void engine_init(int bpp, int pitch_bytes)
 int r128_set_mode(const r128_mode *m)
 {
     sys_rmregs r;
-    if (r128.mmio)
+    if (r128.mmio) {
         r128_sync(100000);
+        r128_cce_stop();                            /* (the caller starts it again for the new mode) */
+    }
     memset(&r, 0, sizeof r);
     r.eax = 0x4F02;
     r.ebx = 0x4000u | m->mode;                      /* (the linear window) */
@@ -214,8 +216,10 @@ int r128_set_mode(const r128_mode *m)
 void r128_text_mode(void)
 {
     sys_rmregs r;
-    if (r128.mmio)
+    if (r128.mmio) {
         r128_sync(100000);
+        r128_cce_stop();
+    }
     memset(&r, 0, sizeof r);
     r.eax = 0x0003;
     sys_rm_int(0x10, &r);
@@ -237,7 +241,10 @@ int r128_set_pitch(int pitch_bytes)
     if (px <= 0 || px % 8)
         return -1;
     r128_wr(R128_CRTC_PITCH, (uint32_t)(px / 8));   /* (r128_crtc.c's crtc_pitch: the width / 8) */
-    r128_wr(R128_DEFAULT_PITCH, (uint32_t)(px / 8));
+    if (r128_cce_running())
+        r128_cce_reg(R128_DEFAULT_PITCH, (uint32_t)(px / 8));
+    else
+        r128_wr(R128_DEFAULT_PITCH, (uint32_t)(px / 8));
     return 0;
 }
 

@@ -66,6 +66,20 @@ void r128_mono(int x, int y, int w, int h, const uint8_t *bits, int stride, uint
 /* Pixels from the CPU in the target's format, rows stride bytes apart. */
 void r128_image(int x, int y, int w, int h, const void *px, int stride);
 
+/* cce.c: the Concurrent Command Engine in PIO mode (R2). r128_cce_init loads the microcode (pairs: 512 dwords,
+ * DATAH and DATAL in turn, an r128_cce.bin read by the caller; NULL: the embedded one, cce_ucode.c) and starts the
+ * engine in 192PIO; from then on the 2D engine's writes go as type-0 packets and r128_sync waits for the CCE. The
+ * CCE stops at r128_cce_stop, a mode set, and an engine reset. */
+extern const uint32_t r128_cce_microcode[512];
+int  r128_cce_init(const uint32_t *pairs);  /* 0, or -1 (the engine not idle to begin with) */
+void r128_cce_stop(void);
+int  r128_cce_running(void);
+void r128_cce_out(const uint32_t *d, int n);    /* packet dwords, buffered */
+void r128_cce_reg(uint32_t reg, uint32_t v);    /* a type-0 register write */
+void r128_cce_flush(void);
+int  r128_cce_idle_wait(uint32_t timeout_us);
+void r128_cce_forget(void);
+
 /* cursor.c: the hardware cursor (64 x 64), as the Matrox HAL's cursor_*: the AND and XOR masks, rows of 8 bytes,
  * the leftmost pixel in bit 7 (AND 0: colour 0 for XOR 0, colour 1 for XOR 1; AND 1: the screen, inverted for
  * XOR 1), stored at off (a multiple of 16); colours 0xRRGGBB; r128_cursor_move takes the image's top left corner,

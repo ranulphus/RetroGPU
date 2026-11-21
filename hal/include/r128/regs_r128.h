@@ -103,6 +103,31 @@
 #define R128_HOST_DATA_LAST         0x17E0
 #define R128_SCALE_3D_CNTL          0x1A00
 
+/* The CCE (Linux's r128_drv.h) */
+#define R128_PM4_BUFFER_OFFSET      0x0700
+#define R128_PM4_BUFFER_CNTL        0x0704
+#define     R128_PM4_NONPM4         (0u << 28)
+#define     R128_PM4_192PIO         (1u << 28)
+#define     R128_PM4_BUFFER_CNTL_NOUPDATE (1u << 27)
+#define R128_PM4_BUFFER_DL_RPTR     0x0710
+#define R128_PM4_BUFFER_DL_WPTR     0x0714
+#define R128_PM4_VC_FPU_SETUP       0x071C
+#define R128_PM4_STAT               0x07B8
+#define     R128_PM4_FIFOCNT_MASK   0x0FFFu
+#define     R128_PM4_BUSY           (1u << 16)
+#define     R128_PM4_GUI_ACTIVE     (1u << 31)
+#define R128_PM4_MICROCODE_ADDR     0x07D4
+#define R128_PM4_MICROCODE_DATAH    0x07DC
+#define R128_PM4_MICROCODE_DATAL    0x07E0
+#define R128_PM4_BUFFER_ADDR        0x07F0
+#define R128_PM4_MICRO_CNTL         0x07FC
+#define     R128_PM4_MICRO_FREERUN  (1u << 30)
+#define R128_PM4_FIFO_DATA_EVEN     0x1000
+#define R128_PM4_FIFO_DATA_ODD      0x1004
+#define R128_CCE_PACKET0            0x00000000u   /* | (count - 1) << 16 | reg >> 2 */
+#define R128_CCE_PACKET2            0x80000000u   /* (a no-op: pads an odd count) */
+#define R128_CCE_PACKET3            0xC0000000u   /* | opcode | (count - 1) << 16 */
+
 /* DP_GUI_MASTER_CNTL's destination data types (r128_reg.h's R128_DATATYPE_* >> 16) */
 enum { R128_DT_CI8 = 2, R128_DT_ARGB1555 = 3, R128_DT_RGB565 = 4, R128_DT_RGB888 = 5, R128_DT_ARGB8888 = 6 };
 

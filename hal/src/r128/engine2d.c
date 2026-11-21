@@ -8,6 +8,15 @@
 #include "mga/sys.h"
 #include <string.h>
 
+/* A drawing-engine register: by MMIO, or a type-0 packet while the CCE runs (it ignores MMIO writes there). */
+static void eng_wr(uint32_t reg, uint32_t v)
+{
+    if (r128_cce_running())
+        r128_cce_reg(reg, v);
+    else
+        r128_wr(reg, v);
+}
+
 static uint32_t t_off, t_dt;
 static int t_pitch, t_bpp, t_bytes;
 static int c_x0, c_y0, c_x1 = 0x7FFF, c_y1 = 0x7FFF;
@@ -16,12 +25,20 @@ static int c_x0, c_y0, c_x1 = 0x7FFF, c_y1 = 0x7FFF;
 static void fifo_wait(int n)
 {
     uint32_t t0 = sys_time_us();
+    if (r128_cce_running())
+        return;                         /* (the CCE's own flush waits for room) */
     while ((int)(r128_rd(R128_GUI_STAT) & R128_GUI_FIFOCNT_MASK) < n && sys_time_us() - t0 < 200000u)
         ;
 }
 
 int r128_idle(void)
 {
+    if (r128.mmio && r128_cce_running()) {
+        uint32_t st;
+        r128_cce_flush();
+        st = r128_rd(R128_PM4_STAT);
+        return (st & R128_PM4_FIFOCNT_MASK) >= 192 && !(st & (R128_PM4_BUSY | R128_PM4_GUI_ACTIVE));
+    }
     return r128.mmio && (r128_rd(R128_GUI_STAT) & R128_GUI_FIFOCNT_MASK) >= 64 &&
            !(r128_rd(R128_GUI_STAT) & R128_GUI_ACTIVE);
 }
@@ -32,6 +49,8 @@ int r128_sync(uint32_t timeout_us)
     uint32_t t0 = sys_time_us();
     if (!r128.mmio)
         return 0;
+    if (r128_cce_running())
+        return r128_cce_idle_wait(timeout_us);
     while ((r128_rd(R128_GUI_STAT) & R128_GUI_FIFOCNT_MASK) < 64 || (r128_rd(R128_GUI_STAT) & R128_GUI_ACTIVE))
         if (sys_time_us() - t0 >= timeout_us)
             return -1;
@@ -60,6 +79,7 @@ void r128_engine_reset(void)
     r128_pll_wr(R128_MCLK_CNTL, mclk);
     r128_wr(R128_CLOCK_CNTL_INDEX, index);
     r128_wr(R128_GEN_RESET_CNTL, gen);
+    r128_cce_forget();                  /* (the CCE stops at an engine reset: the DRM's r128_do_engine_reset) */
 }
 
 void r128_set_target(uint32_t off, int pitch_bytes, int bpp)
@@ -118,12 +138,12 @@ void r128_fill(int x, int y, int w, int h, uint32_t value)
         return;
     po = pitch_offset(t_off, t_pitch, &xa);
     fifo_wait(6);
-    r128_wr(R128_DP_GUI_MASTER_CNTL, master(R128_GMC_BRUSH_SOLID_COLOR | R128_GMC_SRC_DATATYPE_COLOR | R128_ROP3_P));
-    r128_wr(R128_DP_BRUSH_FRGD_CLR, pixel(value));
-    r128_wr(R128_DP_CNTL, R128_DST_X_LEFT_TO_RIGHT | R128_DST_Y_TOP_TO_BOTTOM);
-    r128_wr(R128_DST_PITCH_OFFSET, po);
-    r128_wr(R128_DST_Y_X, yx(x + xa, y));
-    r128_wr(R128_DST_WIDTH_HEIGHT, ((uint32_t)w << 16) | (uint32_t)h);
+    eng_wr(R128_DP_GUI_MASTER_CNTL, master(R128_GMC_BRUSH_SOLID_COLOR | R128_GMC_SRC_DATATYPE_COLOR | R128_ROP3_P));
+    eng_wr(R128_DP_BRUSH_FRGD_CLR, pixel(value));
+    eng_wr(R128_DP_CNTL, R128_DST_X_LEFT_TO_RIGHT | R128_DST_Y_TOP_TO_BOTTOM);
+    eng_wr(R128_DST_PITCH_OFFSET, po);
+    eng_wr(R128_DST_Y_X, yx(x + xa, y));
+    eng_wr(R128_DST_WIDTH_HEIGHT, ((uint32_t)w << 16) | (uint32_t)h);
 }
 
 /* A copy from (sx, sy) of src to (x, y) of the target, already trimmed; the direction chosen so an overlap reads
@@ -142,14 +162,14 @@ static void blt(uint32_t src_off, int src_pitch, int sx, int sy, int x, int y, i
     else
         sy += h - 1, y += h - 1;
     fifo_wait(7);
-    r128_wr(R128_DP_GUI_MASTER_CNTL, master(R128_GMC_SRC_PITCH_OFFSET_CNTL | R128_GMC_BRUSH_NONE |
+    eng_wr(R128_DP_GUI_MASTER_CNTL, master(R128_GMC_SRC_PITCH_OFFSET_CNTL | R128_GMC_BRUSH_NONE |
                                             R128_GMC_SRC_DATATYPE_COLOR | R128_ROP3_S | R128_DP_SRC_SOURCE_MEMORY));
-    r128_wr(R128_DP_CNTL, cntl);
-    r128_wr(R128_DST_PITCH_OFFSET, dpo);
-    r128_wr(R128_SRC_PITCH_OFFSET, spo);
-    r128_wr(R128_SRC_Y_X, yx(sx, sy));
-    r128_wr(R128_DST_Y_X, yx(x, y));
-    r128_wr(R128_DST_HEIGHT_WIDTH, ((uint32_t)h << 16) | (uint32_t)w);
+    eng_wr(R128_DP_CNTL, cntl);
+    eng_wr(R128_DST_PITCH_OFFSET, dpo);
+    eng_wr(R128_SRC_PITCH_OFFSET, spo);
+    eng_wr(R128_SRC_Y_X, yx(sx, sy));
+    eng_wr(R128_DST_Y_X, yx(x, y));
+    eng_wr(R128_DST_HEIGHT_WIDTH, ((uint32_t)h << 16) | (uint32_t)w);
 }
 
 void r128_copy(int sx, int sy, int dx, int dy, int w, int h)
@@ -203,13 +223,13 @@ void r128_mono(int x, int y, int w, int h, const uint8_t *bits, int stride, uint
     total = dwords * h;
     po = pitch_offset(t_off, t_pitch, &xa);
     fifo_wait(6);
-    r128_wr(R128_DP_GUI_MASTER_CNTL, master(R128_GMC_BRUSH_NONE | R128_GMC_SRC_DATATYPE_MONO_FG_LA |
+    eng_wr(R128_DP_GUI_MASTER_CNTL, master(R128_GMC_BRUSH_NONE | R128_GMC_SRC_DATATYPE_MONO_FG_LA |
                                             R128_GMC_BYTE_MSB_TO_LSB | R128_ROP3_S | R128_DP_SRC_SOURCE_HOST_DATA));
-    r128_wr(R128_DP_SRC_FRGD_CLR, pixel(fg));
-    r128_wr(R128_DP_CNTL, R128_DST_X_LEFT_TO_RIGHT | R128_DST_Y_TOP_TO_BOTTOM);
-    r128_wr(R128_DST_PITCH_OFFSET, po);
-    r128_wr(R128_DST_Y_X, yx(x + xa, y));
-    r128_wr(R128_DST_HEIGHT_WIDTH, ((uint32_t)h << 16) | (uint32_t)(dwords * 32));
+    eng_wr(R128_DP_SRC_FRGD_CLR, pixel(fg));
+    eng_wr(R128_DP_CNTL, R128_DST_X_LEFT_TO_RIGHT | R128_DST_Y_TOP_TO_BOTTOM);
+    eng_wr(R128_DST_PITCH_OFFSET, po);
+    eng_wr(R128_DST_Y_X, yx(x + xa, y));
+    eng_wr(R128_DST_HEIGHT_WIDTH, ((uint32_t)h << 16) | (uint32_t)(dwords * 32));
     for (j = 0; j < h; j++) {
         const uint8_t *src = bits + (long)(dy + j) * stride;
         uint8_t *o = (uint8_t *)rowbuf;
@@ -227,7 +247,7 @@ void r128_mono(int x, int y, int w, int h, const uint8_t *bits, int stride, uint
         for (i = 0; i < dwords; i++, n++) {
             if ((n & 7) == 0)
                 fifo_wait(8);
-            r128_wr(n == total - 1 ? R128_HOST_DATA_LAST : R128_HOST_DATA0 + (uint32_t)(n & 7) * 4u, rowbuf[i]);
+            eng_wr(n == total - 1 ? R128_HOST_DATA_LAST : R128_HOST_DATA0 + (uint32_t)(n & 7) * 4u, rowbuf[i]);
         }
     }
 }

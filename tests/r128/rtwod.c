@@ -7,7 +7,7 @@
  * Then, at 16 bits, the hardware cursor and the display start, read from the
  * emulated monitor (86Box's unit tester).
  *
- *   RTWOD [8] [16] [32] [ops=N]
+ *   RTWOD [8] [16] [32] [ops=N] [cce]        (cce: the CCE started after each mode set, the 2D as packets)
  *
  * HX-TEST lines: map, mode-BPP, fill-BPP, copy-BPP, copy-from-BPP, mono-BPP,
  * image-BPP, mixed-BPP, cursor, cursor-edge, start, start-high. */
@@ -33,7 +33,7 @@ static uint32_t used;
 static int bpp, bpp_b;
 static surface scr, s1, s2;
 static unsigned seed = 1;
-static int nops = 300;
+static int nops = 300, use_cce;
 
 static unsigned rnd(unsigned n)
 {
@@ -390,6 +390,14 @@ static int depth(int b)
         return 0;
     }
     hx_test(n, 1, "mode %03x, pitch %u", m.mode, m.pitch_bytes);
+    if (use_cce) {
+        name_of(n, "cce");
+        if (r128_cce_init(NULL) != 0) {
+            hx_test(n, 0, "the CCE did not start");
+            return 0;
+        }
+        hx_test(n, 1, "the CCE started in 192PIO");
+    }
     /* The screen, then two surfaces of other pitches off it. */
     off = (uint32_t)m.pitch_bytes * SH;
     used = off + 1024u * 1024u;                 /* (s1 and s2 at 32 bits: 512 KB) */
@@ -417,6 +425,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "16")) d16 = 1;
         else if (!strcmp(argv[i], "32")) d32 = 1;
         else if (!strncmp(argv[i], "ops=", 4)) nops = atoi(argv[i] + 4);
+        else if (!strcmp(argv[i], "cce")) use_cce = 1;
     }
     if (!d8 && !d16 && !d32)
         d8 = d16 = d32 = 1;

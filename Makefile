@@ -100,7 +100,8 @@ build/djgpp/libvirge.a: $(VIRGE_SRCS:%.c=build/djgpp/%.o)
 	@rm -f $@
 	$(DJAR) rcs $@ $^
 # The ATI Rage 128 (docs/rage128.md): its register layer, a library of its own as the ViRGE's and the TNT2's are.
-R128_SRCS := hal/src/r128/chip.c hal/src/r128/engine2d.c hal/src/r128/cursor.c
+R128_SRCS := hal/src/r128/chip.c hal/src/r128/engine2d.c hal/src/r128/cursor.c hal/src/r128/cce.c \
+             hal/src/r128/cce_ucode.c
 build/djgpp/libr128.a: $(R128_SRCS:%.c=build/djgpp/%.o)
 	@rm -f $@
 	$(DJAR) rcs $@ $^
