@@ -262,7 +262,7 @@ static rtex *prepare(dgl_texture *t)
     x->palgen = pal ? pal->gen : 0;
     t->be = x;
     t->dirty = 0;
-    r128_3d_stale = 1;                  /* (the context sent again: its TEX_CACHE_FLUSH) */
+    r128_3d_tex_written();              /* (the texture cache flushed at the next draw) */
     dgl_texc.uploads++;
     dgl_texc.upload_bytes += size;
     return x;
@@ -613,9 +613,11 @@ static void validate(void)
     else
         c->plane_3d_mask_c = (dgl_gl.color_mask[0] ? 0xF800u : 0) | (dgl_gl.color_mask[1] ? 0x07E0u : 0) |
                              (dgl_gl.color_mask[2] ? 0x001Fu : 0);
-    r128_3d_format(R128_VC_FRMT_RHW | R128_VC_FRMT_DIFFUSE_ARGB | R128_VC_FRMT_SPEC_FRGB | R128_VC_FRMT_S_T |
-                   (two ? R128_VC_FRMT_S2_T2 : 0));
-    r128_3d_stale = 1;                          /* (sent at the next triangle) */
+    /* (the vertex's dwords: x, y, z, 1/w and the colour always; the fog factor only fogging, s and t only
+     * textured: every dword a bus write in PIO) */
+    r128_3d_format(R128_VC_FRMT_RHW | R128_VC_FRMT_DIFFUSE_ARGB | (fogging ? R128_VC_FRMT_SPEC_FRGB : 0) |
+                   (x0 ? R128_VC_FRMT_S_T : 0) | (two ? R128_VC_FRMT_S2_T2 : 0));
+    r128_3d_dirty = 1;                          /* (the groups that changed sent at the next triangle) */
     dgl_gl.dirty &= ~(DGL_DIRTY_RASTER | DGL_DIRTY_TARGET | DGL_DIRTY_TEXTURE | DGL_DIRTY_FOG | DGL_DIRTY_CLIP);
     valid_ok = 1;
     valid_tex[0] = t0, valid_tex[1] = t1;
@@ -993,7 +995,7 @@ static int tex_sub(dgl_texture *t, int level, int x, int y, int w, int h)
         put_texels(r128.fb + tx->lvoff[0] + (uint32_t)(((y + j) * l->w + x) * tx->cpp),
                    l->rgba + ((y + j) * l->w + x) * 4, w, tx->dt);
     r128_vram_written(tx->lvoff[0] + (uint32_t)(((y + h - 1) * l->w + x + w - 1) * tx->cpp));
-    r128_3d_stale = 1;                          /* (the texture cache flushed with the context) */
+    r128_3d_tex_written();                      /* (the texture cache flushed at the next draw) */
     dgl_texc.sub_fast++;
     dgl_texc.sub_sync++;
     return 1;

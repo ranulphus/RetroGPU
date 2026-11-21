@@ -392,11 +392,11 @@ static int depth(int b)
     hx_test(n, 1, "mode %03x, pitch %u", m.mode, m.pitch_bytes);
     if (use_cce) {
         name_of(n, "cce");
-        if (r128_cce_init(NULL) != 0) {
+        if ((use_cce == 2 ? r128_cce_init_ring(NULL, r128.vram_bytes - 0x40000u, 0x10000u) : r128_cce_init(NULL)) != 0) {
             hx_test(n, 0, "the CCE did not start");
             return 0;
         }
-        hx_test(n, 1, "the CCE started in 192PIO");
+        hx_test(n, 1, "the CCE started in %s", use_cce == 2 ? "192BM, its ring in VRAM" : "192PIO");
     }
     /* The screen, then two surfaces of other pitches off it. */
     off = (uint32_t)m.pitch_bytes * SH;
@@ -426,6 +426,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "32")) d32 = 1;
         else if (!strncmp(argv[i], "ops=", 4)) nops = atoi(argv[i] + 4);
         else if (!strcmp(argv[i], "cce")) use_cce = 1;
+        else if (!strcmp(argv[i], "ring")) use_cce = 2;
     }
     if (!d8 && !d16 && !d32)
         d8 = d16 = d32 = 1;

@@ -34,12 +34,8 @@ static void fifo_wait(int n)
 
 int r128_idle(void)
 {
-    if (r128.mmio && r128_cce_running()) {
-        uint32_t st;
-        r128_cce_flush();
-        st = r128_rd(R128_PM4_STAT);
-        return (st & R128_PM4_FIFOCNT_MASK) >= 192 && !(st & (R128_PM4_BUSY | R128_PM4_GUI_ACTIVE));
-    }
+    if (r128.mmio && r128_cce_running())
+        return r128_cce_drained();
     return r128.mmio && (r128_rd(R128_GUI_STAT) & R128_GUI_FIFOCNT_MASK) >= 64 &&
            !(r128_rd(R128_GUI_STAT) & R128_GUI_ACTIVE);
 }

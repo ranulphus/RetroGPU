@@ -77,6 +77,15 @@ void r128_image(int x, int y, int w, int h, const void *px, int stride);
  * CCE stops at r128_cce_stop, a mode set, and an engine reset. */
 extern const uint32_t r128_cce_microcode[512];
 int  r128_cce_init(const uint32_t *pairs);  /* 0, or -1 (the engine not idle to begin with) */
+/* The same in 192BM: the packets in a ring in VRAM at off (bytes a power of two from 4 KB to 1 MB, 128 bytes more
+ * after it kept too) that the CCE fetches itself, the CPU writing it as memory (R4's speed: no MMIO write a dword). */
+int  r128_cce_init_ring(const uint32_t *pairs, uint32_t off, uint32_t bytes);
+int  r128_cce_ring(void);                   /* 1: running from a ring */
+int  r128_cce_drained(void);                /* 1: everything sent fetched, the engine idle */
+/* PIO through a burst window: page is a mapping of the registers' FIFO page (offset 0x1000 of either register
+ * aperture; the second, CONFIG_REG_1_BASE's, can be made write-combining without the first), written a 32-byte line
+ * at a time in address order; NULL: back to EVEN and ODD. Until r128_cce_stop. */
+void r128_cce_burst_window(volatile void *page);
 void r128_cce_stop(void);
 int  r128_cce_running(void);
 void r128_cce_out(const uint32_t *d, int n);    /* packet dwords, buffered */
@@ -105,6 +114,9 @@ extern r128_ctx3d r128_3d;
 /* (set by any 2D register write: the 2D engine shares the 3D context's registers, and a triangle after a fill drew
  * nothing on the P3; r128_tri sends the context again first) */
 extern int r128_3d_stale;
+/* (set by a caller that changed r128_3d's words: the next triangle sends the groups that changed) */
+extern int r128_3d_dirty;
+void r128_3d_tex_written(void);         /* textures written by the CPU: the texture cache flushed at the next draw */
 typedef struct {
     float x, y, z, rhw;
     uint32_t argb, spec;                /* (the specular's top byte: the fog factor) */

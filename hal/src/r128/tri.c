@@ -9,6 +9,10 @@
 
 r128_ctx3d r128_3d;
 int r128_3d_stale = 1;
+int r128_3d_dirty = 1;
+static int tex_flush;                   /* (the context block again for its TEX_CACHE_FLUSH: textures written) */
+
+void r128_3d_tex_written(void) { tex_flush = 1; r128_3d_dirty = 1; }
 static int vfmt = R128_VC_FRMT_RHW | R128_VC_FRMT_DIFFUSE_ARGB;
 
 static uint32_t pitch_offset(uint32_t off, int pitch_bytes, int bytes)
@@ -65,39 +69,69 @@ void r128_3d_init(uint32_t color_off, int pitch_bytes, int bpp, uint32_t z_off, 
  * cases on the P3, and without it the texel's alpha never reached the blend: TEX_MAP_ALPHA_IN_TEXTURE), then the
  * context's 12 registers from DST_PITCH_OFFSET_C, SETUP_CNTL and PM4_VC_FPU_SETUP, the masks, the window, the
  * constant colour, and the texture units' blocks (the second's only while it is on). */
+static r128_ctx3d sent;                 /* the words the engine has (while !r128_3d_stale) */
+
+#define CHANGED(f, n) (full || memcmp(&c->f, &sent.f, (n) * sizeof(uint32_t)) != 0)
+
+/* Only the groups that changed since the last time (all of them after 2D work, r128_3d_stale): in PIO each dword
+ * is a bus write (~140 cycles on the P3), and a texture change alone was 75 dwords of the whole context. */
 void r128_3d_emit(void)
 {
     const r128_ctx3d *c = &r128_3d;
     uint32_t p[16];
-    int i;
-    r128_cce_reg(R128_SCALE_3D_CNTL, c->scale_3d_cntl);
-    p[0] = R128_CCE_PACKET0 | 11u << 16 | (R128_DST_PITCH_OFFSET_C >> 2);
-    p[1] = c->dst_pitch_offset_c, p[2] = c->dp_gui_master_cntl_c, p[3] = c->sc_top_left_c;
-    p[4] = c->sc_bottom_right_c, p[5] = c->z_offset_c, p[6] = c->z_pitch_c, p[7] = c->z_sten_cntl_c;
-    p[8] = c->tex_cntl_c, p[9] = c->misc_3d_state_cntl_reg, p[10] = c->texture_clr_cmp_clr_c;
-    p[11] = c->texture_clr_cmp_msk_c, p[12] = c->fog_color_c;
-    r128_cce_out(p, 13);
-    r128_cce_reg(R128_SETUP_CNTL, c->setup_cntl);
-    r128_cce_reg(R128_PM4_VC_FPU_SETUP, c->pm4_vc_fpu_setup);
-    r128_cce_reg(R128_DP_WRITE_MASK, c->dp_write_mask);
-    r128_cce_reg(R128_STEN_REF_MASK_C, c->sten_ref_mask_c);
-    r128_cce_reg(R128_PLANE_3D_MASK_C, c->plane_3d_mask_c);
-    r128_cce_reg(R128_WINDOW_XY_OFFSET, c->window_xy_offset);
-    r128_cce_reg(R128_CONSTANT_COLOR_C, c->constant_color_c);
-    p[0] = R128_CCE_PACKET0 | 13u << 16 | (R128_PRIM_TEX_CNTL_C >> 2);
-    p[1] = c->prim_tex_cntl_c, p[2] = c->prim_texture_combine_cntl_c, p[3] = c->tex_size_pitch_c;
-    r128_cce_out(p, 4);
-    for (i = 0; i < 11; i++)
-        r128_cce_out(&c->prim_tex_offset_c[i], 1);
-    if (c->tex_cntl_c & R128_SEC_TEXMAP_ENABLE) {
+    int i, full = r128_3d_stale, scale = 0, tex0, tex1;
+    tex0 = CHANGED(prim_tex_cntl_c, 14);
+    tex1 = (c->tex_cntl_c & R128_SEC_TEXMAP_ENABLE) &&
+           (CHANGED(sec_tex_cntl_c, 13) || !(sent.tex_cntl_c & R128_SEC_TEXMAP_ENABLE));
+    if (CHANGED(scale_3d_cntl, 1)) {
+        r128_cce_reg(R128_SCALE_3D_CNTL, c->scale_3d_cntl);
+        scale = 1;                      /* (then MISC_3D_STATE_CNTL_REG's block after it, its blend over the core's) */
+    }
+    /* (the context block again with any texture block, as Mesa's driver sends them: a texture's words alone, its
+     * offsets, size and filters, drew nothing new until TEX_CNTL_C came again: conformance t06 on the P3) */
+    if (scale || tex_flush || tex0 || tex1 || CHANGED(dst_pitch_offset_c, 12)) {
+        p[0] = R128_CCE_PACKET0 | 11u << 16 | (R128_DST_PITCH_OFFSET_C >> 2);
+        p[1] = c->dst_pitch_offset_c, p[2] = c->dp_gui_master_cntl_c, p[3] = c->sc_top_left_c;
+        p[4] = c->sc_bottom_right_c, p[5] = c->z_offset_c, p[6] = c->z_pitch_c, p[7] = c->z_sten_cntl_c;
+        p[8] = c->tex_cntl_c, p[9] = c->misc_3d_state_cntl_reg, p[10] = c->texture_clr_cmp_clr_c;
+        p[11] = c->texture_clr_cmp_msk_c, p[12] = c->fog_color_c;
+        r128_cce_out(p, 13);
+    }
+    if (CHANGED(setup_cntl, 1))
+        r128_cce_reg(R128_SETUP_CNTL, c->setup_cntl);
+    if (CHANGED(pm4_vc_fpu_setup, 1))
+        r128_cce_reg(R128_PM4_VC_FPU_SETUP, c->pm4_vc_fpu_setup);
+    if (CHANGED(dp_write_mask, 1))
+        r128_cce_reg(R128_DP_WRITE_MASK, c->dp_write_mask);
+    if (CHANGED(sten_ref_mask_c, 1))
+        r128_cce_reg(R128_STEN_REF_MASK_C, c->sten_ref_mask_c);
+    if (CHANGED(plane_3d_mask_c, 1))
+        r128_cce_reg(R128_PLANE_3D_MASK_C, c->plane_3d_mask_c);
+    if (CHANGED(window_xy_offset, 1))
+        r128_cce_reg(R128_WINDOW_XY_OFFSET, c->window_xy_offset);
+    if (CHANGED(constant_color_c, 1))
+        r128_cce_reg(R128_CONSTANT_COLOR_C, c->constant_color_c);
+    if (tex0) {
+        p[0] = R128_CCE_PACKET0 | 13u << 16 | (R128_PRIM_TEX_CNTL_C >> 2);
+        p[1] = c->prim_tex_cntl_c, p[2] = c->prim_texture_combine_cntl_c, p[3] = c->tex_size_pitch_c;
+        for (i = 0; i < 11; i++)
+            p[4 + i] = c->prim_tex_offset_c[i];
+        r128_cce_out(p, 15);
+    }
+    if (tex1) {
         p[0] = R128_CCE_PACKET0 | 12u << 16 | (R128_SEC_TEX_CNTL_C >> 2);
         p[1] = c->sec_tex_cntl_c, p[2] = c->sec_tex_combine_cntl_c;
-        r128_cce_out(p, 3);
         for (i = 0; i < 11; i++)
-            r128_cce_out(&c->sec_tex_offset_c[i], 1);
+            p[3 + i] = c->sec_tex_offset_c[i];
+        r128_cce_out(p, 14);
     }
-    r128_cce_reg(R128_PC_GUI_CTLSTAT, R128_PC_FLUSH_GUI);
-    r128_3d_stale = 0;
+    /* The pixel cache flushed in the stream after 2D work, and after the CPU wrote textures: with only
+     * TEX_CNTL_C's TEX_CACHE_FLUSH, the triangles with a texture written since drew nothing (conformance t06: each
+     * texture after the first); the flush was the full send's, and it alone mended it. */
+    if (full || tex_flush)
+        r128_cce_reg(R128_PC_GUI_CTLSTAT, R128_PC_FLUSH_GUI);
+    sent = *c;
+    r128_3d_stale = r128_3d_dirty = tex_flush = 0;
 }
 
 void r128_3d_format(int fmt) { vfmt = fmt; }
@@ -116,7 +150,7 @@ void r128_tri(const r128_vertex *a, const r128_vertex *b, const r128_vertex *c)
     uint32_t p[3 + 3 * 10];
     const r128_vertex *v[3];
     int n = 3, i;
-    if (r128_3d_stale)
+    if (r128_3d_stale || r128_3d_dirty)
         r128_3d_emit();
     v[0] = a, v[1] = b, v[2] = c;
     for (i = 0; i < 3; i++) {
@@ -141,7 +175,7 @@ void r128_poly(const r128_vertex *v, int nv)
         return;
     if (nv > 16)
         nv = 16;
-    if (r128_3d_stale)
+    if (r128_3d_stale || r128_3d_dirty)
         r128_3d_emit();
     for (i = 0; i < nv; i++) {
         p[n++] = fbits(v[i].x), p[n++] = fbits(v[i].y), p[n++] = fbits(v[i].z);

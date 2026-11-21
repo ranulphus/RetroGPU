@@ -43,6 +43,8 @@ static float kover[2];              /* k=MIN,MAX: texels a pixel, for every text
 /* (the Rage 128, the P3, 2026-11-21: lodmode 3, the largest single derivative, at its bias byte 63 matched best:
  * 957 of 47,007 pixels off in tex-mip; OpenGL's (0) 2,304, the TNT2's (4) 34,953) */
 static int lodmode = 3, lodsel, lodlin;
+static int use_ring;                    /* (ring: the CCE from a ring in VRAM, not PIO) */
+static int use_burst;                   /* (burst: PIO in whole lines through the FIFO page) */
 static double lodbias;
 static int chipbias = 0x3F;          /* (TEX_CNTL_C's LOD bias byte: Mesa's r128 driver's 63 for no bias) */
 static int snap = 4;                /* snap=N: vertices rounded to 1/2^N pixel for both: the chip sets triangles up from
@@ -533,6 +535,10 @@ int main(int argc, char **argv)
             sscanf(argv[i] + 2, "%f,%f", &kover[0], &kover[1]);
         else if (!strncmp(argv[i], "snap=", 5))
             snap = atoi(argv[i] + 5);
+        else if (!strcmp(argv[i], "ring"))
+            use_ring = 1;
+        else if (!strcmp(argv[i], "burst"))
+            use_burst = 1;
         else if (!strncmp(argv[i], "lodmode=", 8))
             lodmode = atoi(argv[i] + 8);
         else if (!strncmp(argv[i], "lodsel=", 7))
@@ -555,12 +561,14 @@ int main(int argc, char **argv)
     }
     pitch = m.pitch_bytes;
     hx_test("mode", 1, "mode %03x, pitch %d", m.mode, pitch);
-    if (r128_cce_init(NULL) != 0) {
+    if ((use_ring ? r128_cce_init_ring(NULL, r128.vram_bytes - 0x40000u, 0x10000u) : r128_cce_init(NULL)) != 0) {
         r128_text_mode();
         hx_test("cce", 0, "the CCE did not start");
         hx_done(1);
     }
-    hx_test("cce", 1, "192PIO");
+    if (use_burst)                              /* (the burst path through aperture 0's own FIFO page, uncached) */
+        r128_cce_burst_window(r128.mmio + 0x1000);
+    hx_test("cce", 1, "%s%s", use_ring ? "192BM, its ring in VRAM" : "192PIO", use_burst ? ", 32-byte lines" : "");
     ref = malloc(W * H * 2);
     refz = malloc(W * H * 2);
     refm = malloc(W * H);

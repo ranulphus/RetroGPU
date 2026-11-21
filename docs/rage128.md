@@ -139,6 +139,36 @@ quads; GL_POLYGON whole as one triangle fan (`r128_poly`).
   On GLOS, a RUN.BAT line longer than COMMAND.COM's 127 characters doesn't run ("GLOS can't run it here."): the
   timedemo's `-mtex` lines needed the program renamed short.
 
+### R4's speed (2026-11-21)
+
+The owner's aim: about the TNT2 M64's speed on the same P3 (GLQuake 77.4 and 104.5 fps at 640x480 and 320x200).
+
+- **Where the time goes** (`PROF=1`, k cycles a frame, GLQuake at 320x200 with `-mtex`): the game 1,615, the
+  transform 954, the projection 906, validation 408, textures 660, the swap 294, all at or under the TNT2's; but
+  **sending to the chip 2,580 against the TNT2's 290**. In PIO each packet dword is an uncached write over the bus.
+- **RPIO** (`tests/r128/rpio.c`): on the P3 such a write costs 138 CPU cycles (0.3 µs; the ALi chipset), 183 through
+  the layer at first (a PM4_STAT read and a clock read every 32 dwords), 144 now. The CCE never made the CPU
+  wait: the bus is the limit.
+- **The cuts** (2026-11-21): the FIFO's room read once a batch, the clock only while waiting; the context sent
+  by the groups that changed (a texture change was 75 dwords, now 28: the context block goes with any texture
+  block, as Mesa sends them); no fog dword without fog, no s and t untextured. GLQuake: 38.72 and 44.12 fps at
+  640x480 (two passes, `-mtex`), 57.60 and 60.58 at 320x200 (from 34.97, 36.88, 48.50, 47.36). With GLOS's `MTRR
+  LFB ON` (safe here: the registers have a BAR of their own) texture writes take a third less time.
+- **Found on the P3:** after the CPU writes a texture, the pixel cache's flush (PC_GUI_CTLSTAT) must come in the
+  stream as well as TEX_CNTL_C's TEX_CACHE_FLUSH; without it every texture written after the first drew nothing
+  (conformance t06).
+- **The bus-master ring doesn't fetch** (`tests/r128/rringp.c`): with the ring at a VRAM offset; or in
+  conventional memory through the chip's PCI GART (PCI_GART_PAGE at a 32 KB table, 32 KB aligned; BM_CHUNK_0_VAL's
+  force-to-PCI bits as X.org sets them for AGP boards; bus mastering on in BUS_CNTL, the card and the AGP bridge),
+  the CCE goes busy at the first write pointer and its read pointer never moves. PM4_BUFFER_OFFSET keeps 25 bits:
+  offsets into the GART's space only. ATI's register guide (RAGE 128 PRO RRG, bitsavers) doesn't describe the
+  CCE's own registers.
+- **The next step: bursts.** The FIFO takes dwords anywhere in 0x1000-0x13FF (RPIO), in address order within a
+  write (RTRI `burst`: all cases pass through it), and the chip's second register aperture
+  (CONFIG_REG_1_BASE, 0xDFEFE000 on the P3) is there to be given another cache type. Written through a
+  write-combining mapping of its FIFO page, a 32-byte line goes as one burst. `r128_cce_burst_window` is the path;
+  it waits for a way to make that one 4 KB page write-combining under GLOS (asked of GLOS, 2026-11-21).
+
 ## Next
 
 R5 Glide's back end, R6 86Box's Rage 128 in

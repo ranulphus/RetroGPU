@@ -208,10 +208,13 @@ enum { R128_COMB_DIS, R128_COMB_COPY, R128_COMB_COPY_INP, R128_COMB_MODULATE, R1
 #define     R128_VC_NUM_SHIFT       16
 
 /* The CCE (Linux's r128_drv.h) */
+#define R128_BUS_CNTL               0x0030      /* (bit 6: BUS_MASTER_DIS) */
 #define R128_PM4_BUFFER_OFFSET      0x0700
+#define R128_PM4_BUFFER_WM_CNTL     0x0708
 #define R128_PM4_BUFFER_CNTL        0x0704
 #define     R128_PM4_NONPM4         (0u << 28)
 #define     R128_PM4_192PIO         (1u << 28)
+#define     R128_PM4_192BM          (2u << 28)
 #define     R128_PM4_BUFFER_CNTL_NOUPDATE (1u << 27)
 #define R128_PM4_BUFFER_DL_RPTR     0x0710
 #define R128_PM4_BUFFER_DL_WPTR     0x0714
