@@ -89,7 +89,28 @@ of 2026-11-12. The card is in bench B (the P3) since 2026-11-20, the TNT2 out.
     exact, alpha 128 over blue within one step.
   - **RMIP:** which level the chip samples, at a sweep of bias bytes.
 
+## R3: the device (2026-11-21)
+
+`hal/src/rg/r128.c` (`rg_r128_device`, "r128"; its open context for the drawing back ends in `rg/r128_dev.h`), on
+the TNT2 device's pattern. The device list is now mga, virge, tnt2, r128, then vbe and mem by name.
+
+- **Modes:** the BIOS's linear modes at 16 (R5G6B5) and 32 bits, the ones the 3D engine draws.
+- **Pitch:** a requested pitch (Glide's 1024 pixels) is written to the CRTC, and every surface and the engine's
+  default pitch use it; rows must be multiples of 8 pixels and 16 bytes.
+- **Memory:** colour A, colour B, then a linear depth buffer (Z16 with 16-bit colour, Z24S8 with 32, at the colour's
+  pitch in pixels), each 4 KB aligned. Textures get the rest, up to the top of the 16 MB.
+- **The CCE** starts at open, with the layer's embedded microcode, or with `R128_CCE.BIN` (linux-firmware's
+  `r128/r128_cce.bin`, big-endian, 2048 bytes) when it is in the program's folder, else in the current one. Using
+  the file always prints a `DGL-R128` line. The Open Watcom build (Glide's) has no C library, so it always uses
+  the embedded copy. Close returns to text mode with the CCE stopped.
+- **Swap:** it waits for the engine, then writes the display start before the retrace wait (the TNT2's order;
+  RFLIP's watch is owed). With PIO feeding, the chip is never more than its 192-entry FIFO behind the CPU, so the
+  wait is short.
+- **RGDEV** on the P3 passes: `dev=r128`, chosen by probe, `pitch=1024`, and with `R128_CCE.BIN` beside it.
+- **DOS-GL** still draws through the VBE software renderer on this card until R4 gives it a back end;
+  `DGL_DEVICE=r128` waits for R4 too.
+
 ## Next
 
-R3 the device on `rg_device` (`hal/src/rg/r128.c`), R4 DOS-GL's back end, R5 Glide's, R6 86Box's Rage 128 in
+R4 DOS-GL's back end, R5 Glide's, R6 86Box's Rage 128 in
 Loop A, R7 the docs (the plan approved 2026-11-21).

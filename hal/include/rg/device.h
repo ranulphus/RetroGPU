@@ -6,10 +6,13 @@
  * down. What is drawn, and how, is the drawing back end's (GL's: gl/src/
  * backend), which knows its own device's private side.
  *
- * Devices: "mga" (the Matrox HAL behind the table: hal/src/rg/mga.c) and
- * "virge" (the S3 ViRGE/DX: hal/src/rg/virge.c, docs/virge.md V3), and "mem"
- * (buffers in system memory, shown nowhere: the software renderer's tests,
- * hal/src/rg/mem.c); later "soft" (B3). rg_choose picks one by DGL_DEVICE,
+ * Devices: "mga" (the Matrox HAL behind the table: hal/src/rg/mga.c),
+ * "virge" (the S3 ViRGE/DX: hal/src/rg/virge.c, docs/virge.md V3), "tnt2"
+ * (the Riva TNT2: hal/src/rg/tnt2.c, docs/tnt2.md T3), "r128" (the ATI
+ * Rage 128: hal/src/rg/r128.c, docs/rage128.md R3), "vbe" (any VBE card's
+ * linear window, drawn by the CPU: hal/src/rg/vbe_soft.c) and "mem" (buffers
+ * in system memory, shown nowhere: the software renderer's tests,
+ * hal/src/rg/mem.c). rg_choose picks one by DGL_DEVICE,
  * or the first whose probe succeeds, in that order, of those not chosen
  * only by name. */
 #ifndef RG_DEVICE_H
@@ -239,6 +242,6 @@ void rg_set_format(int (*fn)(char *buf, size_t size, const char *fmt, va_list ap
 #define RG_INFO(...) do { if (RG_LOG_LEVEL >= 2) rg_logf(__VA_ARGS__); } while (0)
 #define RG_DBG(...)  do { if (RG_LOG_LEVEL >= 3) rg_logf(__VA_ARGS__); } while (0)
 #endif
-extern const rg_device rg_mga_device, rg_virge_device, rg_tnt2_device, rg_vbe_device, rg_mem_device;
+extern const rg_device rg_mga_device, rg_virge_device, rg_tnt2_device, rg_r128_device, rg_vbe_device, rg_mem_device;
 
 #endif
