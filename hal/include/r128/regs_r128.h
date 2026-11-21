@@ -103,6 +103,79 @@
 #define R128_HOST_DATA_LAST         0x17E0
 #define R128_SCALE_3D_CNTL          0x1A00
 
+/* The 3D context (X.org's r128_reg.h; Mesa 7.x's r128 driver's values: r128_state.c's r128DDInitState) */
+#define R128_PC_GUI_CTLSTAT         0x1748
+#define     R128_PC_FLUSH_GUI       (3u << 0)
+#define R128_SETUP_CNTL             0x1BC4
+#define     R128_COLOR_GOURAUD      (4u << 3)
+#define     R128_PRIM_TYPE_TRI      (0u << 7)
+#define     R128_TEXTURE_ST_MULT_W  (0u << 9)
+#define     R128_STARTING_VERTEX_1  (1u << 14)
+#define     R128_ENDING_VERTEX_3    (3u << 16)
+#define     R128_SU_POLY_LINE_NOT_LAST (1u << 18)
+#define     R128_SUB_PIX_4BITS      (1u << 19)
+#define R128_WINDOW_XY_OFFSET       0x1BCC
+#define R128_DST_PITCH_OFFSET_C     0x1C80      /* (the context's 12 registers from here, in a row) */
+#define R128_DP_GUI_MASTER_CNTL_C   0x1C84
+#define     R128_GMC_DST_CLIPPING   (1u << 3)
+#define     R128_GMC_3D_FCN_EN      (1u << 27)
+#define     R128_GMC_WR_MSK_DIS     (1u << 30)
+#define R128_Z_STEN_CNTL_C          0x1C98
+#define     R128_Z_PIX_WIDTH_16     (0u << 1)
+#define     R128_Z_PIX_WIDTH_24     (1u << 1)
+#define     R128_Z_PIX_WIDTH_32     (2u << 1)
+#define     R128_Z_TEST_SHIFT       4           /* 0 never, 1 <, 2 <=, 3 =, 4 >=, 5 >, 6 !=, 7 always */
+#define     R128_STENCIL_TEST_ALWAYS (7u << 12)
+#define R128_TEX_CNTL_C             0x1C9C
+#define     R128_Z_ENABLE           (1u << 0)
+#define     R128_Z_WRITE_ENABLE     (1u << 1)
+#define     R128_TEXMAP_ENABLE      (1u << 4)
+#define     R128_SEC_TEXMAP_ENABLE  (1u << 5)
+#define     R128_FOG_ENABLE         (1u << 7)
+#define     R128_DITHER_ENABLE      (1u << 8)
+#define     R128_ALPHA_ENABLE       (1u << 9)
+#define     R128_ALPHA_TEST_ENABLE  (1u << 10)
+#define     R128_TEX_CACHE_FLUSH    (1u << 23)
+#define     R128_LOD_BIAS_SHIFT     24
+#define R128_MISC_3D_STATE_CNTL_REG 0x1CA0
+#define     R128_MISC_SCALE_3D_TEXMAP_SHADE (2u << 8)
+#define     R128_MISC_SCALE_PIX_REPLICATE   (1u << 10)
+#define     R128_FOG_TABLE          (1u << 14)
+#define     R128_ALPHA_BLEND_SRC_SHIFT 16
+#define     R128_ALPHA_BLEND_DST_SHIFT 20
+#define     R128_ALPHA_TEST_SHIFT   24
+enum { R128_BLEND_ZERO, R128_BLEND_ONE, R128_BLEND_SRCCOLOR, R128_BLEND_INVSRCCOLOR, R128_BLEND_SRCALPHA,
+       R128_BLEND_INVSRCALPHA, R128_BLEND_DSTALPHA, R128_BLEND_INVDSTALPHA, R128_BLEND_DSTCOLOR, R128_BLEND_INVDSTCOLOR,
+       R128_BLEND_SAT };
+#define R128_FOG_COLOR_C            0x1CAC
+#define R128_PRIM_TEX_CNTL_C        0x1CB0
+#define R128_CONSTANT_COLOR_C       0x1D34
+#define R128_STEN_REF_MASK_C        0x1D40
+#define R128_PLANE_3D_MASK_C        0x1D44
+#define     R128_FRONT_DIR_CCW      (1u << 0)
+#define     R128_BACKFACE_SOLID     (3u << 1)
+#define     R128_FRONTFACE_SOLID    (3u << 3)
+#define     R128_FPU_COLOR_GOURAUD  (2u << 5)
+#define     R128_FPU_SUB_PIX_4BITS  (1u << 7)
+#define     R128_FPU_MODE_3D        (1u << 8)
+#define     R128_TRAP_BITS_DISABLE  (1u << 9)
+#define     R128_FLAT_SHADE_VERTEX_OGL (1u << 14)
+#define     R128_SCALE_DITHER_TABLE (1u << 1)
+#define     R128_DITHER_INIT_RESET  (1u << 3)
+#define     R128_SCALE_3D_TEXMAP_SHADE (2u << 6)
+#define     R128_SCALE_PIX_REPLICATE (1u << 8)
+#define     R128_TEX_MAP_ALPHA_IN_TEXTURE (1u << 30)
+#define     R128_TEX_CACHE_LINE_SIZE_4QW (1u << 31)
+#define R128_3D_RNDR_GEN_PRIM       0x00002500u /* (a type-3 opcode: the vertices inline) */
+#define     R128_VC_FRMT_RHW        0x001u
+#define     R128_VC_FRMT_DIFFUSE_ARGB 0x008u
+#define     R128_VC_FRMT_SPEC_FRGB  0x040u
+#define     R128_VC_FRMT_S_T        0x080u
+#define     R128_VC_FRMT_S2_T2      0x100u
+#define     R128_VC_PRIM_TRI_LIST   0x004u
+#define     R128_VC_WALK_RING       0x030u
+#define     R128_VC_NUM_SHIFT       16
+
 /* The CCE (Linux's r128_drv.h) */
 #define R128_PM4_BUFFER_OFFSET      0x0700
 #define R128_PM4_BUFFER_CNTL        0x0704

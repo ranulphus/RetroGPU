@@ -80,6 +80,27 @@ void r128_cce_flush(void);
 int  r128_cce_idle_wait(uint32_t timeout_us);
 void r128_cce_forget(void);
 
+/* tri.c: the 3D engine through the CCE (R2). r128_3d holds the context's register words (Mesa's r128 driver's
+ * starting values, made by r128_3d_init for a target, a linear depth buffer of zbits 16, 24 or 32); a caller
+ * changes them, then r128_3d_emit sends them all (the CCE running). Triangles go as 3D_RNDR_GEN_PRIM packets in
+ * r128_3d_format's vertex format (R128_VC_FRMT_*: x, y, z always). */
+typedef struct {
+    uint32_t dst_pitch_offset_c, dp_gui_master_cntl_c, sc_top_left_c, sc_bottom_right_c, z_offset_c, z_pitch_c;
+    uint32_t z_sten_cntl_c, tex_cntl_c, misc_3d_state_cntl_reg, texture_clr_cmp_clr_c, texture_clr_cmp_msk_c;
+    uint32_t fog_color_c, setup_cntl, pm4_vc_fpu_setup, dp_write_mask, sten_ref_mask_c, plane_3d_mask_c;
+    uint32_t window_xy_offset, constant_color_c, scale_3d_cntl, prim_tex_cntl_c;
+} r128_ctx3d;
+extern r128_ctx3d r128_3d;
+typedef struct {
+    float x, y, z, rhw;
+    uint32_t argb, spec;                /* (the specular's top byte: the fog factor) */
+    float s, t, s2, t2;
+} r128_vertex;
+void r128_3d_init(uint32_t color_off, int pitch_bytes, int bpp, uint32_t z_off, int z_pitch_bytes, int zbits);
+void r128_3d_emit(void);
+void r128_3d_format(int fmt);
+void r128_tri(const r128_vertex *a, const r128_vertex *b, const r128_vertex *c);
+
 /* cursor.c: the hardware cursor (64 x 64), as the Matrox HAL's cursor_*: the AND and XOR masks, rows of 8 bytes,
  * the leftmost pixel in bit 7 (AND 0: colour 0 for XOR 0, colour 1 for XOR 1; AND 1: the screen, inverted for
  * XOR 1), stored at off (a multiple of 16); colours 0xRRGGBB; r128_cursor_move takes the image's top left corner,
