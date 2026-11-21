@@ -169,7 +169,32 @@ The owner's aim: about the TNT2 M64's speed on the same P3 (GLQuake 77.4 and 104
   write-combining mapping of its FIFO page, a 32-byte line goes as one burst. `r128_cce_burst_window` is the path;
   it waits for a way to make that one 4 KB page write-combining under GLOS (asked of GLOS, 2026-11-21).
 
+## R5: Glide's back end (2026-11-21)
+
+`glide/src/backend/r128/r128.c` (`mg_r128_backend`), on the seam beside the Matrox, TNT2 and ViRGE back ends (the
+branch is based on the ViRGE's, `virge5`, for `glide/src/backend/share.c`); probed after them.
+
+- **The window:** the BIOS's 16-bit mode at a 1024-pixel pitch (the Voodoo's 2048-byte stride), double buffered,
+  Z16 linear at the same pitch; clears by the 2D engine; the start written before the retrace wait; the clip
+  window as the context's scissor.
+- **Triangles:** the Voodoo's level and table fog per piece (`mg_split`); the combines on the chip's combiner (one
+  function a unit over the vertex colour and the texel): a combine without the texture worked out at the vertices;
+  with it the texture, the texture modulated by a factor at the vertices, texture + local, the lerp by the
+  texel's alpha (BLEND_TEXTURE) or by an iterated factor (BLEND_VERTEX), (1 - texture) * local; and texture *
+  factor + local with the local added by the **specular colour after the combine** (SPEC_LIGHT_ENABLE: t13's cells
+  8, 10, 14, 15 exact with it). Depth as the Matrox cards keep it (W: a linear 1/w in Z16), the alpha test,
+  blending, dithering, fog by the specular's alpha, chroma key by the core's keyed variants and the alpha test.
+- **Textures** in the chip's linear layout, one level a triangle, written with the engine idle.
+- **Gamma** by the DAC's palette: in 16-bit modes each component is looked up there (X.org's R128LoadPalette),
+  8-bit entries (DAC_8BIT_EN); put back at close.
+- **On the P3:** Glide conformance 26 of 27 (`glide/tools/conform/run.py check --bench bench-p3`), with the
+  manifest's r128 class as the TNT2's: t07 (W-buffering in Z16) and t13's cells 12 (a subtraction) and 13 (the
+  constant blended by the texel's alpha) approximated; t22 (gamma) captures the screen, which the P3 can't: the
+  owner's eyes. Replays against the emulated Voodoo at 40 levels and 5%: GTA frames 60, 150, 240, 295 with no
+  pixel past it; Screamer Rally 60, 150, 250, 300, 340, 380 with at most 0.22%.
+- **Owed:** the live games with the owner watching; t22 on screen.
+
 ## Next
 
-R5 Glide's back end, R6 86Box's Rage 128 in
+R5's live games, R6 86Box's Rage 128 in
 Loop A, R7 the docs (the plan approved 2026-11-21).
