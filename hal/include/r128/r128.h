@@ -50,6 +50,11 @@ extern int r128_mode_bpp;               /* the mode's bits a pixel: 8, 15, 16 or
 int  r128_set_start(uint32_t byte_off);
 int  r128_set_pitch(int pitch_bytes);
 int  r128_vsync_wait(uint32_t timeout_us);
+/* Gamma: in 16- and 32-bit modes the DAC looks each component up in its 256-entry palette (X.org's
+ * R128LoadPalette: 565's red at index r5 * 8, green g6 * 4); one ramp for the three, 8-bit entries (DAC_8BIT_EN).
+ * r128_ramp_off: the DAC as it was before the first ramp (for text mode). */
+void r128_set_ramp(const uint8_t ramp[256]);
+void r128_ramp_off(void);
 
 /* engine2d.c: the 2D engine. Coordinates are pixels of the target, any value; the clip (inclusive-exclusive,
  * within the target) trims everything drawn, in software. Colours are pixel values in the target's format. */

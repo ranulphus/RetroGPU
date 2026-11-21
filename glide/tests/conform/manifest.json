@@ -35,6 +35,10 @@
    "tnt2": {
     "gate": false,
     "why": "W-buffering in Z16 (a linear 1/w); the chip's float Z was worse (docs/tnt2.md)"
+   },
+   "r128": {
+    "gate": false,
+    "why": "W-buffering in Z16 (a linear 1/w, as the TNT2's): Glide's aux buffer is 16-bit"
    }
   }
  },
@@ -154,6 +158,10 @@
        15
       ],
       "tnt2": [
+       12,
+       13
+      ],
+      "r128": [
        12,
        13
       ]

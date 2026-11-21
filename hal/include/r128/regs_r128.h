@@ -140,6 +140,7 @@
 #define     R128_DITHER_ENABLE      (1u << 8)
 #define     R128_ALPHA_ENABLE       (1u << 9)
 #define     R128_ALPHA_TEST_ENABLE  (1u << 10)
+#define     R128_SPEC_LIGHT_ENABLE  (1u << 11)   /* (the vertices' specular RGB added after the combine) */
 #define     R128_TEX_CACHE_FLUSH    (1u << 23)
 #define     R128_LOD_BIAS_SHIFT     24
 #define R128_MISC_3D_STATE_CNTL_REG 0x1CA0
@@ -209,6 +210,10 @@ enum { R128_COMB_DIS, R128_COMB_COPY, R128_COMB_COPY_INP, R128_COMB_MODULATE, R1
 
 /* The CCE (Linux's r128_drv.h) */
 #define R128_BUS_CNTL               0x0030      /* (bit 6: BUS_MASTER_DIS) */
+#define R128_DAC_CNTL               0x0058
+#define     R128_DAC_8BIT_EN        (1u << 8)
+#define R128_PALETTE_INDEX          0x00B0      /* (an 8-bit write: the entry; PALETTE_DATA then moves on) */
+#define R128_PALETTE_DATA           0x00B4      /* (0x00RRGGBB) */
 #define R128_PM4_BUFFER_OFFSET      0x0700
 #define R128_PM4_BUFFER_WM_CNTL     0x0708
 #define R128_PM4_BUFFER_CNTL        0x0704

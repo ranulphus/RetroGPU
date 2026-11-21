@@ -56,5 +56,6 @@ extern volatile uint8_t *mg_vram;       /* its video memory mapped (texture reco
 extern const mg_backend mg_mga_backend; /* the Matrox cards (backend/mga) */
 extern const mg_backend mg_tnt2_backend; /* the Riva TNT and TNT2 (backend/tnt2) */
 extern const mg_backend mg_virge_backend; /* the S3 ViRGE/DX and /GX (backend/virge) */
+extern const mg_backend mg_r128_backend; /* the ATI Rage 128 (backend/r128) */
 
 #endif

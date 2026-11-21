@@ -251,6 +251,36 @@ int r128_set_start(uint32_t byte_off)
     return 0;
 }
 
+static uint32_t dac_saved;
+static int dac_changed;
+
+void r128_set_ramp(const uint8_t ramp[256])
+{
+    int i;
+    if (!r128.mmio)
+        return;
+    if (!dac_changed) {
+        dac_saved = r128_rd(R128_DAC_CNTL);
+        dac_changed = 1;
+    }
+    r128_wr(R128_DAC_CNTL, dac_saved | R128_DAC_8BIT_EN);
+    r128.mmio[R128_PALETTE_INDEX] = 0;
+    for (i = 0; i < 256; i++)
+        r128_wr(R128_PALETTE_DATA, (uint32_t)ramp[i] * 0x010101u);
+}
+
+void r128_ramp_off(void)
+{
+    int i;
+    if (!r128.mmio || !dac_changed)
+        return;
+    r128.mmio[R128_PALETTE_INDEX] = 0;
+    for (i = 0; i < 256; i++)
+        r128_wr(R128_PALETTE_DATA, (uint32_t)i * 0x010101u);
+    r128_wr(R128_DAC_CNTL, dac_saved);
+    dac_changed = 0;
+}
+
 int r128_set_pitch(int pitch_bytes)
 {
     int px = pitch_bytes / bytes_of(r128_mode_bpp ? r128_mode_bpp : 16);
