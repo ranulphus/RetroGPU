@@ -99,6 +99,11 @@ VIRGE_SRCS := hal/src/virge/chip.c hal/src/virge/engine2d.c hal/src/virge/cursor
 build/djgpp/libvirge.a: $(VIRGE_SRCS:%.c=build/djgpp/%.o)
 	@rm -f $@
 	$(DJAR) rcs $@ $^
+# The ATI Rage 128 (docs/rage128.md): its register layer, a library of its own as the ViRGE's and the TNT2's are.
+R128_SRCS := hal/src/r128/chip.c hal/src/r128/engine2d.c hal/src/r128/cursor.c
+build/djgpp/libr128.a: $(R128_SRCS:%.c=build/djgpp/%.o)
+	@rm -f $@
+	$(DJAR) rcs $@ $^
 # The Riva TNT2 (docs/tnt2.md): its register layer, a library of its own as the ViRGE's is.
 TNT2_SRCS := hal/src/tnt2/tnt2.c
 build/djgpp/libtnt2.a: $(TNT2_SRCS:%.c=build/djgpp/%.o)
@@ -129,6 +134,9 @@ DJ_SRC_STEAL := tests/tnt2/steal.c
 # The ATI Rage 128 Pro (docs/rage128.md): RPROBE (R0: PCI and AGP, the configuration, memory, CRTC and engine
 # registers, the PLLs, the video BIOS's PLL table, the BIOS's modes; reads only, but for the clock index, put back).
 DJ_SRC_RPROBE := tests/r128/rprobe.c
+# RTWOD (R1: the 2D engine against sw2d.c at 8, 16 and 32 bits) and RFLIP (when the start is taken, watched).
+DJ_SRC_RTWOD := tests/r128/rtwod.c tests/hal/sw2d.c build/djgpp/libr128.a
+DJ_SRC_RFLIP := tests/r128/rflip.c build/djgpp/libr128.a
 DJ_SRC_VTWOD := tests/virge/vtwod.c tests/hal/sw2d.c build/djgpp/libvirge.a
 DJ_SRC_VTRI := tests/virge/vtri.c build/djgpp/libvirge.a
 # VFLIP (V5's W1: when the chip takes a display start, for someone watching: steady colour or black flashes).
@@ -159,6 +167,9 @@ build/djgpp/NTRI32.EXE: tests/tnt2/ntri32.c build/djgpp/libtnt2.a
 build/djgpp/NSHOW.EXE: tests/tnt2/nshow.c build/djgpp/libtnt2.a
 build/djgpp/STEAL.EXE: tests/tnt2/steal.c
 build/djgpp/RPROBE.EXE: tests/r128/rprobe.c
+build/djgpp/RTWOD.EXE: tests/r128/rtwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libr128.a
+build/djgpp/RTWOD.EXE: DJ_CFLAGS += -Itests/hal
+build/djgpp/RFLIP.EXE: tests/r128/rflip.c build/djgpp/libr128.a
 build/djgpp/VTWOD.EXE: tests/virge/vtwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libvirge.a
 build/djgpp/VTWOD.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/VTRI.EXE: tests/virge/vtri.c build/djgpp/libvirge.a
