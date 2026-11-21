@@ -88,9 +88,15 @@ typedef struct {
     uint32_t dst_pitch_offset_c, dp_gui_master_cntl_c, sc_top_left_c, sc_bottom_right_c, z_offset_c, z_pitch_c;
     uint32_t z_sten_cntl_c, tex_cntl_c, misc_3d_state_cntl_reg, texture_clr_cmp_clr_c, texture_clr_cmp_msk_c;
     uint32_t fog_color_c, setup_cntl, pm4_vc_fpu_setup, dp_write_mask, sten_ref_mask_c, plane_3d_mask_c;
-    uint32_t window_xy_offset, constant_color_c, scale_3d_cntl, prim_tex_cntl_c;
+    uint32_t window_xy_offset, constant_color_c, scale_3d_cntl;
+    /* The first texture unit's block (the DRM's r128_emit_tex0): its control, combine, size and pitch, the eleven
+     * levels' offsets in VRAM. */
+    uint32_t prim_tex_cntl_c, prim_texture_combine_cntl_c, tex_size_pitch_c, prim_tex_offset_c[11];
 } r128_ctx3d;
 extern r128_ctx3d r128_3d;
+/* (set by any 2D register write: the 2D engine shares the 3D context's registers, and a triangle after a fill drew
+ * nothing on the P3; r128_tri sends the context again first) */
+extern int r128_3d_stale;
 typedef struct {
     float x, y, z, rhw;
     uint32_t argb, spec;                /* (the specular's top byte: the fog factor) */

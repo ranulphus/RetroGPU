@@ -5,8 +5,10 @@
  * (no Z_TILE), so the CPU can read it as Glide's LFB does. */
 #include "r128/r128.h"
 #include "r128/regs_r128.h"
+#include <string.h>
 
 r128_ctx3d r128_3d;
+int r128_3d_stale = 1;
 static int vfmt = R128_VC_FRMT_RHW | R128_VC_FRMT_DIFFUSE_ARGB;
 
 static uint32_t pitch_offset(uint32_t off, int pitch_bytes, int bytes)
@@ -51,15 +53,22 @@ void r128_3d_init(uint32_t color_off, int pitch_bytes, int bpp, uint32_t z_off, 
                        R128_SCALE_PIX_REPLICATE | (uint32_t)R128_BLEND_ONE << R128_ALPHA_BLEND_SRC_SHIFT |
                        (uint32_t)R128_BLEND_ZERO << R128_ALPHA_BLEND_DST_SHIFT | 7u << R128_ALPHA_TEST_SHIFT |
                        R128_TEX_MAP_ALPHA_IN_TEXTURE | R128_TEX_CACHE_LINE_SIZE_4QW;
-    c->prim_tex_cntl_c = 0;
+    c->prim_tex_cntl_c = 0, c->prim_texture_combine_cntl_c = 0, c->tex_size_pitch_c = 0;
+    memset(c->prim_tex_offset_c, 0, sizeof c->prim_tex_offset_c);
+    r128_3d_stale = 1;
 }
 
-/* The context to the engine (the DRM's packets: 12 registers from DST_PITCH_OFFSET_C; SETUP_CNTL and
- * PM4_VC_FPU_SETUP; the masks; the window; then the constant colour and the scaler's control). */
+/* The context to the engine in the DRM's order (r128_emit_state): the core first (SCALE_3D_CNTL: its blend fields
+ * are overridden by MISC_3D_STATE_CNTL_REG's written after it; sent after it instead, they undid the blend in RTRI's
+ * cases on the P3, and without it the texel's alpha never reached the blend: TEX_MAP_ALPHA_IN_TEXTURE), then the
+ * context's 12 registers from DST_PITCH_OFFSET_C, SETUP_CNTL and PM4_VC_FPU_SETUP, the masks, the window, the
+ * constant colour, and the first texture unit's block. */
 void r128_3d_emit(void)
 {
     const r128_ctx3d *c = &r128_3d;
     uint32_t p[16];
+    int i;
+    r128_cce_reg(R128_SCALE_3D_CNTL, c->scale_3d_cntl);
     p[0] = R128_CCE_PACKET0 | 11u << 16 | (R128_DST_PITCH_OFFSET_C >> 2);
     p[1] = c->dst_pitch_offset_c, p[2] = c->dp_gui_master_cntl_c, p[3] = c->sc_top_left_c;
     p[4] = c->sc_bottom_right_c, p[5] = c->z_offset_c, p[6] = c->z_pitch_c, p[7] = c->z_sten_cntl_c;
@@ -73,9 +82,13 @@ void r128_3d_emit(void)
     r128_cce_reg(R128_PLANE_3D_MASK_C, c->plane_3d_mask_c);
     r128_cce_reg(R128_WINDOW_XY_OFFSET, c->window_xy_offset);
     r128_cce_reg(R128_CONSTANT_COLOR_C, c->constant_color_c);
-    r128_cce_reg(R128_SCALE_3D_CNTL, c->scale_3d_cntl);
-    r128_cce_reg(R128_PRIM_TEX_CNTL_C, c->prim_tex_cntl_c);
+    p[0] = R128_CCE_PACKET0 | 13u << 16 | (R128_PRIM_TEX_CNTL_C >> 2);
+    p[1] = c->prim_tex_cntl_c, p[2] = c->prim_texture_combine_cntl_c, p[3] = c->tex_size_pitch_c;
+    r128_cce_out(p, 4);
+    for (i = 0; i < 11; i++)
+        r128_cce_out(&c->prim_tex_offset_c[i], 1);
     r128_cce_reg(R128_PC_GUI_CTLSTAT, R128_PC_FLUSH_GUI);
+    r128_3d_stale = 0;
 }
 
 void r128_3d_format(int fmt) { vfmt = fmt; }
@@ -94,6 +107,8 @@ void r128_tri(const r128_vertex *a, const r128_vertex *b, const r128_vertex *c)
     uint32_t p[3 + 3 * 10];
     const r128_vertex *v[3];
     int n = 3, i;
+    if (r128_3d_stale)
+        r128_3d_emit();
     v[0] = a, v[1] = b, v[2] = c;
     for (i = 0; i < 3; i++) {
         p[n++] = fbits(v[i]->x), p[n++] = fbits(v[i]->y), p[n++] = fbits(v[i]->z);

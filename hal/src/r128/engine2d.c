@@ -11,6 +11,7 @@
 /* A drawing-engine register: by MMIO, or a type-0 packet while the CCE runs (it ignores MMIO writes there). */
 static void eng_wr(uint32_t reg, uint32_t v)
 {
+    r128_3d_stale = 1;
     if (r128_cce_running())
         r128_cce_reg(reg, v);
     else
