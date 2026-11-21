@@ -19,6 +19,7 @@
 #include <string.h>
 #if !defined(__WATCOMC__)
 #include <stdio.h>
+#include <stdlib.h>
 #endif
 
 #define ALIGN4K(x) (((x) + 4095u) & ~4095u)
@@ -299,6 +300,18 @@ static int open_screen(const rg_open *o, rg_opened *out)
         rg_set_error("the Rage 128's CCE didn't start (the engine never went idle)");
         return -1;
     }
+    /* Packets as 32-byte bursts through the second register aperture's FIFO page, write-combining by GLOS (2.11):
+     * each PIO dword otherwise an uncached write (~140 cycles on the P3). DGL_R128_BURST=0: not asked. */
+#if !defined(__WATCOMC__)
+    if (getenv("DGL_R128_BURST") && *getenv("DGL_R128_BURST") == '0')
+        RG_INFO("DGL-R128 bursts off (DGL_R128_BURST=0)");
+    else
+#endif
+    if (r128_cce_burst_wc() == 0)
+        RG_WARN("DGL-R128 the CCE's packets in bursts (its FIFO page write-combining)");   /* (always said) */
+    else
+        RG_INFO("DGL-R128 no write-combining FIFO page (GLOS's answer %d): packets a dword at a time",
+                sys_cache_wc_err);
     colour = (uint32_t)st.pitch_bytes * (uint32_t)st.height;
     zcolour = (uint32_t)st.z_pitch_bytes * (uint32_t)st.height;
     st.front_off = 0;

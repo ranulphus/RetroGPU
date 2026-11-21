@@ -86,6 +86,9 @@ int  r128_cce_drained(void);                /* 1: everything sent fetched, the e
  * aperture; the second, CONFIG_REG_1_BASE's, can be made write-combining without the first), written a 32-byte line
  * at a time in address order; NULL: back to EVEN and ODD. Until r128_cce_stop. */
 void r128_cce_burst_window(volatile void *page);
+/* The same through the second register aperture's FIFO page made write-combining by GLOS (2.11): 0, or -1 (not
+ * given: sys_cache_wc_err says why) with EVEN and ODD kept. After r128_cce_init. */
+int  r128_cce_burst_wc(void);
 void r128_cce_stop(void);
 int  r128_cce_running(void);
 void r128_cce_out(const uint32_t *d, int n);    /* packet dwords, buffered */

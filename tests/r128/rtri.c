@@ -539,6 +539,8 @@ int main(int argc, char **argv)
             use_ring = 1;
         else if (!strcmp(argv[i], "burst"))
             use_burst = 1;
+        else if (!strcmp(argv[i], "burstwc"))
+            use_burst = 2;
         else if (!strncmp(argv[i], "lodmode=", 8))
             lodmode = atoi(argv[i] + 8);
         else if (!strncmp(argv[i], "lodsel=", 7))
@@ -566,9 +568,15 @@ int main(int argc, char **argv)
         hx_test("cce", 0, "the CCE did not start");
         hx_done(1);
     }
-    if (use_burst)                              /* (the burst path through aperture 0's own FIFO page, uncached) */
+    if (use_burst == 2 && r128_cce_burst_wc() != 0) {    /* (burstwc: the second aperture's page, write-combining) */
+        hx_test("cce", 0, "no write-combining FIFO page (GLOS's answer %d)", sys_cache_wc_err);
+        r128_text_mode();
+        hx_done(1);
+    }
+    if (use_burst == 1)                         /* (the burst path through aperture 0's own FIFO page, uncached) */
         r128_cce_burst_window(r128.mmio + 0x1000);
-    hx_test("cce", 1, "%s%s", use_ring ? "192BM, its ring in VRAM" : "192PIO", use_burst ? ", 32-byte lines" : "");
+    hx_test("cce", 1, "%s%s", use_ring ? "192BM, its ring in VRAM" : "192PIO",
+            use_burst == 2 ? ", 32-byte bursts (write-combining)" : use_burst ? ", 32-byte lines" : "");
     ref = malloc(W * H * 2);
     refz = malloc(W * H * 2);
     refm = malloc(W * H);

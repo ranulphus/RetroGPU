@@ -32,6 +32,7 @@ static void line_out(void) { }
 
 void r128_cce_burst_window(volatile void *page) { r128_cce_flush(); burst = (volatile uint32_t *)page; }
 
+
 /* The ring (r128_cce_init_ring): dwords in VRAM the CCE fetches itself (192BM), the CPU's write index, the read
  * index last seen, the index last given to the chip. NULL: PIO. */
 static volatile uint32_t *ring;
@@ -301,3 +302,19 @@ void r128_cce_stop(void)
 
 /* (after an engine reset the CCE is stopped: the DRM's r128_do_engine_reset) */
 void r128_cce_forget(void) { running = 0; nbuf = 0; room = 0; ring = NULL; burst = NULL; }
+
+/* The burst window write-combining: the second register aperture's FIFO page (BAR2 + 0x3000: aperture 1 at
+ * 0x2000, its FIFO at 0x1000) made write-combining by GLOS (API 2.11's DRAW CACHE for a display BAR's page; the
+ * first aperture's pages stay uncached), then PIO through it. 0, or -1 (no GLOS, an older one, or refused:
+ * sys_cache_wc_err) and the EVEN/ODD path kept. */
+int r128_cce_burst_wc(void)
+{
+    volatile uint8_t *page;
+    if (!running || ring || !r128.mmio)
+        return -1;
+    page = r128.mmio + 0x3000;
+    if (sys_cache_type(sys_linear(page), 4096u, 1u) != 0)
+        return -1;
+    r128_cce_burst_window(page);
+    return 0;
+}

@@ -44,6 +44,11 @@ void  sys_dos_free(void *p);
  * can't. */
 int sys_cache_wc(uint32_t lin, uint32_t bytes);
 extern int sys_cache_wc_err;    /* why the last call failed: -1 no GLOS, else GLOS's error code */
+/* The same with the type GLOS's DRAW CACHE takes: 1 write-combining (sys_cache_wc's), 0 uncached again (GLOS API
+ * 2.11, for a display card's BAR pages as well as DOS memory), 6 write-back. */
+int sys_cache_type(uint32_t lin, uint32_t bytes, unsigned type);
+/* A pointer's linear address in the DPMI host's space (what physical mappings return and the cache calls take). */
+uint32_t sys_linear(const volatile void *p);
 
 /* Pointer to real-mode memory seg:off (first megabyte). */
 void *sys_real_ptr(uint16_t seg, uint16_t off);
