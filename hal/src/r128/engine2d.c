@@ -204,6 +204,7 @@ void r128_image(int x, int y, int w, int h, const void *px, int stride)
         for (i = 0; i < w * t_bytes; i++)
             d[i] = p[i];
     }
+    r128_vram_written(t_off + (uint32_t)(y + h - 1) * (uint32_t)t_pitch + (uint32_t)(x + w - 1) * (uint32_t)t_bytes);
 }
 
 static uint32_t rowbuf[2048 / 32 + 1];

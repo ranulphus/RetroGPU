@@ -148,6 +148,8 @@ static const dgl_backend *backend_for(const rg_device *d)
         return &dgl_soft_backend;
     if (d == dgl_tnt2_backend.dev)              /* (the Riva TNT2's: RetroGPU's docs/tnt2.md, T4) */
         return &dgl_tnt2_backend;
+    if (d == dgl_r128_backend.dev)              /* (the ATI Rage 128's: RetroGPU's docs/rage128.md, R4) */
+        return &dgl_r128_backend;
     return NULL;
 }
 

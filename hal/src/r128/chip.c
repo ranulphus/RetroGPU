@@ -196,6 +196,22 @@ static void engine_init(int bpp, int pitch_bytes)
     r128_sync(100000);
 }
 
+#if defined(__GNUC__) && defined(__i386__)
+static void wc_lock(void) { __asm__ __volatile__("lock; orl $0, (%%esp)" ::: "memory"); }
+#elif defined(__WATCOMC__) && defined(__386__)
+static void wc_lock(void);
+#pragma aux wc_lock = "lock or dword ptr [esp], 0" modify exact [];
+#else
+static void wc_lock(void) { }
+#endif
+
+void r128_vram_written(uint32_t last)
+{
+    wc_lock();
+    if (r128.fb && last + 4u <= r128.vram_bytes)
+        (void)*(volatile uint32_t *)(r128.fb + (last & ~3u));   /* (the last write's own dword read back) */
+}
+
 int r128_set_mode(const r128_mode *m)
 {
     sys_rmregs r;

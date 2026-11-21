@@ -25,6 +25,11 @@ int  r128_map(void);                    /* 0: registers and framebuffer mapped, 
 void r128_unmap(void);
 uint32_t r128_rd(uint32_t off);
 void     r128_wr(uint32_t off, uint32_t v);
+/* The CPU writes VRAM the chip will read (textures) only with the engine idle (r128_sync first): written while it
+ * was busy, a texture's last 32-byte line was still old when the triangles after it read it, though the CPU read
+ * it back right (the P3, DOS-GL conformance t14). After writing: the CPU's write-combining buffers out (a locked
+ * instruction) and the last dword written (at offset last) read back. */
+void     r128_vram_written(uint32_t last);
 uint32_t r128_pll_rd(int index);
 void     r128_pll_wr(int index, uint32_t v);
 
@@ -92,6 +97,9 @@ typedef struct {
     /* The first texture unit's block (the DRM's r128_emit_tex0): its control, combine, size and pitch, the eleven
      * levels' offsets in VRAM. */
     uint32_t prim_tex_cntl_c, prim_texture_combine_cntl_c, tex_size_pitch_c, prim_tex_offset_c[11];
+    /* The second unit's (r128_emit_tex1): its control, combine and offsets (its size and pitch in
+     * tex_size_pitch_c's upper half); used with TEX_CNTL_C's SEC_TEXMAP_ENABLE. */
+    uint32_t sec_tex_cntl_c, sec_tex_combine_cntl_c, sec_tex_offset_c[11];
 } r128_ctx3d;
 extern r128_ctx3d r128_3d;
 /* (set by any 2D register write: the 2D engine shares the 3D context's registers, and a triangle after a fill drew
@@ -106,6 +114,7 @@ void r128_3d_init(uint32_t color_off, int pitch_bytes, int bpp, uint32_t z_off, 
 void r128_3d_emit(void);
 void r128_3d_format(int fmt);
 void r128_tri(const r128_vertex *a, const r128_vertex *b, const r128_vertex *c);
+void r128_poly(const r128_vertex *v, int n);   /* a convex polygon of 3 to 16 vertices as one triangle fan */
 
 /* cursor.c: the hardware cursor (64 x 64), as the Matrox HAL's cursor_*: the AND and XOR masks, rows of 8 bytes,
  * the leftmost pixel in bit 7 (AND 0: colour 0 for XOR 0, colour 1 for XOR 1; AND 1: the screen, inverted for

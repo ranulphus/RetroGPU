@@ -126,10 +126,15 @@
 #define     R128_Z_PIX_WIDTH_32     (2u << 1)
 #define     R128_Z_TEST_SHIFT       4           /* 0 never, 1 <, 2 <=, 3 =, 4 >=, 5 >, 6 !=, 7 always */
 #define     R128_STENCIL_TEST_ALWAYS (7u << 12)
+#define     R128_STENCIL_TEST_SHIFT 12          /* the Z test's codes */
+#define     R128_STENCIL_S_FAIL_SHIFT 16        /* 0 keep, 1 zero, 2 replace, 3 increment, 4 decrement, 5 invert */
+#define     R128_STENCIL_ZPASS_SHIFT 20
+#define     R128_STENCIL_ZFAIL_SHIFT 24
 #define R128_TEX_CNTL_C             0x1C9C
 #define     R128_Z_ENABLE           (1u << 0)
 #define     R128_Z_WRITE_ENABLE     (1u << 1)
 #define     R128_TEXMAP_ENABLE      (1u << 4)
+#define     R128_STENCIL_ENABLE     (1u << 3)
 #define     R128_SEC_TEXMAP_ENABLE  (1u << 5)
 #define     R128_FOG_ENABLE         (1u << 7)
 #define     R128_DITHER_ENABLE      (1u << 8)
@@ -147,10 +152,35 @@
 enum { R128_BLEND_ZERO, R128_BLEND_ONE, R128_BLEND_SRCCOLOR, R128_BLEND_INVSRCCOLOR, R128_BLEND_SRCALPHA,
        R128_BLEND_INVSRCALPHA, R128_BLEND_DSTALPHA, R128_BLEND_INVDSTALPHA, R128_BLEND_DSTCOLOR, R128_BLEND_INVDSTCOLOR,
        R128_BLEND_SAT };
+#define     R128_REF_ALPHA_MASK     0xFFu
 #define R128_FOG_COLOR_C            0x1CAC
-#define R128_PRIM_TEX_CNTL_C        0x1CB0
+#define R128_PRIM_TEX_CNTL_C        0x1CB0     /* (and SEC_TEX_CNTL_C's: the same fields for the second unit) */
+#define     R128_MIN_BLEND_SHIFT    1          /* 0 nearest, 1 linear, 2 mip nearest, 3 mip linear, 4 linear mip */
+#define     R128_MAG_BLEND_SHIFT    4          /*   nearest, 5 linear mip linear; mag: 0 nearest, 1 linear */
+#define     R128_MIP_MAP_DISABLE    (1u << 7)
+#define     R128_TEX_CLAMP_S_SHIFT  8          /* 0 wrap, 1 mirror, 2 clamp (to the edge), 3 border colour */
+#define     R128_TEX_CLAMP_T_SHIFT  11
+#define     R128_TEX_DATATYPE_SHIFT 16
+enum { R128_TEX_ARGB1555 = 3, R128_TEX_RGB565 = 4, R128_TEX_ARGB8888 = 6, R128_TEX_ARGB4444 = 15 };
+#define     R128_SEC_SELECT_SEC_ST  (1u << 0)   /* (SEC_TEX_CNTL_C: the second unit reads s2, t2) */
+#define R128_PRIM_TEXTURE_COMBINE_CNTL_C 0x1CB4 /* (and SEC_TEX_COMBINE_CNTL_C) */
+enum { R128_COMB_DIS, R128_COMB_COPY, R128_COMB_COPY_INP, R128_COMB_MODULATE, R128_COMB_MODULATE2X,
+       R128_COMB_MODULATE4X, R128_COMB_ADD, R128_COMB_ADD_SIGNED, R128_COMB_BLEND_VERTEX, R128_COMB_BLEND_TEXTURE,
+       R128_COMB_BLEND_CONST, R128_COMB_BLEND_PREMULT, R128_COMB_BLEND_PREV, R128_COMB_BLEND_PREMULT_INV,
+       R128_COMB_ADD_SIGNED2X, R128_COMB_BLEND_CONST_COLOR };
+#define     R128_COLOR_FACTOR_SHIFT 4          /* 0 constant colour, 1 its inverse, 4 the texel, 5 its inverse, */
+#define     R128_COMB_FCN_MSB       (1u << 8)   /*   6 the texel's alpha, 7 its inverse, 8 the previous colour */
+#define     R128_INPUT_FACTOR_SHIFT 10         /* 2 constant colour, 3 its alpha, 4 interpolated colour, 5 its */
+#define     R128_COMB_ALPHA_SHIFT   14         /*   alpha, 8 the previous colour, 9 its alpha */
+#define     R128_ALPHA_FACTOR_SHIFT 18         /* 6 the texel's alpha, 7 its inverse */
+#define     R128_INP_FACTOR_A_SHIFT 25         /* 1 constant alpha, 2 interpolated alpha, 4 the previous alpha */
+#define R128_TEX_SIZE_PITCH_C       0x1CB8
+#define R128_SEC_TEX_CNTL_C         0x1D00
+#define     R128_SCALE_TEX_CACHE_SPLIT (1u << 9)   /* (SCALE_3D_CNTL: the texture cache shared by two units) */
 #define R128_CONSTANT_COLOR_C       0x1D34
 #define R128_STEN_REF_MASK_C        0x1D40
+#define     R128_STEN_MASK_SHIFT    16          /* (the reference in bits 7-0) */
+#define     R128_STEN_WRITE_MASK_SHIFT 24
 #define R128_PLANE_3D_MASK_C        0x1D44
 #define     R128_FRONT_DIR_CCW      (1u << 0)
 #define     R128_BACKFACE_SOLID     (3u << 1)
@@ -173,6 +203,7 @@ enum { R128_BLEND_ZERO, R128_BLEND_ONE, R128_BLEND_SRCCOLOR, R128_BLEND_INVSRCCO
 #define     R128_VC_FRMT_S_T        0x080u
 #define     R128_VC_FRMT_S2_T2      0x100u
 #define     R128_VC_PRIM_TRI_LIST   0x004u
+#define     R128_VC_PRIM_TRI_FAN    0x005u
 #define     R128_VC_WALK_RING       0x030u
 #define     R128_VC_NUM_SHIFT       16
 

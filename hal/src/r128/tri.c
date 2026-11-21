@@ -55,6 +55,8 @@ void r128_3d_init(uint32_t color_off, int pitch_bytes, int bpp, uint32_t z_off, 
                        R128_TEX_MAP_ALPHA_IN_TEXTURE | R128_TEX_CACHE_LINE_SIZE_4QW;
     c->prim_tex_cntl_c = 0, c->prim_texture_combine_cntl_c = 0, c->tex_size_pitch_c = 0;
     memset(c->prim_tex_offset_c, 0, sizeof c->prim_tex_offset_c);
+    c->sec_tex_cntl_c = R128_SEC_SELECT_SEC_ST, c->sec_tex_combine_cntl_c = 0;
+    memset(c->sec_tex_offset_c, 0, sizeof c->sec_tex_offset_c);
     r128_3d_stale = 1;
 }
 
@@ -62,7 +64,7 @@ void r128_3d_init(uint32_t color_off, int pitch_bytes, int bpp, uint32_t z_off, 
  * are overridden by MISC_3D_STATE_CNTL_REG's written after it; sent after it instead, they undid the blend in RTRI's
  * cases on the P3, and without it the texel's alpha never reached the blend: TEX_MAP_ALPHA_IN_TEXTURE), then the
  * context's 12 registers from DST_PITCH_OFFSET_C, SETUP_CNTL and PM4_VC_FPU_SETUP, the masks, the window, the
- * constant colour, and the first texture unit's block. */
+ * constant colour, and the texture units' blocks (the second's only while it is on). */
 void r128_3d_emit(void)
 {
     const r128_ctx3d *c = &r128_3d;
@@ -87,6 +89,13 @@ void r128_3d_emit(void)
     r128_cce_out(p, 4);
     for (i = 0; i < 11; i++)
         r128_cce_out(&c->prim_tex_offset_c[i], 1);
+    if (c->tex_cntl_c & R128_SEC_TEXMAP_ENABLE) {
+        p[0] = R128_CCE_PACKET0 | 12u << 16 | (R128_SEC_TEX_CNTL_C >> 2);
+        p[1] = c->sec_tex_cntl_c, p[2] = c->sec_tex_combine_cntl_c;
+        r128_cce_out(p, 3);
+        for (i = 0; i < 11; i++)
+            r128_cce_out(&c->sec_tex_offset_c[i], 1);
+    }
     r128_cce_reg(R128_PC_GUI_CTLSTAT, R128_PC_FLUSH_GUI);
     r128_3d_stale = 0;
 }
@@ -121,5 +130,29 @@ void r128_tri(const r128_vertex *a, const r128_vertex *b, const r128_vertex *c)
     p[0] = R128_CCE_PACKET3 | R128_3D_RNDR_GEN_PRIM | (uint32_t)(n - 2) << 16;
     p[1] = (uint32_t)vfmt;
     p[2] = R128_VC_PRIM_TRI_LIST | R128_VC_WALK_RING | 3u << R128_VC_NUM_SHIFT;
+    r128_cce_out(p, n);
+}
+
+void r128_poly(const r128_vertex *v, int nv)
+{
+    uint32_t p[3 + 16 * 10];
+    int n = 3, i;
+    if (nv < 3)
+        return;
+    if (nv > 16)
+        nv = 16;
+    if (r128_3d_stale)
+        r128_3d_emit();
+    for (i = 0; i < nv; i++) {
+        p[n++] = fbits(v[i].x), p[n++] = fbits(v[i].y), p[n++] = fbits(v[i].z);
+        if (vfmt & R128_VC_FRMT_RHW) p[n++] = fbits(v[i].rhw);
+        if (vfmt & R128_VC_FRMT_DIFFUSE_ARGB) p[n++] = v[i].argb;
+        if (vfmt & R128_VC_FRMT_SPEC_FRGB) p[n++] = v[i].spec;
+        if (vfmt & R128_VC_FRMT_S_T) p[n++] = fbits(v[i].s), p[n++] = fbits(v[i].t);
+        if (vfmt & R128_VC_FRMT_S2_T2) p[n++] = fbits(v[i].s2), p[n++] = fbits(v[i].t2);
+    }
+    p[0] = R128_CCE_PACKET3 | R128_3D_RNDR_GEN_PRIM | (uint32_t)(n - 2) << 16;
+    p[1] = (uint32_t)vfmt;
+    p[2] = R128_VC_PRIM_TRI_FAN | R128_VC_WALK_RING | (uint32_t)nv << R128_VC_NUM_SHIFT;
     r128_cce_out(p, n);
 }

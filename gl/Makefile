@@ -63,7 +63,7 @@ hal_objs = $(patsubst $(MGAHAL)/%.c,build/$(1)/mgahal/%.o,$(2))
 # Per-test build flags of the conformance tests: those that ask for stencil bits (t33; ct.h's CT_STENCIL).
 ct_flags = $(if $(filter t33,$(1)),-DCT_STENCIL=8)
 DGL_SRCS := $(wildcard src/dgl/*.c) $(wildcard src/gl/*.c) $(wildcard src/backend/mga/*.c) $(wildcard src/backend/soft/*.c) \
-            $(wildcard src/backend/tnt2/*.c)
+            $(wildcard src/backend/tnt2/*.c) $(wildcard src/backend/r128/*.c)
 LIB := build/lib/libGL.a
 
 .PHONY: all lib examples sdl sdl-host sdl-examples loopa-sdl tests-host loopa conform conform-dos conform-host soft-conform soft-tilecheck soft-meshbench classicube loopa-classicube quake loopa-quake halflife loopa-halflife doom loopa-doom setup-djgpp setup-ow dostools 86box clean help

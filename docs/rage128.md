@@ -110,7 +110,36 @@ the TNT2 device's pattern. The device list is now mga, virge, tnt2, r128, then v
 - **DOS-GL** still draws through the VBE software renderer on this card until R4 gives it a back end;
   `DGL_DEVICE=r128` waits for R4 too.
 
+## R4: DOS-GL's back end (2026-11-21)
+
+`gl/src/backend/r128/backend.c` (`dgl_r128_backend`), on the TNT2 back end's pattern for the geometry: clip-space
+vertices clipped (a guard band of 2), projected, culled and offset on the CPU, then sent to the chip's own set-up as
+window-space vertices; a fog factor a vertex (split where it changes by more than a tenth); lines and points as
+quads; GL_POLYGON whole as one triangle fan (`r128_poly`).
+
+- **State:** the texture environments as Mesa's r128 driver maps them, by the texture's family (RGBA, RGB, alpha,
+  intensity), GL_BLEND on the Pro's constant-colour blend; GL_COMBINE_ARB onto the chip's one function a unit
+  (others drawn as MODULATE, said once); both texture units (ARB_multitexture: the second with its own
+  coordinates, the texture cache split); blending, the alpha test, depth, stencil with Z24S8, the colour mask
+  (PLANE_3D_MASK_C), the scissor (the context's), dithering.
+- **Textures:** converted to ARGB8888, RGB565, ARGB1555 or ARGB4444 and written by the CPU into the device's heap
+  (vram.c's allocator), each level after the last, 32-byte aligned; made again into a new block, the old one
+  retired until a sync; a rectangle of a single-level texture (lightmaps) written in place after a sync.
+- **Found on the P3:** the CPU writes VRAM the chip will read only with the engine idle. Written while a clear's fill
+  was running, a texture's last 32-byte line was still old when the triangles after it read it (conformance t14:
+  the right half of texel row 15 black in every quad), though the CPU read it back right, and neither draining the
+  CPU's write-combining buffers nor a read-back of the last dword helped; a sync before the writes (or a 500 µs wait
+  after them) did. `r128.h`'s rule, as RTRI followed from the start.
+- **Conformance on the P3** (`make conform-bench PC=bench-p3`): all 33 tests that apply pass (t33 and t34 are the
+  software renderer's only), the worst t08 with 0.05% of its pixels off; the multitexture (t20-t22, t30) and
+  combine (t25) tests among them.
+- **GLQuake on the P3** (QDOSDGL, timedemo demo1, `-fixedtime`, vsync off; the 451 MHz Pentium III), the first back
+  end, untuned: 34.97 fps at 640x480 and 48.50 at 320x200 in two passes; 36.88 and 47.36 with `-mtex`. (The TNT2's
+  first back end: 21.8 at 640x480; tuned, 77.4 and 104.5.) Windows 98's numbers on this card are still to be taken.
+  On GLOS, a RUN.BAT line longer than COMMAND.COM's 127 characters doesn't run ("GLOS can't run it here."): the
+  timedemo's `-mtex` lines needed the program renamed short.
+
 ## Next
 
-R4 DOS-GL's back end, R5 Glide's, R6 86Box's Rage 128 in
+R5 Glide's back end, R6 86Box's Rage 128 in
 Loop A, R7 the docs (the plan approved 2026-11-21).
