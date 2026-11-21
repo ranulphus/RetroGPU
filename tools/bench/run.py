@@ -223,6 +223,8 @@ def main():
     ap.add_argument("--frames", default="", help="frames GLPLAY captures (with --replay)")
     ap.add_argument("--game", help="game key from tools/games/games.json, installed on the PC")
     ap.add_argument("--cmd", action="append", default=[], help="RUN.BAT line (repeatable) instead of --exe")
+    ap.add_argument("--direct", action="store_true",
+                    help="ssh: the job's session in GLOS's direct mode (glos run --direct: IOPL 3, the real interrupt flag)")
     ap.add_argument("--timeout", type=float, default=900, help="seconds from pick-up to HX-EXIT")
     ap.add_argument("--pickup", type=float, default=300, help="seconds for the PC to pick the job up")
     ap.add_argument("--idle", type=float, help="silent seconds that count as a hang (default 180; games "
@@ -258,7 +260,7 @@ def main():
             glos = None
     if a.transport == "ssh" and not glos:
         sys.exit("bench: GLOS doesn't answer at %s (bench.toml: pc.%s.ssh)" % (pc.get("ssh") or "no address", a.pc))
-    http_srv = sink = runner = None
+    http_srv = sink = runner = direct_job = None
     if glos:
         jd = os.path.join(pub, "job")
         names = build_job(a, pc, cfg, job, token, jd, upload=False)
@@ -266,7 +268,11 @@ def main():
         if rc != 0:
             sys.exit("bench: sftp to %s failed: %s" % (pc["ssh"], said.strip()[-200:]))
         lines = glos.follow()
-        runner = glos.start("C:\\TEST\\RUN.BAT")
+        if a.direct:
+            # (glos run --direct posts the job and may return at once: the job's end from its HX lines alone)
+            direct_job = glos.start("glos run --direct C:\\TEST\\RUN.BAT")
+        else:
+            runner = glos.start("C:\\TEST\\RUN.BAT")
         print("bench: started %s on %s (%s) over ssh (%s)" % (job, a.pc, pc["card"], pc["ssh"]), flush=True)
     else:
         names = build_job(a, pc, cfg, job, token, os.path.join(pub, "job"))
@@ -355,12 +361,13 @@ def main():
         if stuck:                               # GLOS is still there beside a hung program: it kills it
             print("bench: glos kill", flush=True)
             glos.ssh("glos kill")
+        proc = runner or direct_job
         try:
-            said = runner.communicate(timeout=60)[0]
+            said = proc.communicate(timeout=60)[0]
             stuck = False
         except subprocess.TimeoutExpired:       # (not even that: the PC needs its reset)
-            runner.kill()
-            said = runner.communicate()[0]
+            proc.kill()
+            said = proc.communicate()[0]
         open(os.path.join(out, "stdout.txt"), "wb").write(said)
         received = [] if stuck else glos.get_dir("/C/OUT", files)
         upload_end = upload_end or (not stuck and time.time())

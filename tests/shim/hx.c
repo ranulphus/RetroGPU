@@ -45,10 +45,30 @@ static int text_mode(void)
 #endif
 }
 
+/* HX_LOGFILE: every line appended to that file too (a GLOS direct-mode session owns the PC's ports: its COM1
+ * lines go to the real port, not to GLOS's log). */
+static void to_logfile(const char *s)
+{
+    static int tried;
+    static FILE *f;
+    if (!tried) {
+        const char *e = getenv("HX_LOGFILE");
+        tried = 1;
+        if (e && *e)
+            f = fopen(e, "a");
+    }
+    if (f) {
+        fputs(s, f);
+        fputc('\n', f);
+        fflush(f);
+    }
+}
+
 static void line(const char *s)
 {
     serial_puts(s);
     serial_puts("\n");
+    to_logfile(s);
     if (text_mode()) {
         fputs(s, stdout);
         fputc('\n', stdout);
