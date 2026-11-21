@@ -111,3 +111,8 @@ conform-ci: runtime dostests
 	MGA_CARD=g200 $(PYTHON) glide/tools/conform/run.py check
 	MGA_CARD=g400 $(PYTHON) glide/tools/conform/run.py check
 	MGA_CARD=g450 $(PYTHON) glide/tools/conform/run.py check
+# Glide on the ViRGE/DX (V5 of docs/virge.md): the suite on the emulated card, on both of its boards.
+conform-virge: runtime dostests
+	MGA_CARD=virge $(PYTHON) glide/tools/conform/run.py check --machine bf6
+	MGA_CARD=virge $(PYTHON) glide/tools/conform/run.py check --machine 486dx4
+.PHONY: conform-virge

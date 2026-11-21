@@ -135,6 +135,7 @@ if [ "$tier" = merge ]; then
     pstep rgdev-g200         loopa_pass regress-rgdev-g200 --card g200 --exe build/djgpp/RGDEV.EXE --idle 200 --timeout 900
     pstep hreplay-check      tools/dev make -s hreplay-check
     pstep glide-conform-ci   tools/dev make -s conform-ci
+    pstep glide-conform-virge tools/dev make -s conform-virge
     # The acceptance games' traces through Glide, three cards at once. Screamer
     # Rally's 389 frames stop at 240 (the owner's choice, 2026-11-09): loading
     # screens to frame 95, the race from 96; every call pattern of the trace has
