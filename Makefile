@@ -143,6 +143,7 @@ DJ_SRC_RTRI0 := tests/r128/rtri0.c build/djgpp/libr128.a
 # RTRI (R2's exit: NTRI's scenes against OpenGL's rules through the CCE).
 DJ_SRC_RTRI := tests/r128/rtri.c build/djgpp/libr128.a
 DJ_SRC_RMIP := tests/r128/rmip.c build/djgpp/libr128.a
+DJ_SRC_RTRI32 := tests/r128/rtri32.c build/djgpp/libr128.a
 DJ_SRC_VTWOD := tests/virge/vtwod.c tests/hal/sw2d.c build/djgpp/libvirge.a
 DJ_SRC_VTRI := tests/virge/vtri.c build/djgpp/libvirge.a
 # VFLIP (V5's W1: when the chip takes a display start, for someone watching: steady colour or black flashes).
@@ -179,6 +180,7 @@ build/djgpp/RFLIP.EXE: tests/r128/rflip.c build/djgpp/libr128.a
 build/djgpp/RTRI0.EXE: tests/r128/rtri0.c build/djgpp/libr128.a
 build/djgpp/RTRI.EXE: tests/r128/rtri.c build/djgpp/libr128.a
 build/djgpp/RMIP.EXE: tests/r128/rmip.c build/djgpp/libr128.a
+build/djgpp/RTRI32.EXE: tests/r128/rtri32.c build/djgpp/libr128.a
 build/djgpp/VTWOD.EXE: tests/virge/vtwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libvirge.a
 build/djgpp/VTWOD.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/VTRI.EXE: tests/virge/vtri.c build/djgpp/libvirge.a

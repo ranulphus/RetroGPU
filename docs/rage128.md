@@ -8,8 +8,9 @@ of 2026-11-12. The card is in bench B (the P3) since 2026-11-20, the TNT2 out.
 - **X.org's `xf86-video-r128`** (MIT): `r128_reg.h` for the register offsets and bits, `r128_driver.c` for the
   memory type's and the video BIOS's PLL table's readings, `r128_accel.c` for the 2D engine. Facts and the
   register sequences are taken from it; the code isn't copied.
-- **Linux's DRM `r128` driver** (MIT, `drivers/gpu/drm/r128`): the command processor (CCE) and its microcode,
-  for the 3D steps; read before any of it is used, its licence checked file by file.
+- **Linux's DRM `r128` driver** (MIT, `drivers/gpu/drm/r128`): the command processor (CCE), its PIO mode and the
+  order the 3D state is sent in; the microcode from linux-firmware (`r128/r128_cce.bin`, MIT per its `WHENCE`).
+- **Mesa 7.x's r128 DRI driver** (MIT): the 3D context's values, the texture registers, the level order.
 - Measurement on the card (the P3), as the TNT2's facts were.
 
 ## What R0 found (the P3, 2026-11-20, `RPROBE`)
@@ -32,8 +33,63 @@ of 2026-11-12. The card is in bench B (the P3) since 2026-11-20, the TNT2 out.
 - **The BIOS:** 32 KB, ATI's signature at `31`, "Rage128 PRO GL P/N 113-60609-100"; VBE 2.0, 16 MB, 56 modes
   (OEM "ATI RAGE128", product "R128"), every one with its mode attributes and linear window in the log.
 
-## Next (a plan for the owner before any of it)
+## R1: the register layer and the 2D engine (2026-11-21)
 
-R1 the register layer (the MMIO window, the engine's FIFO and idle, the 2D engine, the display start, the
-cursor; a 2D test against `tests/hal/sw2d.c`), R2 the 3D engine (through the CCE, its microcode's licence first),
-R3 the device on `rg_device`, R4 DOS-GL's back end, R5 Glide's, R6 the docs: the TNT2's steps, in the same order.
+`hal/include/r128/`, `hal/src/r128/{chip,engine2d,cursor}.c` (`libr128.a`), after X.org's `xf86-video-r128`.
+
+- **Modes:** the BIOS's linear modes (VBE `0x4000 | mode`) at 8, 15, 16 and 32 bits; then the 2D engine set up as
+  `R128EngineInit` does. The display start is CRTC_OFFSET in bytes (a multiple of 8), the pitch CRTC_PITCH in
+  pixels / 8.
+- **2D by MMIO** (the CCE off): fills, copies in either direction, copies between surfaces by pitch-and-offset
+  words (`((pitch_bytes / bytes / 8) << 21) | (offset >> 5)`), colour expansion from host data (rows padded with
+  clear bits, drawn leave-alone at the padded width; opaque fills the background first), images by the CPU
+  through the window.
+- **Found on the P3:** surface pitches must be multiples of 16 bytes (8-bit surfaces of 328 and 520 bytes drew
+  wrongly).
+- **Cursor:** 64x64, AND and XOR rows interleaved 16 bytes each, as `r128_cursor.c`.
+- **RTWOD** (from VTWOD): fills, copies, surfaces, expansion, images and 300 mixed operations byte-exact against
+  `tests/hal/sw2d.c` at 8, 16 and 32 bits (22/22). **RFLIP** (from VFLIP) is written; the flip order is still to
+  be watched.
+
+## R2: the CCE and the 3D engine (2026-11-21)
+
+- **The CCE in PIO mode** (`cce.c`, `cce_ucode.c`): ATI's microcode (linux-firmware's `r128/r128_cce.bin`, MIT,
+  Copyright 2000 AMD, its notice kept) loaded through `PM4_MICROCODE_ADDR`/`DATAH`/`DATAL`; `PM4_BUFFER_CNTL` =
+  192PIO | NOUPDATE, `PM4_MICRO_CNTL` = free run. The CPU writes packet dwords to `PM4_FIFO_DATA_EVEN`/`ODD`
+  (0x1000/0x1004) in pairs, a type-2 packet padding an odd count: no ring, no GART. It started first time.
+  `r128_cce_init` takes other microcode from its caller (the device reads an `r128_cce.bin` beside the program,
+  R3).
+- **2D with the CCE on:** the chip then ignores MMIO writes to 0x1400-0x1FFF, so the layer sends the 2D engine's
+  registers as type-0 packets. RTWOD `cce`: byte-exact at 8, 16 and 32 bits (25/25).
+- **The 3D context** (`tri.c`): Mesa 7.x's starting values (`r128DDInitState`), a linear depth buffer (no
+  `Z_TILE`: the CPU reads it as Glide's LFB does), sent in the DRM's order (`r128_emit_state`): the core
+  (`SCALE_3D_CNTL`) first, then the context's 12 registers from `DST_PITCH_OFFSET_C`, `SETUP_CNTL` and
+  `PM4_VC_FPU_SETUP`, the masks, the window, the constant colour, the first texture unit's block (control,
+  combine, size and pitch, eleven level offsets).
+- **Triangles:** type-3 `3D_RNDR_GEN_PRIM` with the vertices inline (x, y, z, 1/w, diffuse ARGB, specular with
+  the fog factor in its top byte, s and t), as X.org's `R128CCEComposite` sends them.
+- **Found on the P3:**
+  - Pixel centres are at half pixels (OpenGL's); coverage exact with OpenGL's top-left rule (RTRI0, RTRI32).
+  - `SCALE_3D_CNTL` after the context undoes `MISC_3D_STATE_CNTL_REG`'s blend; left out, the texel's alpha never
+    reaches the blend (it carries `TEX_MAP_ALPHA_IN_TEXTURE`). Sent first, as the DRM does, both work.
+  - The 2D engine shares the 3D context's registers: a triangle right after a 2D fill drew nothing. Any 2D write
+    marks the 3D context stale, and the next triangle sends it again.
+  - `PRIM_TEX_n_OFFSET_C` slot n holds the level of 2^n texels a side, the **smallest level in slot 0** (Mesa's
+    `r128UploadTexImages` order); with mipmapping off every slot holds the base (RMIP).
+  - The level is chosen by the largest single texel derivative (RTRI's `lodmode 3`: 957 of 47,007 pixels a
+    step or more off in `tex-mip`, against 2,304 for OpenGL's footprint and 34,953 for the TNT2's) at Mesa's
+    bias byte 63.
+  - Z24S8: the depth in bits 23-0, the stencil in 31-24 (RTRI32).
+- **Tests:**
+  - **RTRI0:** three Gouraud triangles at three depths: coverage exact, colours within one 565 step.
+  - **RTRI** (from NTRI, VTRI's scenes) at 640x480 RGB565 with Z16: random, mesh, zbuf, blend, tex-nearest,
+    tex-linear, tex-persp, tex-persp-linear, tex-mip, tex-modulate, tex-8888, tex-alpha and tex-fog, all within
+    NTRI's tolerances against OpenGL's rules.
+  - **RTRI32** (from NTRI32) at ARGB8888 with Z24S8: coverage exact, the corners' colours, LEQUAL with Z writes
+    exact, alpha 128 over blue within one step.
+  - **RMIP:** which level the chip samples, at a sweep of bias bytes.
+
+## Next
+
+R3 the device on `rg_device` (`hal/src/rg/r128.c`), R4 DOS-GL's back end, R5 Glide's, R6 86Box's Rage 128 in
+Loop A, R7 the docs (the plan approved 2026-11-21).
