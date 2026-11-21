@@ -301,7 +301,8 @@ static int open_screen(const rg_open *o, rg_opened *out)
         return -1;
     }
     /* Packets as 32-byte bursts through the second register aperture's FIFO page, write-combining by GLOS (2.11):
-     * each PIO dword otherwise an uncached write (~140 cycles on the P3). DGL_R128_BURST=0: not asked. */
+     * each PIO dword otherwise an uncached write (~140 cycles on the P3). Only at IOPL 3, where the lines can be
+     * written with interrupts really held (r128_cce_burst_wc). DGL_R128_BURST=0: not asked. */
 #if !defined(__WATCOMC__)
     if (getenv("DGL_R128_BURST") && *getenv("DGL_R128_BURST") == '0')
         RG_INFO("DGL-R128 bursts off (DGL_R128_BURST=0)");
@@ -309,6 +310,9 @@ static int open_screen(const rg_open *o, rg_opened *out)
 #endif
     if (r128_cce_burst_wc() == 0)
         RG_WARN("DGL-R128 the CCE's packets in bursts (its FIFO page write-combining)");   /* (always said) */
+    else if (sys_cache_wc_err == -2)
+        RG_INFO("DGL-R128 packets a dword at a time: bursts want the real interrupt flag (IOPL 3: GLOS's direct "
+                "sessions), lines split by an interrupt would reach the FIFO out of order");
     else
         RG_INFO("DGL-R128 no write-combining FIFO page (GLOS's answer %d): packets a dword at a time",
                 sys_cache_wc_err);

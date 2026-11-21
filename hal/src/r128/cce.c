@@ -21,13 +21,32 @@ static int room;                        /* (PIO: FIFO entries known free since t
  * then the CPU's buffers drained, so each line goes as one burst and the lines in order. NULL: EVEN and ODD. */
 static volatile uint32_t *burst;
 
+/* A line goes out whole or not at all: with the interrupt flag clear while it is written (an interrupt mid-line
+ * flushes the part written as pieces in no set order, and the FIFO takes dwords in the order they come: GLQuake
+ * through the page froze the P3, 2026-11-21), then a locked OR to send it before the next. The flag is real only
+ * at IOPL 3 (GLOS's direct-mode sessions; elsewhere CLI is emulated and the kernel still takes every interrupt):
+ * r128_cce_burst_wc refuses the page otherwise. */
 #if defined(__GNUC__) && defined(__i386__)
-static void line_out(void) { __asm__ __volatile__("lock; orl $0, (%%esp)" ::: "memory"); }
+static void line_in(void) { __asm__ __volatile__("cli" ::: "memory"); }
+static void line_out(void) { __asm__ __volatile__("lock; orl $0, (%%esp)\n\tsti" ::: "memory"); }
+static int iopl3(void)
+{
+    uint32_t f;
+    __asm__ __volatile__("pushfl\n\tpopl %0" : "=r"(f));
+    return ((f >> 12) & 3u) == 3u;
+}
 #elif defined(__WATCOMC__) && defined(__386__)
+static void line_in(void);
+#pragma aux line_in = "cli" modify exact [];
 static void line_out(void);
-#pragma aux line_out = "lock or dword ptr [esp], 0" modify exact [];
+#pragma aux line_out = "lock or dword ptr [esp], 0" "sti" modify exact [];
+static uint32_t eflags(void);
+#pragma aux eflags = "pushfd" "pop eax" value [eax] modify exact [eax];
+static int iopl3(void) { return ((eflags() >> 12) & 3u) == 3u; }
 #else
+static void line_in(void) { }
 static void line_out(void) { }
+static int iopl3(void) { return 0; }
 #endif
 
 void r128_cce_burst_window(volatile void *page) { r128_cce_flush(); burst = (volatile uint32_t *)page; }
@@ -209,6 +228,7 @@ void r128_cce_flush(void)
                         break;
                 }
             }
+            line_in();
             burst[0] = buf[i], burst[1] = buf[i + 1], burst[2] = buf[i + 2], burst[3] = buf[i + 3];
             burst[4] = buf[i + 4], burst[5] = buf[i + 5], burst[6] = buf[i + 6], burst[7] = buf[i + 7];
             line_out();
@@ -312,6 +332,10 @@ int r128_cce_burst_wc(void)
     volatile uint8_t *page;
     if (!running || ring || !r128.mmio)
         return -1;
+    if (!iopl3()) {
+        sys_cache_wc_err = -2;          /* (no real interrupt flag: lines could be split by an interrupt) */
+        return -1;
+    }
     page = r128.mmio + 0x3000;
     if (sys_cache_type(sys_linear(page), 4096u, 1u) != 0)
         return -1;
