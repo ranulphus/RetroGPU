@@ -187,7 +187,8 @@ The owner's aim: about the TNT2 M64's speed on the same P3 (GLQuake 77.4 and 104
   the same geometry: the CPU waits on the chip's drawing, which can never be more than the 192-entry FIFO behind. A
   frame costs the CPU's time plus the chip's, not the larger. Tried: TEX_CACHE_FLUSH only after the CPU wrote
   textures (it was in every context block: no change in speed, kept); a tiled depth buffer as Mesa's (Z_TILE, the
-  2D clears with DST_TILE; `DGL_R128_ZTILE=1`, an experiment): +2 to 4%.
+  2D clears with DST_TILE): +2 to 4%, conformance all 33 with it (2026-11-22), so DOS-GL's default
+  (`DGL_R128_ZTILE=0`: linear). Glide keeps a linear Z16: games read it through the LFB.
 - **The bus-master ring fetches** (RRINGP on the P3 after a power cycle): the ring in conventional memory, the chip's
   own PCI GART (PCI_GART_PAGE: a 32 KB-aligned table of page addresses, bit 0 clear), BM_CHUNK_0_VAL's force-to-PCI
   bits (21-23; X.org's R128DRIPciInit for AGP boards: without them no fetch), bus mastering on (BUS_CNTL bit 6

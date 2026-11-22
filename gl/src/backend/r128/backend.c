@@ -308,7 +308,7 @@ static uint32_t sop(GLenum o)
     }
 }
 
-static int ztile;                       /* (EXPERIMENT: the depth buffer tiled) */
+static int ztile;                       /* (the depth buffer tiled: the default) */
 static int fogging;                     /* the fog factor goes in the vertices' specular alpha */
 static int valid_ok;                    /* the words in r128_3d are GL's state now (until a dirty bit or a texture change) */
 static const dgl_texture *valid_tex[2];
@@ -923,7 +923,9 @@ static void install(void)
     r128_3d_init(rg_r128_color_off(0), rg_r128.pitch_bytes, rg_r128.bpp, rg_r128.z_off,
                  rg_r128.z_pitch_bytes ? rg_r128.z_pitch_bytes : rg_r128.pitch_bytes,
                  rg_r128.depth_bits ? rg_r128.depth_bits : 16);
-    ztile = getenv("DGL_R128_ZTILE") && *getenv("DGL_R128_ZTILE") == '1';   /* EXPERIMENT: Mesa's tiled Z */
+    /* The depth buffer tiled, as Mesa's (Z_TILE; its 2D clears with DST_TILE): GLQuake +2-4%, conformance all 33
+     * as linear (the P3, 2026-11-22). DOS-GL never reads depth back through the device. DGL_R128_ZTILE=0: linear. */
+    ztile = !(getenv("DGL_R128_ZTILE") && *getenv("DGL_R128_ZTILE") == '0');
     if (ztile)
         r128_3d.z_pitch_c |= 1u << 16;      /* (Z_TILE) */
     dgl_sink.begin = rb_begin;

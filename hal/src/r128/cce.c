@@ -372,14 +372,27 @@ int r128_cce_idle_wait(uint32_t timeout_us)
 
 void r128_cce_stop(void)
 {
+    int had_ring = ring != NULL;
     if (!running)
         return;
+    if (had_ring) {
+        /* The DRM's order for a bus-master ring (r128_cce_stop: r128_do_cce_flush, _idle, _stop, _reset, then
+         * r128_do_engine_reset): the download marked done, the engine idle, the CCE stopped, its pointers zeroed,
+         * the engine reset; only then bus mastering off and the ring's memory given back (ring_release). */
+        ring_commit();
+        r128_wr(R128_PM4_BUFFER_DL_WPTR, wptr | R128_PM4_BUFFER_DL_DONE);
+    }
     r128_cce_idle_wait(500000);
     r128_wr(R128_PM4_MICRO_CNTL, 0);
     r128_wr(R128_PM4_BUFFER_CNTL, R128_PM4_NONPM4 | R128_PM4_BUFFER_CNTL_NOUPDATE);
     running = 0;
     ring = NULL;
     burst = NULL;
+    if (had_ring) {
+        r128_wr(R128_PM4_BUFFER_DL_WPTR, 0);
+        r128_wr(R128_PM4_BUFFER_DL_RPTR, 0);
+        r128_engine_reset();            /* (r128_cce_forget's ring_release in it) */
+    }
     ring_release();
 }
 
