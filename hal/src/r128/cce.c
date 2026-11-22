@@ -99,19 +99,52 @@ int r128_cce_init(const uint32_t *pairs)
     return 0;
 }
 
-/* The CCE in 192BM with its ring in VRAM at off (bytes a power of two, 4 KB to 1 MB, and RING_MIRROR dwords more
- * after it), as the DRM's r128_cce_init_ring_buffer: the ring's address in the chip's own space, where VRAM is
- * below 32 MB (AGP from R128_AGP_OFFSET); no read-pointer write-back (NOUPDATE: the register is read). */
-int r128_cce_init_ring(const uint32_t *pairs, uint32_t off, uint32_t bytes)
+/* The CCE in 192BM with its ring in system memory, fetched by the chip through its own PCI GART (the DRM's PCI way,
+ * r128_cce_init_ring_buffer and drm_ati_pcigart; X.org's R128DRIPciInit for AGP boards: BM_CHUNK_0_VAL's
+ * force-to-PCI bits, PCI_GART_PAGE's table): the ring, a mirror page after it (early chips read 32 dwords past the
+ * end: the DRM's R128_BROKEN_CCE) and the table's first page in conventional memory (linear = physical), the table
+ * 32 KB aligned; ring offset 0 is the table's entry 0. Found on the P3 (RRINGP): it fetches with the force bits,
+ * not without them; a ring at a VRAM offset never fetched and left the chip's bus mastering wedged until a power
+ * cycle. A first fetch is checked: on failure the CCE is stopped, everything put back, -1 (PIO then). */
+static void *ring_block;
+static uint32_t saved_gart, saved_chunk, saved_bus;
+
+static void ring_release(void)
 {
-    int i, l2qw = 0;
-    if (!r128.mmio || (bytes & (bytes - 1)) || bytes < 4096u || bytes > (1u << 20) || (off & 4095u) ||
-        off + bytes + RING_MIRROR * 4u > r128.vram_bytes)
+    if (!ring_block)
+        return;
+    r128_wr(R128_PCI_GART_PAGE, saved_gart);
+    r128_wr(R128_BM_CHUNK_0_VAL, saved_chunk);
+    r128_wr(R128_BUS_CNTL, saved_bus);
+    sys_dos_free(ring_block);
+    ring_block = NULL;
+}
+
+int r128_cce_init_ring(const uint32_t *pairs, uint32_t bytes)
+{
+    int i, l2qw = 0, pages;
+    uint16_t seg;
+    uint32_t lin, tbl, rb, t0;
+    volatile uint32_t *t;
+    uint8_t *blk;
+    if (!r128.mmio || (bytes & (bytes - 1)) || bytes < 4096u || bytes > (1u << 18))
         return -1;
     if (running)
         r128_cce_stop();
+    r128_engine_reset();                /* (as the DRM's r128_do_cce_reset: a PIO CCE before, or a stuck one) */
     if (wait_engine_idle(500000) != 0)
         return -1;
+    blk = (uint8_t *)sys_dos_alloc(bytes + 4096u + 4096u + 0x8000u, &seg);
+    if (!blk)
+        return -1;
+    ring_block = blk;
+    lin = (uint32_t)seg << 4;
+    tbl = (lin + 0x7FFFu) & ~0x7FFFu;           /* (the table: 32 KB aligned) */
+    rb = tbl + 4096u;                           /* (the ring, then its mirror page) */
+    t = (volatile uint32_t *)(blk + (tbl - lin));
+    pages = (int)(bytes / 4096u) + 1;
+    for (i = 0; i < 1024; i++)
+        t[i] = i < pages ? rb + (uint32_t)i * 4096u : rb;
     if (!pairs)
         pairs = r128_cce_microcode;
     r128_wr(R128_PM4_MICROCODE_ADDR, 0);
@@ -121,21 +154,43 @@ int r128_cce_init_ring(const uint32_t *pairs, uint32_t off, uint32_t bytes)
     }
     while ((8u << l2qw) < bytes)
         l2qw++;
-    ring = (volatile uint32_t *)(r128.fb + off);
+    ring = (volatile uint32_t *)(blk + (rb - lin));
     ring_dw = bytes / 4u, ring_mask = ring_dw - 1u;
     for (i = 0; i < (int)ring_dw + RING_MIRROR; i++)
         ring[i] = R128_CCE_PACKET2;
-    r128_vram_written(off + bytes + RING_MIRROR * 4u - 4u);
+    saved_gart = r128_rd(R128_PCI_GART_PAGE);
+    saved_chunk = r128_rd(R128_BM_CHUNK_0_VAL);
+    saved_bus = r128_rd(R128_BUS_CNTL);
+    r128_wr(R128_PCI_GART_PAGE, tbl);           /* (bit 0, PCI_GART_DIS, clear) */
+    r128_wr(R128_BM_CHUNK_0_VAL, saved_chunk | R128_BM_FORCE_TO_PCI);
     wptr = rptr_seen = wptr_given = 0;
-    r128_wr(R128_PM4_BUFFER_OFFSET, off);
+    r128_wr(R128_PM4_BUFFER_OFFSET, 0);         /* (offset 0 in the GART's space) */
     r128_wr(R128_PM4_BUFFER_DL_WPTR, 0);
     r128_wr(R128_PM4_BUFFER_DL_RPTR, 0);
     r128_wr(R128_PM4_BUFFER_WM_CNTL, (16u / 4u) << 0 | (8u / 4u) << 8 | (8u / 4u) << 16 | (128u / 64u) << 24);
+    (void)r128_rd(R128_PM4_BUFFER_ADDR);
+    r128_wr(R128_BUS_CNTL, saved_bus & ~R128_BUS_MASTER_DIS);
     r128_wr(R128_PM4_BUFFER_CNTL, R128_PM4_192BM | (uint32_t)l2qw | R128_PM4_BUFFER_CNTL_NOUPDATE);
     (void)r128_rd(R128_PM4_BUFFER_ADDR);
     r128_wr(R128_PM4_MICRO_CNTL, R128_PM4_MICRO_FREERUN);
     running = 1;
     nbuf = 0;
+    /* The first fetch: eight no-ops, the read index past them within 50 ms. */
+    wptr = 8;
+    r128_wr(R128_PM4_BUFFER_DL_WPTR, wptr);
+    wptr_given = wptr;
+    t0 = sys_time_us();
+    while ((r128_rd(R128_PM4_BUFFER_DL_RPTR) & ring_mask) != wptr)
+        if (sys_time_us() - t0 > 50000u) {
+            r128_wr(R128_PM4_MICRO_CNTL, 0);
+            r128_wr(R128_PM4_BUFFER_CNTL, R128_PM4_NONPM4 | R128_PM4_BUFFER_CNTL_NOUPDATE);
+            running = 0;
+            ring = NULL;
+            r128_engine_reset();
+            ring_release();
+            return -1;
+        }
+    rptr_seen = wptr;
     return 0;
 }
 
@@ -157,7 +212,14 @@ static void ring_commit(void)
 {
     if (wptr == wptr_given)
         return;
-    r128_vram_written((uint32_t)((volatile uint8_t *)ring - r128.fb) + (wptr ? wptr - 1u : ring_dw - 1u) * 4u);
+    if (wptr & 1u) {                    /* (the CCE fetches qwords: an odd index is never reached; a type-2 pads it) */
+        ring[wptr] = R128_CCE_PACKET2;
+        if (wptr < RING_MIRROR)
+            ring[ring_dw + wptr] = R128_CCE_PACKET2;
+        wptr = (wptr + 1u) & ring_mask;
+    }
+    /* (the ring is ordinary memory: x86 keeps these stores before the uncached write of the index, and the
+     * chip's reads are snooped) */
     r128_wr(R128_PM4_BUFFER_DL_WPTR, wptr);
     wptr_given = wptr;
 }
@@ -184,7 +246,7 @@ static void ring_out(const uint32_t *d, int n)
 {
     if (n > (int)ring_dw / 2)
         n = (int)ring_dw / 2;
-    ring_room(n);
+    ring_room(n + 2);                   /* (and the pad a commit may add) */
     while (n-- > 0) {
         uint32_t v = *d++;
         ring[wptr] = v;
@@ -318,10 +380,11 @@ void r128_cce_stop(void)
     running = 0;
     ring = NULL;
     burst = NULL;
+    ring_release();
 }
 
 /* (after an engine reset the CCE is stopped: the DRM's r128_do_engine_reset) */
-void r128_cce_forget(void) { running = 0; nbuf = 0; room = 0; ring = NULL; burst = NULL; }
+void r128_cce_forget(void) { running = 0; nbuf = 0; room = 0; ring = NULL; burst = NULL; ring_release(); }
 
 /* The burst window write-combining: the second register aperture's FIFO page (BAR2 + 0x3000: aperture 1 at
  * 0x2000, its FIFO at 0x1000) made write-combining by GLOS (API 2.11's DRAW CACHE for a display BAR's page; the

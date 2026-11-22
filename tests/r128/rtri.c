@@ -563,7 +563,7 @@ int main(int argc, char **argv)
     }
     pitch = m.pitch_bytes;
     hx_test("mode", 1, "mode %03x, pitch %d", m.mode, pitch);
-    if ((use_ring ? r128_cce_init_ring(NULL, r128.vram_bytes - 0x40000u, 0x10000u) : r128_cce_init(NULL)) != 0) {
+    if ((use_ring ? r128_cce_init_ring(NULL, 0x10000u) : r128_cce_init(NULL)) != 0) {
         r128_text_mode();
         hx_test("cce", 0, "the CCE did not start");
         hx_done(1);
@@ -575,7 +575,7 @@ int main(int argc, char **argv)
     }
     if (use_burst == 1)                         /* (the burst path through aperture 0's own FIFO page, uncached) */
         r128_cce_burst_window(r128.mmio + 0x1000);
-    hx_test("cce", 1, "%s%s", use_ring ? "192BM, its ring in VRAM" : "192PIO",
+    hx_test("cce", 1, "%s%s", use_ring ? "192BM, its ring in system memory" : "192PIO",
             use_burst == 2 ? ", 32-byte bursts (write-combining)" : use_burst ? ", 32-byte lines" : "");
     ref = malloc(W * H * 2);
     refz = malloc(W * H * 2);

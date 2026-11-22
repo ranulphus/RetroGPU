@@ -64,6 +64,8 @@ void r128_engine_reset(void);           /* (X.org's R128EngineReset: the GUI sof
 /* The target: its first pixel at off in VRAM (a multiple of 32), pitch_bytes apart (a multiple of 8 pixels and of
  * 16 bytes: 8-bit surfaces with pitches of 8 bytes' steps drew wrongly on the P3), bpp 8, 15, 16 or 32. */
 void r128_set_target(uint32_t off, int pitch_bytes, int bpp);
+/* The same for a tiled surface (a tiled depth buffer, Z_TILE): fills only (DST_TILE in its pitch and offset). */
+void r128_set_target_tiled(uint32_t off, int pitch_bytes, int bpp);
 void r128_set_clip(int x0, int y0, int x1, int y1);
 void r128_fill(int x, int y, int w, int h, uint32_t value);
 void r128_copy(int sx, int sy, int dx, int dy, int w, int h);  /* within the target; the two may overlap */
@@ -82,9 +84,10 @@ void r128_image(int x, int y, int w, int h, const void *px, int stride);
  * CCE stops at r128_cce_stop, a mode set, and an engine reset. */
 extern const uint32_t r128_cce_microcode[512];
 int  r128_cce_init(const uint32_t *pairs);  /* 0, or -1 (the engine not idle to begin with) */
-/* The same in 192BM: the packets in a ring in VRAM at off (bytes a power of two from 4 KB to 1 MB, 128 bytes more
- * after it kept too) that the CCE fetches itself, the CPU writing it as memory (R4's speed: no MMIO write a dword). */
-int  r128_cce_init_ring(const uint32_t *pairs, uint32_t off, uint32_t bytes);
+/* The same in 192BM: the packets in a ring of bytes (a power of two, 4 KB to 256 KB) in conventional memory that the
+ * CCE fetches itself through its PCI GART, the CPU writing it as ordinary memory: no bus write a dword, and the chip
+ * as far behind as the ring holds. 0, or -1 (no memory, or the first fetch didn't come: PIO then). */
+int  r128_cce_init_ring(const uint32_t *pairs, uint32_t bytes);
 int  r128_cce_ring(void);                   /* 1: running from a ring */
 int  r128_cce_drained(void);                /* 1: everything sent fetched, the engine idle */
 /* PIO through a burst window: page is a mapping of the registers' FIFO page (offset 0x1000 of either register

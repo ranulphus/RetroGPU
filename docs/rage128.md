@@ -169,6 +169,35 @@ The owner's aim: about the TNT2 M64's speed on the same P3 (GLQuake 77.4 and 104
   write-combining mapping of its FIFO page, a 32-byte line goes as one burst. `r128_cce_burst_window` is the path;
   it waits for a way to make that one 4 KB page write-combining under GLOS (asked of GLOS, 2026-11-21).
 
+### R4's speed, part 2: bursts and the ring (2026-11-21, evening)
+
+- **Bursts through a write-combining FIFO page** (GLOS 2.11's DRAW CACHE for one page of a display card's BAR,
+  `MTRR PAGE`): the second register aperture's FIFO page (0xDFEFF000 on the P3) write-combining, packets as whole
+  32-byte lines in ascending addresses, a locked OR after each. RPIO: 39 cycles a dword (144 by PIO), RTRI's scenes
+  all pass. **But GLQuake froze the P3 hard** in a normal GLOS session: an interrupt in the middle of a line flushes
+  the part written as pieces in no set order, and the FIFO takes dwords as they come. In a normal session CLI only
+  sets GLOS's virtual flag (~1,400 cycles a trap) and the kernel takes every interrupt anyway (its clock, the RTC
+  at 1024 Hz, the NIC). So bursts are used **only at IOPL 3** (GLOS's direct-mode sessions, `glos run --direct`;
+  `tools/bench/run.py --direct`), with a real CLI before each line and STI after its locked OR: 43.5 cycles a dword,
+  GLQuake stable. Elsewhere PIO, as before (`r128_cce_burst_wc` refuses, -2).
+- **GLQuake with bursts** (direct sessions): 44.60 and 52.43 fps at 640x480 (two passes, `-mtex`), 77.10 and 80.50
+  at 320x200 (PIO in the same sessions: 60.47 at 320 `-mtex`, as in normal ones). Against the TNT2 M64's 73.7,
+  77.4, 104.5 and 96.9.
+- **What's left is overlap.** The timers at 640x480: sending 3,960k cycles a frame against 1,110k at 320x200, for
+  the same geometry: the CPU waits on the chip's drawing, which can never be more than the 192-entry FIFO behind. A
+  frame costs the CPU's time plus the chip's, not the larger. Tried: TEX_CACHE_FLUSH only after the CPU wrote
+  textures (it was in every context block: no change in speed, kept); a tiled depth buffer as Mesa's (Z_TILE, the
+  2D clears with DST_TILE; `DGL_R128_ZTILE=1`, an experiment): +2 to 4%.
+- **The bus-master ring fetches** (RRINGP on the P3 after a power cycle): the ring in conventional memory, the chip's
+  own PCI GART (PCI_GART_PAGE: a 32 KB-aligned table of page addresses, bit 0 clear), BM_CHUNK_0_VAL's force-to-PCI
+  bits (21-23; X.org's R128DRIPciInit for AGP boards: without them no fetch), bus mastering on (BUS_CNTL bit 6
+  clear). PM4_BUFFER_OFFSET keeps 25 bits: an offset in the GART's space. **A ring at a VRAM offset never fetches
+  and leaves the chip's bus mastering wedged until a power cycle**, an engine reset doesn't clear it: the first
+  failures were that. The CCE fetches qwords: the write index must be even (padded with a type-2).
+  `r128_cce_init_ring` now builds that ring (with a first-fetch check, PIO on failure); its first run stalled on an
+  odd write index and wedged the chip again, so its retest waits for the P3's next power cycle. Nothing uses it by
+  default.
+
 ## R5: Glide's back end (2026-11-21)
 
 `glide/src/backend/r128/r128.c` (`mg_r128_backend`), on the seam beside the Matrox, TNT2 and ViRGE back ends (the

@@ -210,6 +210,10 @@ enum { R128_COMB_DIS, R128_COMB_COPY, R128_COMB_COPY_INP, R128_COMB_MODULATE, R1
 
 /* The CCE (Linux's r128_drv.h) */
 #define R128_BUS_CNTL               0x0030      /* (bit 6: BUS_MASTER_DIS) */
+#define     R128_BUS_MASTER_DIS     (1u << 6)
+#define R128_PCI_GART_PAGE          0x017C      /* (31:12 the table's page; bit 0 PCI_GART_DIS) */
+#define R128_BM_CHUNK_0_VAL         0x0A18
+#define     R128_BM_FORCE_TO_PCI    (7u << 21)  /* (pointer, PM4 reads, everything else: X.org's for AGP boards) */
 #define R128_DAC_CNTL               0x0058
 #define     R128_DAC_8BIT_EN        (1u << 8)
 #define R128_PALETTE_INDEX          0x00B0      /* (an 8-bit write: the entry; PALETTE_DATA then moves on) */

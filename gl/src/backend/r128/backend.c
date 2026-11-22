@@ -308,6 +308,7 @@ static uint32_t sop(GLenum o)
     }
 }
 
+static int ztile;                       /* (EXPERIMENT: the depth buffer tiled) */
 static int fogging;                     /* the fog factor goes in the vertices' specular alpha */
 static int valid_ok;                    /* the words in r128_3d are GL's state now (until a dirty bit or a texture change) */
 static const dgl_texture *valid_tex[2];
@@ -922,6 +923,9 @@ static void install(void)
     r128_3d_init(rg_r128_color_off(0), rg_r128.pitch_bytes, rg_r128.bpp, rg_r128.z_off,
                  rg_r128.z_pitch_bytes ? rg_r128.z_pitch_bytes : rg_r128.pitch_bytes,
                  rg_r128.depth_bits ? rg_r128.depth_bits : 16);
+    ztile = getenv("DGL_R128_ZTILE") && *getenv("DGL_R128_ZTILE") == '1';   /* EXPERIMENT: Mesa's tiled Z */
+    if (ztile)
+        r128_3d.z_pitch_c |= 1u << 16;      /* (Z_TILE) */
     dgl_sink.begin = rb_begin;
     dgl_sink.triangle = rb_triangle;
     dgl_sink.fast = rb_fast;
@@ -956,7 +960,10 @@ static void clear(GLbitfield mask)
                    : (uint32_t)(d * 65535.0 + 0.5);
         if (!((mask & GL_DEPTH_BUFFER_BIT) && dgl_gl.depth_mask))
             warn_once(4, "a stencil clear clears the depth buffer too");
-        r128_set_target(rg_r128.z_off, rg_r128.z_pitch_bytes, rg_r128.depth_bits == 24 ? 32 : 16);
+        if (ztile)
+            r128_set_target_tiled(rg_r128.z_off, rg_r128.z_pitch_bytes, rg_r128.depth_bits == 24 ? 32 : 16);
+        else
+            r128_set_target(rg_r128.z_off, rg_r128.z_pitch_bytes, rg_r128.depth_bits == 24 ? 32 : 16);
         r128_set_clip(c[0], c[1], c[2], c[3]);
         r128_fill(c[0], c[1], c[2] - c[0], c[3] - c[1], v);
     }

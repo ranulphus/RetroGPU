@@ -93,7 +93,10 @@ void r128_3d_emit(void)
         p[0] = R128_CCE_PACKET0 | 11u << 16 | (R128_DST_PITCH_OFFSET_C >> 2);
         p[1] = c->dst_pitch_offset_c, p[2] = c->dp_gui_master_cntl_c, p[3] = c->sc_top_left_c;
         p[4] = c->sc_bottom_right_c, p[5] = c->z_offset_c, p[6] = c->z_pitch_c, p[7] = c->z_sten_cntl_c;
-        p[8] = c->tex_cntl_c, p[9] = c->misc_3d_state_cntl_reg, p[10] = c->texture_clr_cmp_clr_c;
+        /* (TEX_CACHE_FLUSH only after the CPU wrote textures, or 2D: in every context block it emptied the
+         * texture cache at every texture change, hundreds a frame; Mesa sets it after uploads alone) */
+        p[8] = (c->tex_cntl_c & ~R128_TEX_CACHE_FLUSH) | (full || tex_flush ? R128_TEX_CACHE_FLUSH : 0u);
+        p[9] = c->misc_3d_state_cntl_reg, p[10] = c->texture_clr_cmp_clr_c;
         p[11] = c->texture_clr_cmp_msk_c, p[12] = c->fog_color_c;
         r128_cce_out(p, 13);
     }

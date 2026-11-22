@@ -141,6 +141,38 @@ int main(int argc, char **argv)
         }
     }
     {
+        /* The ring in system memory (192BM through the PCI GART): the CPU writes memory, the chip fetches. */
+        r128_cce_idle_wait(1000000);
+        if (r128_cce_init_ring(NULL, 0x10000u) != 0)
+            hx_log("RPIO-CASE ring not started");
+        else {
+            for (i = 0; i < 64; i++)
+                p[i] = R128_CCE_PACKET2;
+            t0 = tsc();
+            for (n = 0; n < 200000; n += 64)
+                r128_cce_out(p, 64);
+            r128_cce_idle_wait(1000000);
+            report("ring", 200000, tsc() - t0, 0);
+            {
+                r128_vertex v[3];
+                memset(v, 0, sizeof v);
+                for (i = 0; i < 3; i++)
+                    v[i].z = 0.5f, v[i].rhw = 1.0f, v[i].argb = 0xFFFF0000u, v[i].spec = 0xFF000000u;
+                v[0].x = 10, v[0].y = 10, v[1].x = 11.5f, v[1].y = 10, v[2].x = 10, v[2].y = 11.5f;
+                r128_3d_init(0, m.pitch_bytes, 16, 0x100000u, 1280, 16);
+                r128_3d_format(R128_VC_FRMT_RHW | R128_VC_FRMT_DIFFUSE_ARGB | R128_VC_FRMT_SPEC_FRGB | R128_VC_FRMT_S_T);
+                r128_3d_emit();
+                r128_cce_idle_wait(1000000);
+                t0 = tsc();
+                for (n = 0; n < 200000; n += 3 + 3 * 8)
+                    r128_tri(&v[0], &v[1], &v[2]);
+                r128_cce_idle_wait(1000000);
+                report("tri-ring", (uint32_t)n, tsc() - t0, 0);
+            }
+            r128_cce_init(NULL);                /* (back to PIO for the cases after) */
+        }
+    }
+    {
         /* Aliases: does the FIFO take dwords at the addresses after EVEN and ODD (a burst window)? A register write
          * packet at each pair (0x1000 + 8k, 0x1004 + 8k) with its own marker, then the register read back. */
         int k;

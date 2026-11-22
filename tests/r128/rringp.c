@@ -154,22 +154,17 @@ int main(int argc, char **argv)
             for (k = 0; k < 8192; k++)            /* (all of the DRM's 32 KB table: the ring's pages, then the ring again) */
                 t[k] = k <= (int)(RING_BYTES / 4096u) ? al + (uint32_t)k * 4096u : al;
             uint32_t gart0 = r128_rd(0x017C), chunk = r128_rd(0x0A18);
+            (void)cfg_wr;
             r128_wr(0x017C, tbl);               /* (PCI_GART_PAGE; bit 0 clear: the PCI GART, not the AGP one) */
             hx_log("RRINGP-GART ring=%08lx table=%08lx (gart page was %08lx, bm_chunk_0 %08lx)", (unsigned long)al,
                    (unsigned long)tbl, (unsigned long)gart0, (unsigned long)chunk);
-            try_one("sysgart", 0, 0x02000000u, 1, (volatile uint32_t *)(blk + (al - lin)));
             /* X.org's R128DRIPciInit for AGP boards: the bus master's pointer, PM4 and other reads forced to PCI. */
             r128_wr(0x0A18, chunk | 7u << 21);
+            /* X.org's R128DRIPciInit for AGP boards: the bus master's pointer, PM4 and other reads forced to PCI.
+             * (The other ways tried, a ring at a VRAM offset among them, never fetched; the VRAM ones wedged the
+             * chip's bus mastering until a power cycle, so they're gone: docs/rage128.md.) */
+            r128_wr(0x0A18, chunk | 7u << 21);
             try_one("syspci", 0, 0x02000000u, 1, (volatile uint32_t *)(blk + (al - lin)));
-            if (bridge_dev >= 0) {
-                /* The AGP bridge's own bus-master enable: the card's reads forwarded upstream to memory. */
-                uint32_t bc = cfg_rd(0, bridge_dev, 4);
-                cfg_wr(0, bridge_dev, 4, bc | 4u);
-                try_one("bridgebm", 0, 0x02000000u, 1, (volatile uint32_t *)(blk + (al - lin)));
-                r128_wr(0x0A18, chunk);
-                try_one("bridgeagp", 0, 0x02000000u, 1, (volatile uint32_t *)(blk + (al - lin)));
-                cfg_wr(0, bridge_dev, 4, bc);
-            }
             r128_wr(0x0A18, chunk);
             r128_wr(0x017C, gart0);
             sys_dos_free(blk);

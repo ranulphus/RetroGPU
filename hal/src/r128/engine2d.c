@@ -79,8 +79,17 @@ void r128_engine_reset(void)
     r128_cce_forget();                  /* (the CCE stops at an engine reset: the DRM's r128_do_engine_reset) */
 }
 
+static int t_tile;                      /* (the target tiled: a tiled depth buffer's, for fills) */
+
+void r128_set_target_tiled(uint32_t off, int pitch_bytes, int bpp)
+{
+    r128_set_target(off, pitch_bytes, bpp);
+    t_tile = 1;
+}
+
 void r128_set_target(uint32_t off, int pitch_bytes, int bpp)
 {
+    t_tile = 0;
     t_off = off;
     t_pitch = pitch_bytes;
     t_bpp = bpp;
@@ -133,7 +142,7 @@ void r128_fill(int x, int y, int w, int h, uint32_t value)
     uint32_t po;
     if (w <= 0 || h <= 0 || !trim(&x, &y, &w, &h, &dx, &dy))
         return;
-    po = pitch_offset(t_off, t_pitch, &xa);
+    po = pitch_offset(t_off, t_pitch, &xa) | (t_tile ? 1u << 31 : 0u);      /* (DST_TILE) */
     fifo_wait(6);
     eng_wr(R128_DP_GUI_MASTER_CNTL, master(R128_GMC_BRUSH_SOLID_COLOR | R128_GMC_SRC_DATATYPE_COLOR | R128_ROP3_P));
     eng_wr(R128_DP_BRUSH_FRGD_CLR, pixel(value));

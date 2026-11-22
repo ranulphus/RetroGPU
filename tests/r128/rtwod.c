@@ -392,11 +392,11 @@ static int depth(int b)
     hx_test(n, 1, "mode %03x, pitch %u", m.mode, m.pitch_bytes);
     if (use_cce) {
         name_of(n, "cce");
-        if ((use_cce == 2 ? r128_cce_init_ring(NULL, r128.vram_bytes - 0x40000u, 0x10000u) : r128_cce_init(NULL)) != 0) {
+        if ((use_cce == 2 ? r128_cce_init_ring(NULL, 0x10000u) : r128_cce_init(NULL)) != 0) {
             hx_test(n, 0, "the CCE did not start");
             return 0;
         }
-        hx_test(n, 1, "the CCE started in %s", use_cce == 2 ? "192BM, its ring in VRAM" : "192PIO");
+        hx_test(n, 1, "the CCE started in %s", use_cce == 2 ? "192BM, its ring in system memory" : "192PIO");
     }
     /* The screen, then two surfaces of other pitches off it. */
     off = (uint32_t)m.pitch_bytes * SH;
