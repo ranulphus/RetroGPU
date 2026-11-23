@@ -213,7 +213,11 @@ int r128_cce_drained(void)
     st = r128_rd(R128_PM4_STAT);
     if (st & (R128_PM4_BUSY | R128_PM4_GUI_ACTIVE))
         return 0;
-    return ring ? (r128_rd(R128_PM4_BUFFER_DL_RPTR) & ring_mask) == wptr : (int)(st & R128_PM4_FIFOCNT_MASK) >= FIFO_SIZE;
+    /* (a ring: fetched to the write index AND the CCE's own FIFO empty, the DRM's r128_do_cce_idle; see
+     * r128_cce_idle_wait) */
+    if ((int)(st & R128_PM4_FIFOCNT_MASK) < FIFO_SIZE)
+        return 0;
+    return ring ? (r128_rd(R128_PM4_BUFFER_DL_RPTR) & ring_mask) == wptr : 1;
 }
 
 /* The ring's new dwords to the chip: out of the CPU's buffers, then the write index. */
@@ -369,16 +373,22 @@ void r128_cce_reg(uint32_t reg, uint32_t v)
     r128_cce_out(p, 2);
 }
 
-/* Everything sent drawn: the FIFO empty, the engine idle, then the pixel cache flushed (r128_do_cce_idle). */
+/* Everything sent drawn: the FIFO empty, the engine idle, then the pixel cache flushed (r128_do_cce_idle). With a
+ * ring: fetched to the write index first, and the CCE's own FIFO (192 entries in 192BM, as in 192PIO) empty all the
+ * same: what it has fetched waits there, and with the ring's indices alone the wait ended while those commands
+ * still drew. The CPU's texels written then lost 32-byte pieces of their last rows (DOS-GL's conformance t17 on
+ * bench A's 440BX, 2026-11-23; the P3's timing hid it), t14's fault again. */
 int r128_cce_idle_wait(uint32_t timeout_us)
 {
     uint32_t t0 = sys_time_us();
     r128_cce_flush();
     for (;;) {
-        uint32_t st = r128_rd(R128_PM4_STAT);
-        if (ring ? (r128_rd(R128_PM4_BUFFER_DL_RPTR) & ring_mask) == wptr && !(st & (R128_PM4_BUSY | R128_PM4_GUI_ACTIVE))
-                 : (int)(st & R128_PM4_FIFOCNT_MASK) >= FIFO_SIZE && !(st & (R128_PM4_BUSY | R128_PM4_GUI_ACTIVE)))
-            break;
+        uint32_t st;
+        if (!ring || (r128_rd(R128_PM4_BUFFER_DL_RPTR) & ring_mask) == wptr) {
+            st = r128_rd(R128_PM4_STAT);    /* (after the read index, as the DRM reads them) */
+            if ((int)(st & R128_PM4_FIFOCNT_MASK) >= FIFO_SIZE && !(st & (R128_PM4_BUSY | R128_PM4_GUI_ACTIVE)))
+                break;
+        }
         if (sys_time_us() - t0 >= timeout_us)
             return -1;
     }

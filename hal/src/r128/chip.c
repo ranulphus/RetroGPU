@@ -210,6 +210,22 @@ void r128_vram_written(uint32_t last)
     wc_lock();
     if (r128.fb && last + 4u <= r128.vram_bytes)
         (void)*(volatile uint32_t *)(r128.fb + (last & ~3u));   /* (the last write's own dword read back) */
+    /* The pixel cache flushed (the DRM's r128_do_pixcache_flush): the chip keeps the host's last written lines in
+     * it, and the 3D engine sampled the texels under them as they were before. With the CCE in PIO every packet
+     * dword is a host access and pushed them out; from a ring nothing follows the texels, and DOS-GL's
+     * conformance t17 on bench A drew 32-byte pieces of each texture's last rows old (2026-11-23; reading the
+     * whole texture back mended it too). */
+    if (r128.mmio) {
+        uint32_t t0 = 0, spins = 0;
+        r128_wr(R128_PC_NGUI_CTLSTAT, r128_rd(R128_PC_NGUI_CTLSTAT) | R128_PC_FLUSH_ALL);
+        while (r128_rd(R128_PC_NGUI_CTLSTAT) & R128_PC_BUSY)
+            if ((++spins & 63u) == 0) {
+                if (!t0)
+                    t0 = sys_time_us();
+                else if (sys_time_us() - t0 > 100000u)
+                    break;
+            }
+    }
 }
 
 int r128_set_mode(const r128_mode *m)
