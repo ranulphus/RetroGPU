@@ -43,6 +43,11 @@ static float kover[2];              /* k=MIN,MAX: texels a pixel, for every text
 /* (the Rage 128, the P3, 2026-11-21: lodmode 3, the largest single derivative, at its bias byte 63 matched best:
  * 957 of 47,007 pixels off in tex-mip; OpenGL's (0) 2,304, the TNT2's (4) 34,953) */
 static int lodmode = 3, lodsel, lodlin;
+static uint32_t ring_kb = 64;           /* (ring=KB: the ring's size) */
+static int statesync, wdelay_set;          /* (experiments: a sync after each state send; PM4_BUFFER_DL_WPTR_DELAY) */
+static uint32_t wdelay;
+static int chunk_set;                   /* (chunk=V: BM_CHUNK_0_VAL after the ring starts: an experiment) */
+static uint32_t chunk_val;
 static int use_ring;                    /* (ring: the CCE from a ring in VRAM, not PIO) */
 static int use_burst;                   /* (burst: PIO in whole lines through the FIFO page) */
 static double lodbias;
@@ -310,6 +315,8 @@ static void send_state(void)
     for (i = 0; i < 11; i++)
         c->prim_tex_offset_c[i] = tx.levels > 1 && i < tx.levels ? lvoff[tx.levels - 1 - i] : lvoff[0];
     r128_3d_emit();
+    if (statesync)                              /* (statesync: the engine waited for after each state send) */
+        r128_sync(1000000);
 }
 
 static void set_state(const gl_texture *t, int blend_mode, int fog_on)
@@ -350,6 +357,21 @@ static void compare(const char *name, double max_frac, int tol)
     if (r128_sync(4000000) != 0) {
         hx_test(name, 0, "the engine never went idle (PM4_STAT %08lx GUI_STAT %08lx)",
                 (unsigned long)r128_rd(R128_PM4_STAT), (unsigned long)r128_rd(R128_GUI_STAT));
+        if (r128_cce_ring()) {
+            /* Where the CCE stopped: its read index, the write index, the ring's dwords from 24 before it. */
+            uint32_t rp, wp, dw, k;
+            const volatile uint32_t *rb;
+            char line[200];
+            r128_cce_ring_peek(&rp, &wp, &rb, &dw);
+            hx_log("RTRI-RING rptr=%lu wptr=%lu size=%lu", (unsigned long)rp, (unsigned long)wp, (unsigned long)dw);
+            for (k = 0; k < 48; k += 6) {
+                uint32_t i0 = (rp + dw - 24 + k) % dw;
+                sprintf(line, "RTRI-RING %5lu: %08lx %08lx %08lx %08lx %08lx %08lx", (unsigned long)i0,
+                        (unsigned long)rb[i0], (unsigned long)rb[(i0 + 1) % dw], (unsigned long)rb[(i0 + 2) % dw],
+                        (unsigned long)rb[(i0 + 3) % dw], (unsigned long)rb[(i0 + 4) % dw], (unsigned long)rb[(i0 + 5) % dw]);
+                hx_log("%s", line);
+            }
+        }
         return;
     }
     for (y = 0; y < H; y++) {
@@ -537,6 +559,14 @@ int main(int argc, char **argv)
             snap = atoi(argv[i] + 5);
         else if (!strcmp(argv[i], "ring"))
             use_ring = 1;
+        else if (!strncmp(argv[i], "ring=", 5))
+            use_ring = 1, ring_kb = (uint32_t)atoi(argv[i] + 5);
+        else if (!strcmp(argv[i], "statesync"))
+            statesync = 1;
+        else if (!strncmp(argv[i], "wdelay=", 7))
+            wdelay_set = 1, wdelay = (uint32_t)strtoul(argv[i] + 7, NULL, 0);
+        else if (!strncmp(argv[i], "chunk=", 6))
+            chunk_set = 1, chunk_val = (uint32_t)strtoul(argv[i] + 6, NULL, 0);
         else if (!strcmp(argv[i], "burst"))
             use_burst = 1;
         else if (!strcmp(argv[i], "burstwc"))
@@ -563,10 +593,18 @@ int main(int argc, char **argv)
     }
     pitch = m.pitch_bytes;
     hx_test("mode", 1, "mode %03x, pitch %d", m.mode, pitch);
-    if ((use_ring ? r128_cce_init_ring(NULL, 0x10000u) : r128_cce_init(NULL)) != 0) {
+    if ((use_ring ? r128_cce_init_ring(NULL, ring_kb * 1024u) : r128_cce_init(NULL)) != 0) {
         r128_text_mode();
         hx_test("cce", 0, "the CCE did not start");
         hx_done(1);
+    }
+    if (wdelay_set && use_ring) {
+        hx_log("RTRI PM4_BUFFER_DL_WPTR_DELAY %08lx -> %08lx", (unsigned long)r128_rd(0x0718), (unsigned long)wdelay);
+        r128_wr(0x0718, wdelay);
+    }
+    if (chunk_set) {
+        hx_log("RTRI BM_CHUNK_0_VAL %08lx -> %08lx", (unsigned long)r128_rd(0x0A18), (unsigned long)chunk_val);
+        r128_wr(0x0A18, chunk_val);
     }
     if (use_burst == 2 && r128_cce_burst_wc() != 0) {    /* (burstwc: the second aperture's page, write-combining) */
         hx_test("cce", 0, "no write-combining FIFO page (GLOS's answer %d)", sys_cache_wc_err);

@@ -90,6 +90,7 @@ int  r128_cce_init(const uint32_t *pairs);  /* 0, or -1 (the engine not idle to 
 int  r128_cce_init_ring(const uint32_t *pairs, uint32_t bytes);
 int  r128_cce_ring(void);                   /* 1: running from a ring */
 int  r128_cce_drained(void);                /* 1: everything sent fetched, the engine idle */
+void r128_cce_ring_peek(uint32_t *rp, uint32_t *wp, const volatile uint32_t **base, uint32_t *dwords);   /* (diag) */
 /* PIO through a burst window: page is a mapping of the registers' FIFO page (offset 0x1000 of either register
  * aperture; the second, CONFIG_REG_1_BASE's, can be made write-combining without the first), written a 32-byte line
  * at a time in address order; NULL: back to EVEN and ODD. Until r128_cce_stop. */

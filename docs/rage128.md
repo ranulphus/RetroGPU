@@ -195,9 +195,19 @@ The owner's aim: about the TNT2 M64's speed on the same P3 (GLQuake 77.4 and 104
   clear). PM4_BUFFER_OFFSET keeps 25 bits: an offset in the GART's space. **A ring at a VRAM offset never fetches
   and leaves the chip's bus mastering wedged until a power cycle**, an engine reset doesn't clear it: the first
   failures were that. The CCE fetches qwords: the write index must be even (padded with a type-2).
-  `r128_cce_init_ring` now builds that ring (with a first-fetch check, PIO on failure); its first run stalled on an
-  odd write index and wedged the chip again, so its retest waits for the P3's next power cycle. Nothing uses it by
-  default.
+  `r128_cce_init_ring` builds that ring (a first-fetch check, PIO on failure).
+- **The ring, working (2026-11-23):** the CCE fetches the ring in blocks and leaves a partial one at the write
+  index unfetched until more comes; a flush must mark the download done (DL_DONE, bit 31 of the write pointer, as
+  the DRM's r128_do_cce_flush), or an idle wait never ends: RTRI ring's tex-linear stopped 4 dwords short of its
+  last triangle. A full ring is waited for while its read index moves (a stall is only no progress for half a
+  second). With that: RTRI's 17 scenes at 64 and 256 KB, RTWOD's 25, RGDEV, both conformance suites (33 and 26 of
+  27) pass through it, and **the device uses it by default** (`DGL_R128_RING=0`: PIO), in any GLOS session.
+- **GLQuake with the ring:** 56.00 and **65.63** fps at 640x480 (two passes, `-mtex`), **92.88** and **92.26** at
+  320x200, against the TNT2 M64's 73.7, 77.4, 104.5 and 96.9: 85-95% of it with `-mtex`. (PIO: 38.72, 44.12, 57.60,
+  60.58; bursts in direct sessions: 44.60, 52.43, 77.10, 80.50.)
+- **Still owed for overlap:** a full engine sync at every lightmap rectangle (`tex_sub`) and at every swap drains
+  the whole ring; fences (a scratch register written through the ring, as the DRM's ages) and the flip through the
+  ring would keep the chip busy across them.
 
 ## R5: Glide's back end (2026-11-21)
 

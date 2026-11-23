@@ -37,6 +37,7 @@ static rg_mode modes[MAX_MODES];
 static r128_mode rmodes[MAX_MODES];
 static int nmodes;
 static uint32_t retrace_us, timeouts;
+static int ring_on;                     /* (the CCE from a bus-master ring) */
 
 static int bytes_of(int bpp) { return bpp == 32 ? 4 : bpp == 8 ? 1 : 2; }
 
@@ -296,7 +297,17 @@ static int open_screen(const rg_open *o, rg_opened *out)
                 rmodes[i].pitch_bytes / bytes_of(bpp));
         r128_set_pitch(st.pitch_bytes);
     }
-    if (r128_cce_init(microcode()) != 0) {
+    /* The CCE from a bus-master ring in system memory (r128_cce_init_ring: the CPU writes memory, the chip as far
+     * behind as the ring holds), else in PIO. DGL_R128_RING=0: PIO. */
+#if !defined(__WATCOMC__)
+    if (getenv("DGL_R128_RING") && *getenv("DGL_R128_RING") == '0')
+        ring_on = 0;
+    else
+#endif
+    ring_on = r128_cce_init_ring(microcode(), 0x10000u) == 0;
+    if (ring_on)
+        RG_WARN("DGL-R128 the CCE from a 64 KB bus-master ring");    /* (always said) */
+    else if (r128_cce_init(microcode()) != 0) {
         rg_set_error("the Rage 128's CCE didn't start (the engine never went idle)");
         return -1;
     }
@@ -308,7 +319,9 @@ static int open_screen(const rg_open *o, rg_opened *out)
         RG_INFO("DGL-R128 bursts off (DGL_R128_BURST=0)");
     else
 #endif
-    if (r128_cce_burst_wc() == 0)
+    if (ring_on)
+        ;                               /* (no PIO to burst) */
+    else if (r128_cce_burst_wc() == 0)
         RG_WARN("DGL-R128 the CCE's packets in bursts (its FIFO page write-combining)");   /* (always said) */
     else if (sys_cache_wc_err == -2)
         RG_INFO("DGL-R128 packets a dword at a time: bursts want the real interrupt flag (IOPL 3: GLOS's direct "

@@ -196,6 +196,15 @@ int r128_cce_init_ring(const uint32_t *pairs, uint32_t bytes)
 
 int r128_cce_ring(void) { return running && ring != NULL; }
 
+/* (diagnostics: the ring's read and write indexes, its dwords and size) */
+void r128_cce_ring_peek(uint32_t *rp, uint32_t *wp, const volatile uint32_t **base, uint32_t *dwords)
+{
+    *rp = ring ? r128_rd(R128_PM4_BUFFER_DL_RPTR) : 0;
+    *wp = wptr;
+    *base = ring;
+    *dwords = ring_dw;
+}
+
 /* Everything sent fetched and the engine idle now (r128_idle's, with the CCE running). */
 int r128_cce_drained(void)
 {
@@ -225,19 +234,25 @@ static void ring_commit(void)
 }
 
 /* Room for n dwords (and the one that keeps the write index off the read index): the read index read again while
- * short, the chip told of what is written first (bounded). */
+ * short, the chip told of what is written first. Given up only when the read index stops moving for half a second:
+ * a full ring of large blended or filtered triangles takes the chip longer than that to drain, and writing over
+ * commands it hasn't read corrupts the stream (RTRI ring's blend, tex-linear and tex-mip on the P3). */
 static void ring_room(int n)
 {
-    uint32_t t0 = 0;
+    uint32_t t0 = 0, last = rptr_seen;
     int spins = 0;
     while ((int)((rptr_seen - wptr - 1u) & ring_mask) < n) {
         ring_commit();
         rptr_seen = r128_rd(R128_PM4_BUFFER_DL_RPTR) & ring_mask;
+        if (rptr_seen != last) {
+            last = rptr_seen, t0 = 0, spins = 0;
+            continue;
+        }
         if ((++spins & 255) == 0) {
             if (!t0)
                 t0 = sys_time_us();
             else if (sys_time_us() - t0 > 500000u)
-                break;                  /* (the engine stuck: r128_sync's time-out reports it) */
+                break;                  /* (no progress: the engine stuck; r128_sync's time-out reports it) */
         }
     }
 }
@@ -268,7 +283,11 @@ void r128_cce_flush(void)
     volatile uint32_t *odd = (volatile uint32_t *)(r128.mmio + R128_PM4_FIFO_DATA_ODD);
     int i = 0;
     if (running && ring) {
+        /* The download marked done (the DRM's r128_do_cce_flush): the CCE fetches the ring in blocks and leaves a
+         * partial one at the write index unfetched until more comes; RTRI ring's tex-linear on the P3 stopped 4
+         * dwords short of its last triangle's end (read index 256, write index 260). */
         ring_commit();
+        r128_wr(R128_PM4_BUFFER_DL_WPTR, wptr | R128_PM4_BUFFER_DL_DONE);
         return;
     }
     if (!running || !nbuf)
