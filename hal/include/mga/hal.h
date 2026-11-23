@@ -8,7 +8,7 @@ typedef enum {
     MGA_FAMILY_NONE = 0,
     MGA_FAMILY_G100,
     MGA_FAMILY_G200,
-    MGA_FAMILY_G400,      /* G400 and G450 */
+    MGA_FAMILY_G400,      /* G400, G450 and G550 */
     MGA_FAMILY_G200E      /* server variants: reference only */
 } mga_family;
 

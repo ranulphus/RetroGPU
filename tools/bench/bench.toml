@@ -10,7 +10,7 @@ address = "192.168.1.21"
 http_port = 8000
 
 # Per PC:
-#   card          g100 | g200 | g400 | g450 (recorded in each result)
+#   card          g100 | g200 | g400 | g450 | g550 (recorded in each result)
 #   address       the host as this PC sees it (default [host] address)
 #   serial        host serial device on the PC's COM1 null-modem cable,
 #                 or "file:PATH" to follow a log file (the virtual PC)

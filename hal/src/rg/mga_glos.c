@@ -183,9 +183,10 @@ int rg_mga_glos_open(const rg_open *o, rg_opened *out)
     memset(&mga, 0, sizeof mga);
     mga.device_id = (uint16_t)g.device;
     mga.revision = (uint8_t)g.revision;
-    mga.family = g.device == 0x0525 ? MGA_FAMILY_G400 : g.device == 0x0520 || g.device == 0x0521 ? MGA_FAMILY_G200
-               : MGA_FAMILY_G100;
-    mga.name = mga.family == MGA_FAMILY_G400 ? (g.revision >= 0x80 ? "MGA-G450" : "MGA-G400/G450")
+    mga.family = g.device == 0x0525 || g.device == 0x2527 ? MGA_FAMILY_G400
+               : g.device == 0x0520 || g.device == 0x0521 ? MGA_FAMILY_G200 : MGA_FAMILY_G100;
+    mga.name = g.device == 0x2527 ? "MGA-G550"
+             : mga.family == MGA_FAMILY_G400 ? (g.revision >= 0x80 ? "MGA-G450" : "MGA-G400/G450")
              : mga.family == MGA_FAMILY_G200 ? "MGA-G200" : "MGA-G100";
     mga.fb_phys = g.fb_phys;
     mga.mmio_phys = g.regs_phys;

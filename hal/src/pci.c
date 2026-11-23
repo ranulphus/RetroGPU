@@ -30,6 +30,7 @@ static const struct { uint16_t id; mga_family fam; const char *name; } known[] =
     { 0x0520, MGA_FAMILY_G200, "MGA-G200 (PCI)" },
     { 0x0521, MGA_FAMILY_G200, "MGA-G200 (AGP)" },
     { 0x0525, MGA_FAMILY_G400, "MGA-G400/G450" },
+    { 0x2527, MGA_FAMILY_G400, "MGA-G550" },        /* (the G400's WARP path: Linux's DRM mga_warp.c) */
     { 0x0522, MGA_FAMILY_G200E, "G200e" },
     { 0x0530, MGA_FAMILY_G200E, "G200EV" },
     { 0x0532, MGA_FAMILY_G200E, "G200eW" },
@@ -81,7 +82,9 @@ int mga_find(mga_chip *c)
                         c->fb_phys = mga_pci_read32(bus, dev, fn, 0x10) & ~0xFu;
                         c->mmio_phys = mga_pci_read32(bus, dev, fn, 0x14) & ~0xFu;
                         c->iload_phys = mga_pci_read32(bus, dev, fn, 0x18) & ~0xFu;
-                        if (c->family == MGA_FAMILY_G400 && c->revision >= 0x80) {
+                        if (c->device_id == 0x2527)
+                            g450_memory_prepare(c);     /* (the G550's DDR as the G450's, its PInS v5 alike) */
+                        else if (c->family == MGA_FAMILY_G400 && c->revision >= 0x80) {
                             c->name = "MGA-G450";
                             g450_memory_prepare(c);
                         }

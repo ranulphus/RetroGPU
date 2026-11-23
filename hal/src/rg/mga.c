@@ -176,7 +176,7 @@ static int probe(void)
         return discovered > 0 ? 0 : -1;
     }
     discovered = -1;
-    strcpy(why_not, "no supported Matrox card found (G400, G450 or G200)");
+    strcpy(why_not, "no supported Matrox card found (G550, G450, G400 or G200)");
     if (mga_find(&mga) != 0) {
         rg_set_error("%s", why_not);
         return -1;

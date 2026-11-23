@@ -5,8 +5,8 @@
  *
  * Logs the memory registers, soft-resets the engine (unless noreset), logs them, then runs Linux matroxfb's
  * g450_memory_init sequence (unless noinit) with the values of the card's PInS v5 block, OPTION2 as the card has
- * it, and logs them again. Only on a G450 (device 0525, revision >= 80h) with a PInS v5 block. Run MODETEST
- * decay=N after it: the memory holds, or it doesn't. HX-STAT g450mem lines. */
+ * it, and logs them again. Only on a G450 (device 0525, revision >= 80h) or a G550 (2527) with a PInS v5 block.
+ * Run MODETEST decay=N after it: the memory holds, or it doesn't. HX-STAT g450mem lines. */
 #include "hx.h"
 #include "mga/hal.h"
 #include "mga/mmio.h"
@@ -46,8 +46,9 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "noinit")) do_init = 0;
     }
     hx_init(1, argv, "g450mem");
-    if (mga_find(&mga) != 0 || mga_map(&mga) != 0 || mga.device_id != 0x0525 || mga.revision < 0x80) {
-        hx_test("init", 0, "a G450 is needed (device 0525, revision 80h or later)");
+    if (mga_find(&mga) != 0 || mga_map(&mga) != 0 ||
+        !(mga.device_id == 0x2527 || (mga.device_id == 0x0525 && mga.revision >= 0x80))) {
+        hx_test("init", 0, "a G450 or G550 is needed (device 0525 revision 80h or later, or 2527)");
         hx_done(HX_INIT_FAILED);
     }
     rom = (const volatile uint8_t *)sys_real_ptr(0xC000, 0);
