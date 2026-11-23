@@ -16,6 +16,7 @@ NICS = {
     "rtl8139c+": "",            # Realtek RTL8139C+
     "i82557": "",               # Intel PRO/100
     "i82558": "",               # Intel PRO/100+
+    "pcnetpci": "",             # AMD PCnet-PCI II (Am79C970A): GLOS's kernel/drv/pcnet.c (phase H)
     # 86Box's PLIP device on LPT1 (378h, IRQ 7): Ethernet frames over the parallel port as Crynwr's PLIP and
     # Linux's plip speak them, joined to SLiRP like a card. No card in the PC: the guest's own PLIP driver is
     # the network (GLOS: [net] cable = client LPT1).
