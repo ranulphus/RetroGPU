@@ -86,6 +86,7 @@ DJ_SRC_CLKINFO := tests/hal/clkinfo.c
 DJ_SRC_CLKSET := tests/hal/clkset.c
 DJ_SRC_MODETEST := tests/hal/modetest.c
 DJ_SRC_RSTTEST := tests/hal/rsttest.c
+DJ_SRC_RSTMEM := tests/hal/rstmem.c
 DJ_SRC_G450MEM := tests/hal/g450mem.c
 DJ_SRC_ROMDUMP := tests/hal/romdump.c
 DJ_SRC_VRAMBUS := tests/hal/vrambus.c
@@ -137,6 +138,7 @@ build/djgpp/CLKINFO.EXE: tests/hal/clkinfo.c
 build/djgpp/CLKSET.EXE: tests/hal/clkset.c
 build/djgpp/MODETEST.EXE: tests/hal/modetest.c
 build/djgpp/RSTTEST.EXE: tests/hal/rsttest.c
+build/djgpp/RSTMEM.EXE: tests/hal/rstmem.c
 build/djgpp/G450MEM.EXE: tests/hal/g450mem.c
 build/djgpp/ROMDUMP.EXE: tests/hal/romdump.c
 build/djgpp/VRAMBUS.EXE: tests/hal/vrambus.c

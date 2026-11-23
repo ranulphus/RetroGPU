@@ -119,33 +119,54 @@ static uint32_t le32b(const volatile uint8_t *b)
     return (uint32_t)b[0] | (uint32_t)b[1] << 8 | (uint32_t)b[2] << 16 | (uint32_t)b[3] << 24;
 }
 
+/* Which steps of the set-up run (diagnosis: RSTMEM steps=; all of them otherwise): bit 0 refresh off and on again,
+ * 1 the interface's parameters, 2 the memory clocks off, 3 MEMRDBK and MACCESS with them off, 4 the clocks on,
+ * 5 MEMRDBK's second value, 6 the chips' mode registers (MACCESS bit 15), 7 PLNWT's toggle, 8 MCTLWTST's core value. */
+uint32_t mga_g450_reinit_steps = 0x1FFu;
+
 static void g450_memory_reinit(void)
 {
     mga_chip *c = g450chip;
-    uint32_t o, opt2;
+    uint32_t o, opt2, st = mga_g450_reinit_steps;
     if (!c || !mga_mmio)
         return;
     opt2 = mga_pci_read32(c->bus, c->dev, c->fn, 0x50);
-    o = mga_pci_read32(c->bus, c->dev, c->fn, 0x40) & ~0x001F8000u;     /* refresh off */
-    mga_pci_write32(c->bus, c->dev, c->fn, 0x40, o);
-    o = (o & ~0x00207E00u) | (g450mem.opt & 0x00207E00u);               /* the memory interface */
-    mga_pci_write32(c->bus, c->dev, c->fn, 0x40, o);
-    mga_pci_write32(c->bus, c->dev, c->fn, 0x50, opt2);
-    MGA_WR32_DIRECT(MGAREG_MCTLWTST, g450mem.mctlwtst);
-    mga_pci_write32(c->bus, c->dev, c->fn, 0x58, g450mem.memmisc & ~0x80000000u);   /* memory clocks off */
-    MGA_WR32_DIRECT(MGAREG_MEMRDBK, g450mem.memrdbk);
-    MGA_WR32_DIRECT(MGAREG_MACCESS, g450mem.maccess);
-    mga_pci_write32(c->bus, c->dev, c->fn, 0x58, g450mem.memmisc | 0x80000000u);    /* memory clocks on */
-    sys_delay_us(200);
-    if (g450mem.ddr && (!g450mem.emrswen || !g450mem.dll))
+    o = mga_pci_read32(c->bus, c->dev, c->fn, 0x40);
+    if (st & 1u) {
+        o &= ~0x001F8000u;                                              /* refresh off */
+        mga_pci_write32(c->bus, c->dev, c->fn, 0x40, o);
+    }
+    if (st & 2u) {
+        o = (o & ~0x00207E00u) | (g450mem.opt & 0x00207E00u);           /* the memory interface */
+        mga_pci_write32(c->bus, c->dev, c->fn, 0x40, o);
+        mga_pci_write32(c->bus, c->dev, c->fn, 0x50, opt2);
+        MGA_WR32_DIRECT(MGAREG_MCTLWTST, g450mem.mctlwtst);
+    }
+    if (st & 4u)
+        mga_pci_write32(c->bus, c->dev, c->fn, 0x58, g450mem.memmisc & ~0x80000000u);   /* memory clocks off */
+    if (st & 8u) {
+        MGA_WR32_DIRECT(MGAREG_MEMRDBK, g450mem.memrdbk);
+        MGA_WR32_DIRECT(MGAREG_MACCESS, g450mem.maccess);
+    }
+    if (st & 16u) {
+        mga_pci_write32(c->bus, c->dev, c->fn, 0x58, g450mem.memmisc | 0x80000000u);    /* memory clocks on */
+        sys_delay_us(200);
+    }
+    if ((st & 32u) && g450mem.ddr && (!g450mem.emrswen || !g450mem.dll))
         MGA_WR32_DIRECT(MGAREG_MEMRDBK, g450mem.memrdbk & ~0x1000u);
-    MGA_WR32_DIRECT(MGAREG_MACCESS, g450mem.maccess | 0x8000u);         /* the chips' mode registers */
-    sys_delay_us(200);
-    o |= 0x001F8000u & g450mem.opt;                                     /* refresh on */
-    mga_pci_write32(c->bus, c->dev, c->fn, 0x40, o);
-    MGA_WR32_DIRECT(MGAREG_PLNWT, 0);
-    MGA_WR32_DIRECT(MGAREG_PLNWT, 0xFFFFFFFFu);
-    if (g450mem.mctlwtst != g450mem.core)
+    if (st & 64u) {
+        MGA_WR32_DIRECT(MGAREG_MACCESS, g450mem.maccess | 0x8000u);     /* the chips' mode registers */
+        sys_delay_us(200);
+    }
+    if (st & 1u) {
+        o |= 0x001F8000u & g450mem.opt;                                 /* refresh on */
+        mga_pci_write32(c->bus, c->dev, c->fn, 0x40, o);
+    }
+    if (st & 128u) {
+        MGA_WR32_DIRECT(MGAREG_PLNWT, 0);
+        MGA_WR32_DIRECT(MGAREG_PLNWT, 0xFFFFFFFFu);
+    }
+    if ((st & 256u) && g450mem.mctlwtst != g450mem.core)
         MGA_WR32_DIRECT(MGAREG_MCTLWTST, g450mem.core);
     mga_g450_reinits++;
 }
@@ -176,6 +197,12 @@ static void g450_memory_prepare(mga_chip *c)
         static const uint8_t xlat[8] = { 0, 1, 5, 6, 7, 5, 2, 3 };
         g450mem.core = (g450mem.mctlwtst & ~7u) | xlat[g450mem.mctlwtst & 7];
     }
+    /* A G550: the same set-up with its memory clocks left running. With the clocks stopped and started (Linux's
+     * g450_memory_init, a boot-time sequence) what its memory already held came back shifted by a few 16-byte beats
+     * after about one set-up in three (bench G, RSTMEM: reads 16 bytes on, or 32 back, everywhere; new writes read
+     * back right): the textures written before DOS-GL's first WARP load, its white texel among them, were then
+     * wrong. Without the stop: no shift in 92 resets, no decay over 8 s. The G450 keeps what bench F proved. */
+    mga_g450_reinit_steps = c->device_id == 0x2527 ? 0x1FBu : 0x1FFu;
     g450chip = c;
     mga_memory_reinit = g450_memory_reinit;
 }
