@@ -287,6 +287,28 @@ texture sources, ~139 palette loads, 6 LFB locks.
   `MGL-EXC`: Glide had closed and unhooked by then. An exit at frame 20 (the TNT2's) was clean. The P3's game
   settings (`C:\TEST\GAMES\*\MGAGLIDE.CFG`) now keep only `stats=200` for watched runs.
 
+### Bench A: the same card on a 440BX (2026-11-23, night)
+
+The owner moved the card from the P3 into bench A (the IBM 300PL, Pentium II, 440BX; the G400 out).
+
+- **The ring fetches there too** (RRINGP: the PCI GART path, as on the P3's ALi): RPIO's ring cases 20.7 and 15.1
+  cycles a dword, RTRI's and RTWOD's scenes through the ring 42 of 42, RGDEV, Glide conformance 26 + t22.
+- **CPU-written texels stayed in the chip's pixel cache** (DOS-GL's conformance t17, 0.8% of the frame, a little
+  different each run): each texture's last rows drew 32-byte pieces of what the memory held before, from the ring
+  only. PIO passed; so did reading the whole texture back after writing it. The chip holds the host's last
+  written lines in its pixel cache; with PIO every packet dword is a host access and pushes them out, from a ring
+  nothing follows the texels. `r128_vram_written` now flushes it (PC_NGUI_CTLSTAT's flush bits, waited for: the
+  DRM's r128_do_pixcache_flush). t14's old cure (a sync before the writes) worked for the same reason: the sync
+  ends in that flush. The P3's timing hid it. With the fix: DOS-GL 35 of 35 on bench A.
+- **A ring's idle test wants the CCE's own FIFO empty too** (the DRM's r128_do_cce_idle: the ring's indices equal,
+  PM4_STAT's count at 192, not busy): what the CCE has fetched waits in that FIFO. Found while looking for the
+  above (it did not cure it); `r128_cce_idle_wait` and `r128_cce_drained` now test it.
+- **GLQuake on bench A** (`DGL_VSYNC=0`, GLOS's `MTRR LFB ON` by hand): 62.20 and 70.61 fps at 640x480 (two passes,
+  `-mtex`), 97.55 and 94.02 at 320x200.
+- **The shared Glide changes leave the Matrox cards as they were:** REGCRC builds of the branch's base (virge5)
+  and the branch, in Loop A: the 26 compared conformance tests on the G100, G200, G400 and G450 and the GTA and
+  Screamer Rally replays on the G200, G400 and G450, every register CRC line and frame the same.
+
 ## Next
 
 R5's live games, R6 86Box's Rage 128 in
