@@ -397,6 +397,19 @@ int sys_cache_type(uint32_t lin, uint32_t bytes, unsigned type)
             glos_entry.off = r.x.edi;
             glos_entry.sel = sr.es;
             glos_found = 1;
+        } else {
+            /* DOS/4GW answers 0A00h itself (its own name) and passes no other on: GLOS's entry then from DPMI's
+             * other vendor call, INT 2Fh AX=168Ah in protected mode (AL 0: ES:EDI the same entry). */
+            memset(&r, 0, sizeof r);
+            segread(&sr);
+            r.w.ax = 0x168A;
+            r.x.esi = (uint32_t)name;
+            int386x(0x2F, &r, &r, &sr);
+            if (r.h.al == 0) {
+                glos_entry.off = r.x.edi;
+                glos_entry.sel = sr.es;
+                glos_found = 1;
+            }
         }
     }
     if (glos_found < 0) {

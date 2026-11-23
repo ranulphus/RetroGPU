@@ -212,8 +212,10 @@ The owner's aim: about the TNT2 M64's speed on the same P3 (GLQuake 77.4 and 104
   `-mtex`), **102.43 and 98.94** at 320x200: 83%, 94%, 98% and 102% of the TNT2 M64's 73.7, 77.4, 104.5 and 96.9.
   Its frames 200, 400 and 600 at 640x480 `-mtex` identical to the PIO path's with synced writes; conformance all 33
   and Glide 26/27 with it.
-- **Still owed:** the swap's full sync (the flip through the ring, as the DRM's, would keep the chip busy across
-  frames); textures made again whole (`prepare`) still sync first.
+- **Flips in the command stream** (2026-11-23; below, under R5): the swap no longer drains the engine, with or
+  without the retrace. GLQuake (`DGL_VSYNC=0`): **62.81 and 74.44** fps at 640x480 (two passes, `-mtex`), **105.71
+  and 102.24** at 320x200: 85%, 96%, 101% and 106% of the TNT2 M64's.
+- **Still owed:** textures made again whole (`prepare`) still sync first.
 
 ## R5: Glide's back end (2026-11-21)
 
@@ -238,7 +240,52 @@ branch is based on the ViRGE's, `virge5`, for `glide/src/backend/share.c`); prob
   constant blended by the texel's alpha) approximated; t22 (gamma) captures the screen, which the P3 can't: the
   owner's eyes. Replays against the emulated Voodoo at 40 levels and 5%: GTA frames 60, 150, 240, 295 with no
   pixel past it; Screamer Rally 60, 150, 250, 300, 340, 380 with at most 0.22%.
-- **Owed:** the live games with the owner watching; t22 on screen.
+- **The live games watched** (2026-11-23): t22's gamma as described, GTA right and smooth, Screamer Rally right
+  but slow (about 20 fps, as on the TNT2 the owner guessed).
+
+### R5's speed (2026-11-23)
+
+Screamer Rally's call trace (`sr-389.bin`) replayed on the P3 with the profiling OVL (`make runtime-prof`), with
+the Matrox-only stages borrowed for the back end's parts while measuring. A race frame: ~905 triangles, ~194
+texture sources, ~139 palette loads, 6 LFB locks.
+
+- **A palette compared at every triangle** (shared core, `texmgr.c`): a palettised texture is converted again only
+  when the palette differs from its levels'; after each palette load (a new generation) the bind compared the 1 KB
+  palette, found it equal, and kept the old generation, so the next triangle compared it again: ~4,100 cycles a
+  triangle with Open Watcom's byte-at-a-time memcmp, half of the drawing. The same palette under a new generation is
+  now remembered as it, compared a dword at a time. The TNT2 paid it too (its SR profile: ~6,800 cycles a triangle).
+- **Texels by the CPU into uncached VRAM:** ~140 cycles a 16-bit store, ~20 ms a 256x256 level, after a full sync.
+  Glide's `tex_write` now goes through `r128_upload` in the stream (`mg_backend.tex_ordered`: the core's sync
+  skipped), rows under 8 texels by the CPU after a sync: ~10x less.
+- **Conversion** (shared core, `texconv.c`): a call and a switch a texel; 8-bit texels now through a table of their
+  256 values, the format switch and the padding's index outside the inner loops, bit for bit the same (a host check
+  of old against new over 463,632 cases: every format, sizes 1-256, padding, clamps, variants, forced formats).
+- **The state sent at every triangle:** `validate` ran before each, marking the 3D state dirty, and the emit
+  compared every group (Open Watcom's memcmp again) to send nothing ~670 times a frame. Words are now marked only
+  when they change (`SETW`), groups compared a dword at a time.
+- **Flips in the command stream** (`r128_flip_queue`, the DRM's r128_cce_dispatch_flip): CRTC_OFFSET written in
+  the stream, then WAIT_UNTIL with EVENT_CRTC_OFFSET (the register guide: the CCE stalls until the last start
+  written is being shown; CRTC_OFFSET_FLIP_CNTL 0 takes it at the vertical blank), then a sequence number into
+  GUI_SCRATCH_REG0. The CPU doesn't wait for the retrace: the drawing queued after the flip reaches the buffer that
+  was on screen only once it no longer is. One flip in flight (the one before shown first). RFLIP's third phase
+  (`RFLIP ring`): 480 flips in 8 s, each seen ~8.7 ms after queuing, none early; the owner saw it steady. Glide's
+  swap and the DOS-GL device's use it (without the retrace: the start alone, no wait, no drain).
+- **Together:** Glide's part of a race frame from 30+ ms to ~10 ms, frames unchanged (the replay's CRCs at 150, 240
+  and 380). Live, watched (2026-11-23): Screamer Rally "faster, looks right" (4,000 frames in about 2½ minutes with
+  loading and menus, ~17-20 fps before); GTA "as smooth as the TNT2".
+- **GTA's frame is the LFB:** ~20,000 pixels a frame through the shadow's write-back, the same order as on the TNT2.
+  Its locks follow the swap, so they now wait for the flip instead. The TNT2's frame buffer was write-combining
+  (GLOS's `write_combining = auto`), the Rage 128's uncached: GLOS adds 1002:5046 to `auto` (its registers are in a
+  BAR of their own, unlike the Rage Pro's), on its phase-h branch. Until then `MTRR LFB ON` by hand. GLOS's DRAW
+  CACHE takes 4-64 KB of card memory, so a program can't ask for the whole frame buffer itself.
+- **DOS/4GW programs didn't find GLOS:** DOS/4GW answers DPMI 0A00h itself (its own name) and passes no other on,
+  so `hal/port/ow_dos4g.c` never had GLOS's entry (Matrox Glide's `wc=-2/-1`: its WARP ring never write-combining
+  under GLOS). It now tries INT 2Fh AX=168Ah after 0A00h, which GLOS also answers: GLOSFIND under DOS/4GW on the P3
+  finds it (`found=1 err=3`). Matrox Glide on bench-g400 owes a run with its ring write-combining before a merge.
+- **Glide's forced exit** (`exit_after`) mid-race left Screamer Rally's own interrupt handlers (its sound) in place:
+  DOS/4GW faulted while unloading (page fault at 2:000BC101, "deinitializing twice") and the session hung. No
+  `MGL-EXC`: Glide had closed and unhooked by then. An exit at frame 20 (the TNT2's) was clean. The P3's game
+  settings (`C:\TEST\GAMES\*\MGAGLIDE.CFG`) now keep only `stats=200` for watched runs.
 
 ## Next
 
