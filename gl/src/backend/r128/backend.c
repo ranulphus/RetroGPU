@@ -994,6 +994,27 @@ static int tex_sub(dgl_texture *t, int level, int x, int y, int w, int h)
     if (!tx || level != 0 || tx->levels != 1 || tx->pal || !l->rgba || t->dirty || l->w != (1 << tx->lw) ||
         l->h != (1 << tx->lh) || x < 0 || y < 0 || x + w > l->w || y + h > l->h)
         return 0;
+    /* Through the engine, in the command stream (r128_upload): no sync, so the ring keeps the chip busy (a sync here
+     * drained it, ~900 times a second in GLQuake's -mtex: a fifth of the CPU at 640x480). A 16-bit rectangle of an
+     * odd number of texels widened by one to whole dwords. */
+    {
+        static uint32_t up[16384];
+        int ux = x, uw = w;
+        if (tx->cpp == 2 && (uw * h) & 1) {
+            if (ux + uw < l->w) uw++;
+            else if (ux > 0) ux--, uw++;
+        }
+        if (l->w % 8 == 0 && (long)uw * h * tx->cpp <= (long)sizeof up && ((long)uw * h * tx->cpp & 3) == 0) {
+            for (j = 0; j < h; j++)
+                put_texels((volatile uint8_t *)up + (long)j * uw * tx->cpp, l->rgba + ((y + j) * l->w + ux) * 4, uw, tx->dt);
+            if (r128_upload(tx->lvoff[0], l->w, tx->dt, ux, y, uw, h, up) == 0) {
+                r128_3d_tex_written();
+                dgl_texc.sub_fast++;
+                dgl_texc.sub_iload++;
+                return 1;
+            }
+        }
+    }
     {
         int o = PROF_SWITCH(PROF_D_DRAIN), r = r128_sync(1000000);
         PROF_BACK(o);

@@ -258,3 +258,49 @@ void r128_mono(int x, int y, int w, int h, const uint8_t *bits, int stride, uint
         }
     }
 }
+
+/* Texels into video memory through the engine, in the command stream (the DRM's r128_cce_dispatch_blit, Mesa's
+ * uploadSubImage): no engine sync, ordered with the drawing before and after it. The pixel cache flushed and made
+ * read-invalid before, flushed after (so no pixel data mixes with the texels); the caller flushes the texture
+ * cache (r128_3d_tex_written). data: dwords of the rectangle's texels packed row after row in the surface's format
+ * dt (R128_TEX_*), w * h of them a whole number of dwords. The surface at off (32-byte aligned), pitch_px texels a
+ * row (a multiple of 8). Large rectangles go as several packets of whole rows. 0, or -1 (the CCE not running, or
+ * the shape not one the 2D engine takes). */
+int r128_upload(uint32_t off, int pitch_px, int dt, int x, int y, int w, int h, const uint32_t *data)
+{
+    static uint32_t p[2048 + 8];
+    int bytes = dt == R128_TEX_ARGB8888 ? 4 : 2, rows_per, done = 0;
+    if (!r128_cce_running() || (off & 31u) || pitch_px % 8 || w <= 0 || h <= 0 || ((long)w * h * bytes) & 3)
+        return -1;
+    rows_per = (int)(2048L * 4 / ((long)w * bytes));
+    if (rows_per < 1)
+        return -1;
+    r128_cce_reg(R128_PC_GUI_CTLSTAT, R128_PC_RI_GUI | R128_PC_FLUSH_GUI);
+    while (done < h) {
+        int rows = h - done < rows_per ? h - done : rows_per, k;
+        uint32_t dwords;
+        if (((long)w * rows * bytes) & 3)
+            rows--;                     /* (whole dwords a packet: an odd row count of odd 16-bit rows held back) */
+        if (rows < 1)
+            rows = 2;
+        if (rows > h - done)
+            rows = h - done;
+        dwords = (uint32_t)((long)w * rows * bytes / 4);
+        p[0] = R128_CCE_PACKET3 | R128_CNTL_HOSTDATA_BLT | (dwords + 6u) << 16;
+        p[1] = R128_GMC_DST_PITCH_OFFSET_CNTL | R128_GMC_BRUSH_NONE | (uint32_t)dt << R128_GMC_DST_DATATYPE_SHIFT |
+               R128_GMC_SRC_DATATYPE_COLOR | R128_ROP3_S | R128_DP_SRC_SOURCE_HOST_DATA | R128_GMC_CLR_CMP_CNTL_DIS |
+               R128_GMC_AUX_CLIP_DIS | R128_GMC_WR_MSK_DIS;
+        p[2] = (uint32_t)(pitch_px / 8) << 21 | off >> 5;
+        p[3] = 0xFFFFFFFFu, p[4] = 0xFFFFFFFFu;
+        p[5] = (uint32_t)(y + done) << 16 | (uint32_t)x;
+        p[6] = (uint32_t)rows << 16 | (uint32_t)w;
+        p[7] = dwords;
+        for (k = 0; k < (int)dwords; k++)
+            p[8 + k] = data[k];
+        r128_cce_out(p, 8 + (int)dwords);
+        data += dwords, done += rows;
+    }
+    r128_cce_reg(R128_PC_GUI_CTLSTAT, R128_PC_FLUSH_GUI);
+    r128_3d_stale = 1;                  /* (the 2D engine's registers touched: the 3D context sent again) */
+    return 0;
+}

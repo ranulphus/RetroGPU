@@ -205,9 +205,15 @@ The owner's aim: about the TNT2 M64's speed on the same P3 (GLQuake 77.4 and 104
 - **GLQuake with the ring:** 56.00 and **65.63** fps at 640x480 (two passes, `-mtex`), **92.88** and **92.26** at
   320x200, against the TNT2 M64's 73.7, 77.4, 104.5 and 96.9: 85-95% of it with `-mtex`. (PIO: 38.72, 44.12, 57.60,
   60.58; bursts in direct sessions: 44.60, 52.43, 77.10, 80.50.)
-- **Still owed for overlap:** a full engine sync at every lightmap rectangle (`tex_sub`) and at every swap drains
-  the whole ring; fences (a scratch register written through the ring, as the DRM's ages) and the flip through the
-  ring would keep the chip busy across them.
+- **Lightmaps through the engine** (`r128_upload`, the DRM's r128_cce_dispatch_blit): a rectangle of texels
+  goes as a CNTL_HOSTDATA_BLT packet in the stream (the pixel cache flushed and made read-invalid before, flushed
+  after, the texture cache at the next draw), so no sync: the one before each rectangle drained the ring, 93M cycles
+  a second at 640x480 `-mtex` (a fifth of the CPU). GLQuake: **61.43 and 72.49** fps at 640x480 (two passes,
+  `-mtex`), **102.43 and 98.94** at 320x200: 83%, 94%, 98% and 102% of the TNT2 M64's 73.7, 77.4, 104.5 and 96.9.
+  Its frames 200, 400 and 600 at 640x480 `-mtex` identical to the PIO path's with synced writes; conformance all 33
+  and Glide 26/27 with it.
+- **Still owed:** the swap's full sync (the flip through the ring, as the DRM's, would keep the chip busy across
+  frames); textures made again whole (`prepare`) still sync first.
 
 ## R5: Glide's back end (2026-11-21)
 

@@ -106,6 +106,7 @@
 /* The 3D context (X.org's r128_reg.h; Mesa 7.x's r128 driver's values: r128_state.c's r128DDInitState) */
 #define R128_PC_GUI_CTLSTAT         0x1748
 #define     R128_PC_FLUSH_GUI       (3u << 0)
+#define     R128_PC_RI_GUI          (1u << 2)   /* (the pixel cache's contents read-invalid) */
 #define R128_SETUP_CNTL             0x1BC4
 #define     R128_COLOR_GOURAUD      (4u << 3)
 #define     R128_PRIM_TYPE_TRI      (0u << 7)
@@ -198,6 +199,7 @@ enum { R128_COMB_DIS, R128_COMB_COPY, R128_COMB_COPY_INP, R128_COMB_MODULATE, R1
 #define     R128_TEX_MAP_ALPHA_IN_TEXTURE (1u << 30)
 #define     R128_TEX_CACHE_LINE_SIZE_4QW (1u << 31)
 #define R128_3D_RNDR_GEN_PRIM       0x00002500u /* (a type-3 opcode: the vertices inline) */
+#define R128_CNTL_HOSTDATA_BLT      0x00009400u /* (a type-3 opcode: a blit of the data that follows) */
 #define     R128_VC_FRMT_RHW        0x001u
 #define     R128_VC_FRMT_DIFFUSE_ARGB 0x008u
 #define     R128_VC_FRMT_SPEC_FRGB  0x040u

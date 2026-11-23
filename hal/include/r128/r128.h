@@ -77,6 +77,10 @@ void r128_copy_from(uint32_t src_off, int src_pitch_bytes, int sx, int sy, int d
 void r128_mono(int x, int y, int w, int h, const uint8_t *bits, int stride, uint32_t fg, uint32_t bg, unsigned flags);
 /* Pixels from the CPU in the target's format, rows stride bytes apart. */
 void r128_image(int x, int y, int w, int h, const void *px, int stride);
+/* Texels into video memory through the engine, in the command stream (no sync; the CCE running): a rectangle of
+ * a surface at off, pitch_px texels a row (a multiple of 8), format dt (R128_TEX_*), its texels packed in data.
+ * 0, or -1 (not a shape the engine takes: the caller writes them itself). */
+int  r128_upload(uint32_t off, int pitch_px, int dt, int x, int y, int w, int h, const uint32_t *data);
 
 /* cce.c: the Concurrent Command Engine in PIO mode (R2). r128_cce_init loads the microcode (pairs: 512 dwords,
  * DATAH and DATAL in turn, an r128_cce.bin read by the caller; NULL: the embedded one, cce_ucode.c) and starts the
