@@ -17,6 +17,9 @@ NICS = {
     "i82557": "",               # Intel PRO/100
     "i82558": "",               # Intel PRO/100+
     "pcnetpci": "",             # AMD PCnet-PCI II (Am79C970A): GLOS's kernel/drv/pcnet.c (phase H)
+    "dec_21140_tulip_migrate": "",  # DEC 21140 (Tulip; 86Box's card of that name, its default variant the 21140):
+                                    # GLOS's kernel/drv/tulip.c (phase H)
+    "dec_21143_tulip": "",      # DEC 21143 (Tulip)
     # 86Box's PLIP device on LPT1 (378h, IRQ 7): Ethernet frames over the parallel port as Crynwr's PLIP and
     # Linux's plip speak them, joined to SLiRP like a card. No card in the PC: the guest's own PLIP driver is
     # the network (GLOS: [net] cable = client LPT1).
