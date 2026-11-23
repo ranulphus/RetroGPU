@@ -8,7 +8,15 @@
  *
  * Phase 1, blue: the device's order today (the retrace wait, then the start written).
  * Phase 2, green: the start written, then the retrace wait (the order the TNT2 needed, docs/tnt2.md).
- * Lines: RFLIP-PHASE (frames, retrace waits that timed out, the average frame in microseconds). */
+ * Phase 3, red (RFLIP ring: this phase alone): the CCE from a ring, each flip in the command stream
+ * (r128_flip_queue: the start, WAIT_UNTIL's EVENT_CRTC_OFFSET, a sequence number into GUI_SCRATCH_REG0) and the
+ * hidden buffer's black clear queued straight after it, the CPU not waiting for the retrace. The engine has to stall
+ * until the flip is shown, or the black clear lands on the buffer still on screen: black flashes. The CPU then
+ * watches the scratch register: the number should come a while after the flip was queued (not at once: the wait
+ * not taken) and in or just after the retrace.
+ * Lines: RFLIP-PHASE (frames, retrace waits that timed out, the average frame in microseconds); RFLIP-RING (flips
+ * never seen, flips seen within 300 us of queuing, flips seen in the retrace, the delay's minimum, average and
+ * maximum in microseconds). */
 #include "hx.h"
 #include "r128/r128.h"
 #include "mga/sys.h"
@@ -56,15 +64,68 @@ static void phase(const char *name, int start_first, uint16_t colour, uint32_t o
            frames ? (unsigned long)((sys_time_us() - t0) / frames) : 0ul);
 }
 
+static void phase_ring(uint16_t colour, uint32_t off[2], int pitch, int secs)
+{
+    uint32_t t0 = sys_time_us(), t, tq, d, dmin = ~0u, dmax = 0, dsum = 0, seq = r128_flip_seen() + 1u;
+    unsigned frames = 0, unseen = 0, early = 0, in_retrace = 0;
+    int shown = 0;
+    for (;;) {
+        int hidden, seen = 1;
+        t = sys_time_us();
+        if (t - t0 >= (uint32_t)secs * 1000000u)
+            break;
+        tq = sys_time_us();
+        r128_flip_queue(off[!shown], seq, 1);
+        shown = !shown;
+        hidden = !shown;
+        r128_set_target(off[hidden], pitch, 16);
+        r128_set_clip(0, 0, W, H);
+        r128_fill(0, 0, W, H, 0);
+        r128_cce_flush();
+        while (r128_flip_seen() != seq)
+            if (sys_time_us() - tq > 100000u) {
+                seen = 0;
+                break;
+            }
+        d = sys_time_us() - tq;
+        if (!seen)
+            unseen++;
+        else {
+            if (sys_inb(0x3DA) & 0x08)
+                in_retrace++;
+            if (d < 300u)
+                early++;
+            dsum += d;
+            if (d < dmin) dmin = d;
+            if (d > dmax) dmax = d;
+        }
+        t = sys_time_us();
+        while (sys_time_us() - t < 8000u)
+            ;
+        r128_fill(0, 0, W, H, colour);
+        r128_cce_flush();
+        frames++, seq++;
+    }
+    r128_sync(500000);
+    hx_log("RFLIP-PHASE red order=in-the-stream frames=%u frame_us=%lu", frames,
+           frames ? (unsigned long)((sys_time_us() - t0) / frames) : 0ul);
+    hx_log("RFLIP-RING flips=%u unseen=%u early=%u in_retrace=%u delay_us=%lu/%lu/%lu", frames, unseen, early,
+           in_retrace, (unsigned long)(dmin == ~0u ? 0 : dmin),
+           (unsigned long)(frames > unseen ? dsum / (frames - unseen) : 0), (unsigned long)dmax);
+    hx_test("ring-flip", frames > 0 && !unseen && early == 0, "flips %u, unseen %u, early %u", frames, unseen, early);
+}
+
 int main(int argc, char **argv)
 {
     r128_mode m;
     uint32_t off[2];
-    int i, secs = 8;
+    int i, secs = 8, ring_only = 0;
     hx_init(1, argv, "rflip");                  /* (its own arguments only) */
     for (i = 1; i < argc; i++)
         if (!strncmp(argv[i], "secs=", 5))
             secs = atoi(argv[i] + 5);
+        else if (!strcmp(argv[i], "ring"))
+            ring_only = 1;
     if (r128_find() < 0 || r128_map() < 0) {
         hx_test("map", 0, "no Rage 128 mapped");
         hx_done(1);
@@ -83,10 +144,23 @@ int main(int argc, char **argv)
     }
     r128_sync(500000);
     r128_set_start(off[0]);
-    phase("blue", 0, 0x001F, off, m.pitch_bytes, secs);       /* RGB565 blue */
-    phase("green", 1, 0x07E0, off, m.pitch_bytes, secs);      /* RGB565 green */
+    if (!ring_only) {
+        phase("blue", 0, 0x001F, off, m.pitch_bytes, secs);       /* RGB565 blue */
+        phase("green", 1, 0x07E0, off, m.pitch_bytes, secs);      /* RGB565 green */
+    }
+    if (r128_cce_init_ring(NULL, 0x10000u) != 0)
+        hx_test("ring", 0, "the CCE's ring didn't start");
+    else {
+        for (i = 0; i < 2; i++) {           /* both buffers the third phase's colour */
+            r128_set_target(off[i], m.pitch_bytes, 16);
+            r128_set_clip(0, 0, W, H);
+            r128_fill(0, 0, W, H, 0xF800);
+        }
+        r128_sync(500000);
+        phase_ring(0xF800, off, m.pitch_bytes, secs);          /* RGB565 red */
+    }
     r128_text_mode();
     r128_unmap();
-    hx_test("ran", 1, "both phases shown");
+    hx_test("ran", 1, "the phases shown");
     hx_done(0);
 }

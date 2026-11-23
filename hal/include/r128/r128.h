@@ -50,6 +50,13 @@ extern int r128_mode_bpp;               /* the mode's bits a pixel: 8, 15, 16 or
 int  r128_set_start(uint32_t byte_off);
 int  r128_set_pitch(int pitch_bytes);
 int  r128_vsync_wait(uint32_t timeout_us);
+/* A flip in the command stream (the CCE running): the start written after what is queued, then (wait) the engine
+ * stalled until it is shown (WAIT_UNTIL's EVENT_CRTC_OFFSET: the chip takes a start at the vertical blank), then seq
+ * written to GUI_SCRATCH_REG0; the CPU doesn't wait. With wait, drawing queued after it reaches the buffer that was
+ * shown only once it no longer is; without, at once (it may tear, as with no retrace). r128_flip_seen: the seq of
+ * the last flip reached. 0, or -1 (no CCE, or a bad start). */
+int  r128_flip_queue(uint32_t byte_off, uint32_t seq, int wait);
+uint32_t r128_flip_seen(void);
 /* Gamma: in 16- and 32-bit modes the DAC looks each component up in its 256-entry palette (X.org's
  * R128LoadPalette: 565's red at index r5 * 8, green g6 * 4); one ramp for the three, 8-bit entries (DAC_8BIT_EN).
  * r128_ramp_off: the DAC as it was before the first ramp (for text mode). */

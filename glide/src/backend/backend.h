@@ -48,6 +48,8 @@ typedef struct mg_backend {
     uint32_t tex_align;                 /* where a texture's block starts: a multiple of this (0: the heap's 64) */
     int tex_square;                     /* 1: each level's slot square (the larger side), padded as the texture repeats */
     int tex_no565;                      /* 1: no 565 texels (opaque levels as 1555 with the alpha bit set) */
+    int tex_ordered;                    /* 1: tex_write is ordered with the queued drawing (it syncs itself when it
+                                         * can't be): no engine sync before it */
 } mg_backend;
 
 extern const mg_backend *mg_be;         /* the back end of the card found (sst.c) */

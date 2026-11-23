@@ -207,12 +207,37 @@ static int sync(void)
     return 0;
 }
 
+static uint32_t flip_seq;                /* the last flip queued in the command stream */
+
 static int swap(int vsync)
 {
     uint32_t show;
     if (!st.active || !st.double_buffer)
         return 0;
     show = st.front_is_a ? st.back_off : st.front_off;
+    /* The CCE running: the flip in the command stream (r128_flip_queue); the CPU neither drains the engine nor waits
+     * for the retrace. With the retrace, the engine stalled until the new buffer is shown, the next frame's drawing
+     * reaching the old one only then, and one flip in flight (the one before shown first); without, the start taken
+     * at the next blank while the drawing goes on (it may tear, as before). */
+    if (r128_cce_running()) {
+        uint32_t t0 = sys_time_us(), tw = t0;
+        while (vsync && (int32_t)(flip_seq - r128_flip_seen()) > 0) {
+            if (st_hooks.wait && sys_time_us() - tw > 2000u) {
+                st_hooks.wait();
+                tw = sys_time_us();
+            }
+            if (sys_time_us() - t0 > 500000u) {
+                timeouts++;
+                break;
+            }
+        }
+        retrace_us += sys_time_us() - t0;
+        if (r128_flip_queue(show, flip_seq + 1u, vsync) == 0) {
+            flip_seq++;
+            st.front_is_a = !st.front_is_a;
+            return RG_SWAP_TARGET;
+        }
+    }
     /* (the frame finished first: in PIO mode the chip is never more than its 192-entry FIFO behind, so the wait
      * is short, and a start shown before the last triangles land would show them late) */
     if (r128_sync(500000) != 0)
@@ -361,6 +386,7 @@ static int open_screen(const rg_open *o, rg_opened *out)
     }
     r128_sync(500000);
     r128_set_start(st.front_off);
+    flip_seq = r128_flip_seen();
     memset(out, 0, sizeof *out);
     out->width = st.width;
     out->height = st.height;

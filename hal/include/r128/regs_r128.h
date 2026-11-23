@@ -43,6 +43,7 @@
 /* The CRTC: the display start (bytes, a multiple of 8), the pitch (pixels / 8), the cursor */
 #define R128_CRTC_OFFSET            0x0224
 #define R128_CRTC_OFFSET_CNTL       0x0228
+#define     R128_CRTC_GUI_TRIG_OFFSET (1u << 30)  /* (R) the last start written not yet shown */
 #define R128_CRTC_PITCH             0x022C
 #define R128_CUR_OFFSET             0x0260
 #define R128_CUR_HORZ_VERT_POSN     0x0264
@@ -249,5 +250,11 @@ enum { R128_COMB_DIS, R128_COMB_COPY, R128_COMB_COPY_INP, R128_COMB_MODULATE, R1
 
 /* DP_GUI_MASTER_CNTL's destination data types (r128_reg.h's R128_DATATYPE_* >> 16) */
 enum { R128_DT_CI8 = 2, R128_DT_ARGB1555 = 3, R128_DT_RGB565 = 4, R128_DT_RGB888 = 5, R128_DT_ARGB8888 = 6 };
+
+/* The command stream's waits and the GUI's scratch registers (the register guide's WAIT_UNTIL: the CCE stalls until
+ * every selected event; the DRM's page flip and its frame counter in GUI_SCRATCH_REG0) */
+#define R128_WAIT_UNTIL             0x1720
+#define     R128_EVENT_CRTC_OFFSET  (1u << 0)   /* until the last CRTC_OFFSET written is being shown */
+#define R128_GUI_SCRATCH_REG0       0x15E0
 
 #endif

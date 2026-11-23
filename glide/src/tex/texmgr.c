@@ -461,6 +461,16 @@ int tex_level_alpha_class(void) { return last_hwfmt; }
 
 uint32_t tex_vram_gen;
 
+/* Two palettes the same: dword by dword (Open Watcom's memcmp compares bytes, repe cmpsb, several times slower). */
+static int pal_same(const uint32_t *a, const uint32_t *b)
+{
+    int i;
+    for (i = 0; i < 256; i += 4)
+        if (a[i] != b[i] || a[i + 1] != b[i + 1] || a[i + 2] != b[i + 2] || a[i + 3] != b[i + 3])
+            return 0;
+    return 1;
+}
+
 int tex_bind_level(GrLOD_t lod, const tex_variant *var, tex_level_hw *hw)
 {
     uint32_t vkey = tex_variant_key(var);
@@ -483,9 +493,12 @@ int tex_bind_level(GrLOD_t lod, const tex_variant *var, tex_level_hw *hw)
     tex_dims(lod, r->aspect, &w, &h);
     /* A palettised texture is converted again only when the palette differs from the one its levels were made
      * with: games that load a palette before each texture they draw (Screamer Rally: ~80 a frame, each texture
-     * with its own) would otherwise convert every texture at every draw (the generation alone changes each time). */
-    if ((palettised && r->hw_pal_gen != tmu0.pal_gen &&
-         (!r->hw_pal || memcmp(r->hw_pal, tmu0.tables.palette, sizeof tmu0.tables.palette))) ||
+     * with its own) would otherwise convert every texture at every draw (the generation alone changes each time).
+     * The same palette under a new generation is remembered as that generation: else every triangle compared the
+     * whole palette again (~4,000 cycles a triangle on the P3, half of Screamer Rally's drawing on the Rage 128). */
+    if (palettised && r->hw_pal_gen != tmu0.pal_gen && r->hw_pal && pal_same(r->hw_pal, tmu0.tables.palette))
+        r->hw_pal_gen = tmu0.pal_gen;
+    if ((palettised && r->hw_pal_gen != tmu0.pal_gen) ||
         (nccfmt && r->hw_ncc_gen != tmu0.ncc_gen) ||
         ((w < 8 || h < 8 || (mg_be->tex_square && w != h)) && r->hw_clamp != clamp_key) || r->hw_var != vkey) {
         memset(r->hw_valid, 0, sizeof r->hw_valid);
@@ -503,8 +516,9 @@ int tex_bind_level(GrLOD_t lod, const tex_variant *var, tex_level_hw *hw)
     if (!r->hw_valid[lod]) {
         tex_level_hw *lv = &r->hw[lod];
         int hw_w = 1 << lv->w_log2, hw_h = 1 << lv->h_log2, po = PROF_SWITCH(PROF_G_TEXDL);
-        /* The level may still be read by queued draws. */
-        mg_be->sync();
+        /* The level may still be read by queued draws (unless the back end's writes queue behind them). */
+        if (!mg_be->tex_ordered)
+            mg_be->sync();
         lv->hwfmt = tex_convert_level(r->fmt, r->shadow + r->shadow_off[lod], w, h, staging, hw_w, hw_w, hw_h,
                                       clamp_key & 1, (clamp_key >> 1) & 1, &tmu0.tables,
                                       mg_be->tex_no565 ? TEX_NO565 : -1, scratch, var);

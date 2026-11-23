@@ -71,7 +71,15 @@ void r128_3d_init(uint32_t color_off, int pitch_bytes, int bpp, uint32_t z_off, 
  * constant colour, and the texture units' blocks (the second's only while it is on). */
 static r128_ctx3d sent;                 /* the words the engine has (while !r128_3d_stale) */
 
-#define CHANGED(f, n) (full || memcmp(&c->f, &sent.f, (n) * sizeof(uint32_t)) != 0)
+/* (dword by dword: Open Watcom's memcmp compares a byte at a time, repe cmpsb) */
+static int differ(const uint32_t *a, const uint32_t *b, int n)
+{
+    while (n-- > 0)
+        if (*a++ != *b++)
+            return 1;
+    return 0;
+}
+#define CHANGED(f, n) (full || differ((const uint32_t *)&c->f, (const uint32_t *)&sent.f, (n)))
 
 /* Only the groups that changed since the last time (all of them after 2D work, r128_3d_stale): in PIO each dword
  * is a bus write (~140 cycles on the P3), and a texture change alone was 75 dwords of the whole context. */

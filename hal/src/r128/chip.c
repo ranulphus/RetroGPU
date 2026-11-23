@@ -251,6 +251,20 @@ int r128_set_start(uint32_t byte_off)
     return 0;
 }
 
+int r128_flip_queue(uint32_t byte_off, uint32_t seq, int wait)
+{
+    if (byte_off & 7u || byte_off >= r128.vram_bytes || !r128_cce_running())
+        return -1;
+    r128_cce_reg(R128_CRTC_OFFSET, byte_off);
+    if (wait)
+        r128_cce_reg(R128_WAIT_UNTIL, R128_EVENT_CRTC_OFFSET);
+    r128_cce_reg(R128_GUI_SCRATCH_REG0, seq);
+    r128_cce_flush();
+    return 0;
+}
+
+uint32_t r128_flip_seen(void) { return r128_rd(R128_GUI_SCRATCH_REG0); }
+
 static uint32_t dac_saved;
 static int dac_changed;
 

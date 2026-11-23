@@ -42,7 +42,8 @@ static void log_line(const char *line) { mg_line("%s", line); }
 /* ---- The card --------------------------------------------------------------------------------------------- */
 
 static unsigned sync_timeouts;
-static unsigned long vs_waits, vs_fails;
+static unsigned long vs_waits, vs_fails, flips_queued;
+static uint32_t flip_seq;               /* the last flip queued in the command stream (r128_flip_queue) */
 
 static void sync_said(const char *where)
 {
@@ -126,6 +127,7 @@ static FxBool win_open(int w, int h, GrColorFormat_t color_format, GrOriginLocat
     mg.dirty = ~0u;
     sync_said("open");
     r128_set_start(mg.buf_off[mg.front]);
+    flip_seq = r128_flip_seen(), flips_queued = 0;
     mg_gamma_apply();
     mg.fogcol_valid = 0;
     mg_hooks_install();
@@ -143,8 +145,8 @@ static void win_close(void)
     mg.open = 0;
     sys_unhook_faults();
     sys_unhook_exit();
-    mg_line("MGL-WINCLOSE frames=%u sync_timeouts=%u vsync_waits=%lu failed=%lu", mg.frame, sync_timeouts,
-            vs_waits, vs_fails);
+    mg_line("MGL-WINCLOSE frames=%u sync_timeouts=%u vsync_waits=%lu failed=%lu flips_queued=%lu", mg.frame,
+            sync_timeouts, vs_waits, vs_fails, flips_queued);
 }
 
 static void fault(void) { r128_ramp_off(); rg_r128_device.close(); }
@@ -161,8 +163,11 @@ static void set_ramp(const uint8_t ramp[256]) { r128_set_ramp(ramp); }
 static void validate(void)
 {
     r128_ctx3d *c = &r128_3d;
-    if (mg.dirty & MG_DIRTY_TARGET)
+    /* (called before every triangle: the state marked for sending only when the target or the clip changed) */
+    if (mg.dirty & MG_DIRTY_TARGET) {
         c->dst_pitch_offset_c = (uint32_t)(mg.pitch_px / 8) << 21 | mg_buffer_offset(mg.render_buffer) >> 5;
+        r128_3d_dirty = 1;
+    }
     if (mg.dirty & (MG_DIRTY_TARGET | MG_DIRTY_CLIP)) {
         int y0 = mg.st.clip_y0, y1 = mg.st.clip_y1, x0 = mg.st.clip_x0, x1 = mg.st.clip_x1;
         if (mg.st.origin == GR_ORIGIN_LOWER_LEFT) {
@@ -175,8 +180,8 @@ static void validate(void)
             x1--, y1--;                     /* (the scissor's bottom right inclusive) */
         c->sc_top_left_c = (uint32_t)y0 << 16 | (uint32_t)x0;
         c->sc_bottom_right_c = (uint32_t)y1 << 16 | (uint32_t)x1;
+        r128_3d_dirty = 1;
     }
-    r128_3d_dirty = 1;
     mg.dirty = 0;
 }
 
@@ -192,6 +197,25 @@ static void clear(int x0, int y0, int x1, int y1, GrColor_t color, FxU16 depth)
 static void swap(int swap_interval)
 {
     int i;
+    /* One retrace a swap with the CCE running: the flip in the command stream (r128_flip_queue), the engine stalled
+     * until the new buffer is shown and the next frame's drawing, queued after it, reaching the buffer that was on
+     * screen only then; the CPU goes on with the game. One flip in flight: the one before shown first (as the DRM's
+     * clients wait for its frame counter). Before, the CPU synced, wrote the start and waited for the retrace
+     * itself: ~8 ms a frame of Screamer Rally's on the P3. */
+    if (swap_interval == 1 && r128_cce_running()) {
+        uint32_t t0 = sys_time_us();
+        PROF_BACK(PROF_G_VSYNC);
+        while ((int32_t)(flip_seq - r128_flip_seen()) > 0)
+            if (sys_time_us() - t0 > 500000u) {
+                sync_said("flip");
+                break;
+            }
+        if (r128_flip_queue(mg.buf_off[mg.back], flip_seq + 1u, 1) == 0) {
+            flip_seq++, flips_queued++, vs_waits++;
+            PROF_BACK(PROF_G_SWAP);
+            return;
+        }
+    }
     sync_said("swap");
     /* (the start first, then the retrace: the TNT2's order, the device's) */
     r128_set_start(mg.buf_off[mg.back]);
@@ -444,6 +468,10 @@ void r128_be_tri(const GrVertex *a, const GrVertex *b, const GrVertex *c)
     mg_split(a, b, c, fogged, mip, tri_one);
 }
 
+/* A word of the 3D state set, the state marked for sending only when it changed: r128_3d_emit compared every group
+ * at every triangle otherwise (~1,000 cycles a triangle on the P3, most of Screamer Rally's sending nothing). */
+#define SETW(f, v) do { uint32_t v_ = (v); if (x->f != v_) x->f = v_, r128_3d_dirty = 1; } while (0)
+
 static void tri_one(const GrVertex *a, const GrVertex *b, const GrVertex *c, GrLOD_t lod)
 {
     const mg_state *s = &mg.st;
@@ -489,13 +517,16 @@ static void tri_one(const GrVertex *a, const GrVertex *b, const GrVertex *c, GrL
             minified = mg_minified_at(&L, (a->x + b->x + c->x) / 3.0, (a->y + b->y + c->y) / 3.0);
         }
         filt = (minified ? tmu0.minf : tmu0.magf) == GR_TEXTUREFILTER_BILINEAR ? 1u : 0u;
-        x->prim_tex_cntl_c = (uint32_t)dt << R128_TEX_DATATYPE_SHIFT | filt << R128_MIN_BLEND_SHIFT |
-                             filt << R128_MAG_BLEND_SHIFT | R128_MIP_MAP_DISABLE |
-                             (tmu0.clamp_s == GR_TEXTURECLAMP_CLAMP ? 2u : 0u) << R128_TEX_CLAMP_S_SHIFT |
-                             (tmu0.clamp_t == GR_TEXTURECLAMP_CLAMP ? 2u : 0u) << R128_TEX_CLAMP_T_SHIFT;
-        x->tex_size_pitch_c = (uint32_t)hw.w_log2 | (uint32_t)big << 4 | (uint32_t)hw.h_log2 << 8 | (uint32_t)big << 12;
-        for (i = 0; i < 11; i++)
-            x->prim_tex_offset_c[i] = hw.org;
+        SETW(prim_tex_cntl_c, (uint32_t)dt << R128_TEX_DATATYPE_SHIFT | filt << R128_MIN_BLEND_SHIFT |
+                              filt << R128_MAG_BLEND_SHIFT | R128_MIP_MAP_DISABLE |
+                              (tmu0.clamp_s == GR_TEXTURECLAMP_CLAMP ? 2u : 0u) << R128_TEX_CLAMP_S_SHIFT |
+                              (tmu0.clamp_t == GR_TEXTURECLAMP_CLAMP ? 2u : 0u) << R128_TEX_CLAMP_T_SHIFT);
+        SETW(tex_size_pitch_c, (uint32_t)hw.w_log2 | (uint32_t)big << 4 | (uint32_t)hw.h_log2 << 8 | (uint32_t)big << 12);
+        if (x->prim_tex_offset_c[0] != hw.org) {
+            for (i = 0; i < 11; i++)
+                x->prim_tex_offset_c[i] = hw.org;
+            r128_3d_dirty = 1;
+        }
         if (tmu0.combine_set) {
             ks = (double)hw.logical_maxdim / (256.0 * (double)(1 << hw.w_log2));
             kt = (double)hw.logical_maxdim / (256.0 * (double)(1 << hw.h_log2));
@@ -504,7 +535,7 @@ static void tri_one(const GrVertex *a, const GrVertex *b, const GrVertex *c, GrL
                                  tmu0.rgb_invert || tmu0.alpha_invert))
             warn_once(13, "a texture combine other than the texel: drawn as the texel");
     }
-    x->prim_texture_combine_cntl_c = p.comb;
+    SETW(prim_texture_combine_cntl_c, p.comb);
 
     /* The enables, tests and blend. */
     tc = R128_TEX_CACHE_FLUSH | 0x3Fu << R128_LOD_BIAS_SHIFT;
@@ -530,16 +561,15 @@ static void tri_one(const GrVertex *a, const GrVertex *b, const GrVertex *c, GrL
         misc |= 5u << R128_ALPHA_TEST_SHIFT;
     } else
         misc |= 7u << R128_ALPHA_TEST_SHIFT;
-    x->z_sten_cntl_c = (x->z_sten_cntl_c & ~(7u << R128_Z_TEST_SHIFT)) |
-                       (depth ? cmp_of(s->depth_func, wmode) : 7u) << R128_Z_TEST_SHIFT;
+    SETW(z_sten_cntl_c, (x->z_sten_cntl_c & ~(7u << R128_Z_TEST_SHIFT)) |
+                        (depth ? cmp_of(s->depth_func, wmode) : 7u) << R128_Z_TEST_SHIFT);
     if (depth)
         tc |= R128_Z_ENABLE | (s->depth_mask ? R128_Z_WRITE_ENABLE : 0u);
-    x->tex_cntl_c = tc;
-    x->misc_3d_state_cntl_reg = misc;
-    x->plane_3d_mask_c = s->color_mask_rgb ? 0xFFFFFFFFu : 0;
-    x->fog_color_c = (s->fog_mode & GR_FOG_ADD2) ? 0u : (mg_color_to_argb(s->fog_color) & 0xFFFFFFu);
-    x->constant_color_c = mg_color_to_argb(s->constant_color);
-    r128_3d_dirty = 1;
+    SETW(tex_cntl_c, tc);
+    SETW(misc_3d_state_cntl_reg, misc);
+    SETW(plane_3d_mask_c, s->color_mask_rgb ? 0xFFFFFFFFu : 0);
+    SETW(fog_color_c, (s->fog_mode & GR_FOG_ADD2) ? 0u : (mg_color_to_argb(s->fog_color) & 0xFFFFFFu));
+    SETW(constant_color_c, mg_color_to_argb(s->constant_color));
     r128_3d_format(R128_VC_FRMT_RHW | R128_VC_FRMT_DIFFUSE_ARGB | (fog || p.spec ? R128_VC_FRMT_SPEC_FRGB : 0) |
                    (textured ? R128_VC_FRMT_S_T : 0));
 
@@ -627,19 +657,25 @@ static void tri_one(const GrVertex *a, const GrVertex *b, const GrVertex *c, GrL
 }
 
 /* A level the texture manager converted (565, 1555 or 4444, rows hw_w apart) into place: the chip's own linear
- * layout, the rows as they are. The engine is idle (the caller synced: the Rage 128 takes CPU writes to video
- * memory only then, docs/rage128.md R4); the texture cache flushed at the next triangle. */
+ * layout, the rows as they are. Through the engine in the command stream (r128_upload): ordered with the queued
+ * triangles, so no sync, and the CPU writes cached ring memory rather than uncached video memory (16-bit stores at
+ * ~140 cycles each on the P3: a 256x256 level took ~20 ms, Screamer Rally converts one or two a frame). The copy
+ * is the bits as they are, whatever the 16-bit format. Rows under 8 texels (the engine's pitch) by the CPU after a
+ * sync: the Rage 128 takes CPU writes to video memory only with the engine idle (t14). */
 static void tex_write(uint32_t org, const uint16_t *texels, int hw_w, int hw_h)
 {
     volatile uint16_t *d = (volatile uint16_t *)(r128.fb + org);
     long i, n = (long)hw_w * hw_h;
-    for (i = 0; i < n; i++)
-        d[i] = texels[i];
-    r128_vram_written(org + (uint32_t)n * 2u - 2u);
+    if (hw_w % 8 != 0 || r128_upload(org, hw_w, R128_TEX_RGB565, 0, 0, hw_w, hw_h, (const uint32_t *)texels) != 0) {
+        sync_said("texture");
+        for (i = 0; i < n; i++)
+            d[i] = texels[i];
+        r128_vram_written(org + (uint32_t)n * 2u - 2u);
+    }
     r128_3d_tex_written();
 }
 
 const mg_backend mg_r128_backend = {
     "r128", probe, win_open, win_close, fault, exit_restore, sync, busy, in_vblank, vcount, set_ramp, validate,
-    clear, swap, present_front, r128_be_tri, tex_write, 32, 0, 0
+    clear, swap, present_front, r128_be_tri, tex_write, 32, 0, 0, 1
 };
