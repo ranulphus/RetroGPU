@@ -96,8 +96,9 @@ GLfloat dgl_tex_aniso(const dgl_texture *t);
 GLfloat dgl_tex_lod_bias(int unit);
 /* Whether either is other than none (integers only: a back end validating on every bind asks these first; GLQuake on
  * the P3's 7500 lost 6-14% to the float work when it didn't). */
-int dgl_tex_aniso_on(const dgl_texture *t);
-int dgl_tex_lod_bias_on(int unit);
+extern int dgl_texq_aniso, dgl_texq_bias[2];  /* (texture.c; read at dgl_textures_reset) */
+static inline int dgl_tex_aniso_on(const dgl_texture *t) { return t->aniso_on | dgl_texq_aniso; }
+static inline int dgl_tex_lod_bias_on(int unit) { return dgl_texq_bias[unit]; }
 const dgl_texenv *dgl_tex_env(int unit);
 int dgl_texture_units(void);                    /* ext.c: 2 with the G400's combiner, else 1 */
 GLenum dgl_tex_env_mode(int unit);

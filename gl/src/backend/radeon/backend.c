@@ -365,6 +365,7 @@ static const dgl_texture *valid_tex[2];
 static int two;                         /* the second unit on: s2, t2 sent */
 static int shift_s[2], shift_t[2];      /* a repeating texture: coordinates shifted by whole periods per triangle */
 static int cube_unit[2];                /* GL's unit draws a cube map: its r goes in q's place */
+static int any_cube;                    /* (a chip unit draws one: project() writes q; once a validate) */
 static float vx_s, vx_o, vy_s, vy_o, vz_s, vz_o;    /* the viewport's scale and offset, from the last validate */
 
 /* 0..1 to a byte without control-word switches (the TNT2 back end's: one add, an integer clamp). */
@@ -715,6 +716,7 @@ static void validate(void)
     }
     cur_tx[0] = x0, cur_tx[1] = x1;
     two = x1 != NULL;
+    any_cube = (x0 && cube_unit[swap_st]) || (two && cube_unit[1]);
     pp = RADEON_SCISSOR_ENABLE | RADEON_ANTI_ALIAS_NONE | RADEON_TEX_BLEND_0_ENABLE;
     for (i = 0; i < 2; i++) {
         rtex *x = i ? x1 : x0;
@@ -840,7 +842,7 @@ static void project(const dgl_cvtx *c, radeon_vertex *v, const dgl_cvtx *colour)
     else
         v->s = c->s, v->t = c->t;
     v->s2 = c->s1, v->t2 = c->t1;
-    if (cube_unit[0] | cube_unit[1])            /* (a cube map's r, in q's place) */
+    if (any_cube)                               /* (a cube map's r, in q's place) */
         v->q = swap_st ? c->tr1 : c->tr, v->q2 = c->tr1;
 }
 

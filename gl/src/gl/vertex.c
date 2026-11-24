@@ -5,6 +5,7 @@
  * tests capture them). */
 #include "gl_state.h"
 #include "gl_draw.h"
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -142,11 +143,32 @@ void dgl_transform(const dgl_vin *in, dgl_cvtx *o)
     o->z = m->m[2] * p[0] + m->m[6] * p[1] + m->m[10] * p[2] + m->m[14] * p[3];
     o->w = m->m[3] * p[0] + m->m[7] * p[1] + m->m[11] * p[2] + m->m[15] * p[3];
     o->r = in->col[0]; o->g = in->col[1]; o->b = in->col[2]; o->a = in->col[3];
-    if (!(dgl_gl.texgen_on[0] | dgl_gl.texgen_on[1])) {
-        /* Texture coordinates (q already divided out at glTexCoord): through the texture matrix where it isn't the
-         * identity. (The common case kept as it was before X2: no arrays, no float compares; X2's first form cost
-         * GLQuake a third more in the vertex stage on the P3.) */
-        float r0 = dgl_gl.texr_used ? in->texr[0] : 0.0f, r1 = dgl_gl.texr_used ? in->texr[1] : 0.0f;
+    if (!(dgl_gl.texgen_on[0] | dgl_gl.texgen_on[1] | dgl_gl.texr_used)) {
+        /* Only s and t ever given (GLQuake and most programs): the code before X2, r zero (read only by a cube
+         * map's units, and enabling one sets texr_used). */
+        o->tr = o->tr1 = 0.0f;
+        if (dgl_gl.tex_identity) {
+            o->s = in->tex[0]; o->t = in->tex[1];
+        } else {
+            const float *t = dgl_gl.tex.stack[dgl_gl.tex.depth - 1].m;
+            float q = t[3] * in->tex[0] + t[7] * in->tex[1] + t[15];
+            q = q != 0 ? q : 1;
+            o->s = (t[0] * in->tex[0] + t[4] * in->tex[1] + t[12]) / q;
+            o->t = (t[1] * in->tex[0] + t[5] * in->tex[1] + t[13]) / q;
+        }
+        if (dgl_gl.tex1_identity) {
+            o->s1 = in->tex1[0]; o->t1 = in->tex1[1];
+        } else {
+            const float *t = dgl_gl.tex1.stack[dgl_gl.tex1.depth - 1].m;
+            float q = t[3] * in->tex1[0] + t[7] * in->tex1[1] + t[15];
+            q = q != 0 ? q : 1;
+            o->s1 = (t[0] * in->tex1[0] + t[4] * in->tex1[1] + t[12]) / q;
+            o->t1 = (t[1] * in->tex1[0] + t[5] * in->tex1[1] + t[13]) / q;
+        }
+    } else if (!(dgl_gl.texgen_on[0] | dgl_gl.texgen_on[1])) {
+        /* s, t and r (q already divided out at glTexCoord): through the texture matrix where it isn't the identity.
+         * (No arrays, no float compares: X2's first form cost GLQuake a third more in the vertex stage on the P3.) */
+        float r0 = in->texr[0], r1 = in->texr[1];
         if (dgl_gl.tex_identity) {
             o->s = in->tex[0]; o->t = in->tex[1]; o->tr = r0;
         } else {
@@ -231,8 +253,15 @@ static void plan_imm(const dgl_vin *v, GLsizei n)
     GLsizei i;
     pl_v.p = (const unsigned char *)v->pos; pl_v.stride = sizeof *v; pl_v.type = GL_FLOAT; pl_v.size = 4; pl_v.on = 1;
     pl_c.p = (const unsigned char *)v->col; pl_c.stride = sizeof *v; pl_c.type = GL_FLOAT; pl_c.size = 4; pl_c.on = 1;
-    for (i = 1; i < n && !memcmp(v[i].col, v[0].col, sizeof v[0].col); i++)
-        ;
+    {
+        /* (the colour's four floats as words: DJGPP's memcmp is a call and a byte loop) */
+        const uint32_t *c0 = (const uint32_t *)v[0].col;
+        for (i = 1; i < n; i++) {
+            const uint32_t *ci = (const uint32_t *)v[i].col;
+            if ((ci[0] ^ c0[0]) | (ci[1] ^ c0[1]) | (ci[2] ^ c0[2]) | (ci[3] ^ c0[3]))
+                break;
+        }
+    }
     pl_c.uniform = i >= n;
     pl_t.p = (const unsigned char *)v->tex; pl_t.stride = sizeof *v; pl_t.type = GL_FLOAT; pl_t.size = 2; pl_t.on = 1;
     pl_t1.p = (const unsigned char *)v->tex1; pl_t1.stride = sizeof *v; pl_t1.type = GL_FLOAT; pl_t1.size = 2;
@@ -384,6 +413,7 @@ static const dgl_cvtx *get(GLint idx, const dgl_vin *imm)
 /* Two-sided lighting: a back-facing triangle drawn with its vertices' back colours. Facing by the sign of the
  * homogeneous determinant of (x, y, w): the orientation of the part in front of the eye, as clipping leaves it. */
 static int clip_user;                   /* user clip planes enabled for the draw being assembled (texgen.c) */
+static int tri_slow;                    /* clip_user or two-sided lighting: tri() through tri_extra (once a draw) */
 
 /* A triangle cut by the user clip planes: the pieces fanned to the sink with the original provoking vertex. */
 static void tri_clipped(dgl_cvtx *v)
@@ -425,7 +455,7 @@ static void tri_extra(dgl_cvtx *v)
 static void tri(GLint a, GLint b, GLint c, GLint prov, const dgl_vin *imm)
 {
 #define CLASH(x, y) ((x) != (y) && !(((x) ^ (y)) & (VCACHE - 1)))
-    if ((clip_user || (dgl_gl.lighting && dgl_gl.light_two_side)) && dgl_sink.triangle) {
+    if (tri_slow && dgl_sink.triangle) {
         dgl_cvtx v[4];
         v[0] = *get(a, imm); v[1] = *get(b, imm); v[2] = *get(c, imm); v[3] = *get(prov, imm);
         tri_extra(v);
@@ -522,6 +552,7 @@ static void assemble(GLenum mode, GLsizei count, const GLint *idx, GLint first, 
     else
         plan_arrays();
     clip_user = dgl_clip_user_begin();
+    tri_slow = clip_user || (dgl_gl.lighting && dgl_gl.light_two_side);
     cur_imm = imm;
     if (dgl_sink.tnl && dgl_sink.tnl(mode, count, idx, first)) {
         cur_imm = NULL;

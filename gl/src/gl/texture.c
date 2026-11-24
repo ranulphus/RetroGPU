@@ -55,6 +55,14 @@ static void env_defaults(dgl_texenv *e)
  * to every unit's level-of-detail bias (negative: sharper). Read once. */
 static struct { int read, trilinear, aniso_on, bias_on; GLfloat aniso, lod_bias; } q;
 
+int dgl_texq_aniso, dgl_texq_bias[2];  /* (gl_tex.h's inline tests: kept by quality_read and bias_changed) */
+
+static void bias_changed(void)
+{
+    dgl_texq_bias[0] = env_u[0].bias_on | q.bias_on;
+    dgl_texq_bias[1] = env_u[1].bias_on | q.bias_on;
+}
+
 static void quality_read(void)
 {
     const char *e;
@@ -69,20 +77,8 @@ static void quality_read(void)
     q.lod_bias = e && *e ? (GLfloat)atof(e) : 0.0f;
     q.aniso_on = q.aniso > 1.0f;
     q.bias_on = q.lod_bias != 0.0f;
-}
-
-int dgl_tex_aniso_on(const dgl_texture *t)
-{
-    if (!q.read)
-        quality_read();
-    return t->aniso_on | q.aniso_on;
-}
-
-int dgl_tex_lod_bias_on(int unit)
-{
-    if (!q.read)
-        quality_read();
-    return env_u[unit].bias_on | q.bias_on;
+    dgl_texq_aniso = q.aniso_on;
+    bias_changed();
 }
 
 static GLenum drawn_min_filter(GLenum f)
@@ -231,6 +227,7 @@ void dgl_textures_reset(uint32_t heap_start, uint32_t heap_end)
     dgl_palettes_reset();
     env_defaults(&env_u[0]);
     env_defaults(&env_u[1]);
+    quality_read();                             /* (the settings, before anything draws: gl_tex.h's tests read them) */
     dgl_be->tex_reset(heap_start, heap_end);
 }
 
@@ -568,6 +565,7 @@ static void env(GLenum target, GLenum pname, const GLfloat *v)
         if (pname != GL_TEXTURE_LOD_BIAS_EXT || c.max_lod_bias <= 0) { dgl_gl_error(GL_INVALID_ENUM); return; }
         e->lod_bias = v[0];
         e->bias_on = v[0] != 0.0f;
+        bias_changed();
         dgl_gl.dirty |= DGL_DIRTY_TEXTURE;
         return;
     }
