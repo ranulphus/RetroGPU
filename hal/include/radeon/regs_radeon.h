@@ -121,4 +121,61 @@
 /* DP_GUI_MASTER_CNTL's destination data types (radeon_reg.h's RADEON_GMC_DST_* >> 8) */
 enum { RADEON_DT_CI8 = 2, RADEON_DT_ARGB1555 = 3, RADEON_DT_RGB565 = 4, RADEON_DT_ARGB8888 = 6 };
 
+/* The command processor, its ring, the PCI GART and what its start touches (RD3: the DRM's radeon_drv.h and
+ * X.org's radeon_reg.h). */
+#define RADEON_BUS_CNTL             0x0030
+#define RADEON_CONFIG_APER_SIZE     0x0108      /* (the frame buffer window's size: 64 MB on the P3's) */
+#define     RADEON_BUS_MASTER_DIS   (1u << 6)
+#define RADEON_CRTC_EXT_CNTL        0x0054
+#define     RADEON_CRTC_DISPLAY_DIS (1u << 10)
+#define     RADEON_CRTC_ICON_EN     (1u << 15)  /* (CRTC_GEN_CNTL's) */
+#define     RADEON_CRTC_CUR_EN      (1u << 16)
+#define     RADEON_CRTC_EXT_DISP_EN (1u << 24)
+#define     RADEON_CRTC_DISP_REQ_EN_B (1u << 26)
+#define RADEON_MC_AGP_LOCATION      0x014C
+#define RADEON_MC_STATUS            0x0150
+#define     RADEON_MC_IDLE          (1u << 2)
+#define RADEON_AIC_CNTL             0x01D0
+#define     RADEON_PCIGART_TRANSLATE_EN (1u << 0)
+#define RADEON_AIC_STAT             0x01D4
+#define RADEON_AIC_PT_BASE          0x01D8
+#define RADEON_AIC_LO_ADDR          0x01DC
+#define RADEON_AIC_HI_ADDR          0x01E0
+#define RADEON_CP_RB_BASE           0x0700
+#define RADEON_CP_RB_CNTL           0x0704
+#define     RADEON_RB_NO_UPDATE     (1u << 27)
+#define RADEON_CP_RB_RPTR_ADDR      0x070C
+#define RADEON_CP_RB_RPTR           0x0710
+#define RADEON_CP_RB_WPTR           0x0714
+#define RADEON_CP_RB_WPTR_DELAY     0x0718
+#define RADEON_CP_CSQ_CNTL          0x0740
+#define     RADEON_CSQ_PRIDIS_INDDIS (0u << 28)
+#define     RADEON_CSQ_PRIBM_INDBM  (4u << 28)
+#define RADEON_CP_CSQ_STAT          0x07F8
+#define RADEON_SCRATCH_UMSK         0x0770
+#define RADEON_SCRATCH_ADDR         0x0774
+#define RADEON_CP_ME_RAM_ADDR       0x07D4
+#define RADEON_CP_ME_RAM_DATAH      0x07DC
+#define RADEON_CP_ME_RAM_DATAL      0x07E0
+#define RADEON_ISYNC_CNTL           0x1724
+#define     RADEON_ISYNC_ANY2D_IDLE3D       (1u << 0)
+#define     RADEON_ISYNC_ANY3D_IDLE2D       (1u << 1)
+#define     RADEON_ISYNC_WAIT_IDLEGUI       (1u << 4)
+#define     RADEON_ISYNC_CPSCRATCH_IDLEGUI  (1u << 5)
+#define RADEON_RB3D_ZCACHE_CTLSTAT  0x3254
+#define     RADEON_RB3D_ZC_FLUSH    (1u << 0)
+#define     RADEON_RB3D_ZC_FREE     (1u << 2)
+#define     RADEON_RB3D_DC_FLUSH    (3u << 0)   /* (RB3D_DSTCACHE_CTLSTAT's) */
+#define     RADEON_RB3D_DC_FREE     (3u << 2)
+/* Packets: type 0 writes count + 1 registers from reg on (ONE_REG_WR: all to reg); type 2 is a no-op; type 3 is an
+ * operation with count + 1 words after its header. */
+#define RADEON_CP_PACKET0(reg, n)   ((uint32_t)(n) << 16 | (uint32_t)(reg) >> 2)
+#define RADEON_CP_ONE_REG_WR        (1u << 15)
+#define RADEON_CP_PACKET2           0x80000000u
+#define RADEON_CP_PACKET3(op, n)    (0xC0000000u | (uint32_t)(op) | (uint32_t)(n) << 16)
+#define     RADEON_3D_DRAW_IMMD     0x00002900u
+#define     RADEON_CNTL_HOSTDATA_BLT 0x00009400u
+#define     RADEON_CP_VC_WALK_RING  (3u << 4)   /* (the vertex control word's: vertices follow in the stream) */
+#define     RADEON_CP_VC_MAOS_ENABLE (1u << 7)
+
 #endif

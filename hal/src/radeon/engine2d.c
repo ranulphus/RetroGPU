@@ -10,7 +10,13 @@
 #include <string.h>
 
 /* A drawing-engine register (by the command processor's packets once it runs: RD3). */
-static void eng_wr(uint32_t reg, uint32_t v) { radeon_wr(reg, v); }
+static void eng_wr(uint32_t reg, uint32_t v)
+{
+    if (radeon_cp_running())
+        radeon_cp_reg(reg, v);
+    else
+        radeon_wr(reg, v);
+}
 
 static uint32_t t_off, t_dt;
 static int t_pitch, t_bpp, t_bytes;
@@ -19,7 +25,10 @@ static int c_x0, c_y0, c_x1 = 0x7FFF, c_y1 = 0x7FFF;
 /* Room for n register writes in the 64-entry FIFO, bounded (a stuck engine shows at the next sync). */
 static void fifo_wait(int n)
 {
-    uint32_t t0 = sys_time_us();
+    uint32_t t0;
+    if (radeon_cp_running())            /* (the ring has its own room) */
+        return;
+    t0 = sys_time_us();
     while ((int)(radeon_rd(RADEON_RBBM_STATUS) & RADEON_RBBM_FIFOCNT_MASK) < n && sys_time_us() - t0 < 200000u)
         ;
 }
@@ -65,6 +74,8 @@ int radeon_sync(uint32_t timeout_us)
     uint32_t t0 = sys_time_us();
     if (!radeon.mmio)
         return 0;
+    if (radeon_cp_running())            /* (the caches purged in the stream, the ring fetched, the engine idle) */
+        return radeon_cp_idle_wait(timeout_us);
     while (!radeon_idle())
         if (sys_time_us() - t0 >= timeout_us)
             return -1;

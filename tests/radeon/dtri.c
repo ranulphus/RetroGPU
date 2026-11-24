@@ -246,6 +246,12 @@ static uint32_t ub(double v) { return (uint32_t)clampd(floor(v + 0.5), 0, 255); 
 
 /* (experiments, RD2: cfmt=HEX SE_COORD_FMT's word; vmode=1: s and t multiplied by 1/w here; 2: x, y and z
  * multiplied by w and the fourth coordinate w; 3: both) */
+static int use_ring;                 /* (ring[=KB]: the command processor from a ring, RD3) */
+static uint32_t ring_kb = 64;
+static void cp_log(const char *stage, uint32_t a, uint32_t b)
+{
+    hx_log("DTRI-CP %s: %08lx %08lx", stage, (unsigned long)a, (unsigned long)b);
+}
 static int vmode, cfmt_set;
 static uint32_t cfmt;
 
@@ -587,6 +593,10 @@ int main(int argc, char **argv)
             sscanf(argv[i] + 2, "%f,%f", &kover[0], &kover[1]);
         else if (!strncmp(argv[i], "snap=", 5))
             snap = atoi(argv[i] + 5);
+        else if (!strcmp(argv[i], "ring"))
+            use_ring = 1;
+        else if (!strncmp(argv[i], "ring=", 5))
+            use_ring = 1, ring_kb = (uint32_t)atoi(argv[i] + 5);
         else if (!strncmp(argv[i], "seed=", 5))
             seed = (unsigned)atoi(argv[i] + 5);
         else if (!strncmp(argv[i], "vmode=", 6))
@@ -617,6 +627,14 @@ int main(int argc, char **argv)
     }
     pitch = m.pitch_bytes;
     hx_test("mode", 1, "mode %03x, pitch %d", m.mode, pitch);
+    if (use_ring) {
+        int rc;
+        radeon_cp_trace = cp_log;
+        rc = radeon_cp_init(NULL, ring_kb * 1024u);
+        hx_test("cp", rc == 0, rc == 0 ? "running from a %lu KB ring in system memory (the GART's range at %08lx)"
+                                        : "did not start: plain register writes (%lu KB asked, %08lx)",
+                (unsigned long)ring_kb, (unsigned long)radeon_cp_gart_start);
+    }
     ref = malloc(W * H * 2);
     refz = malloc(W * H * 2);
     refm = malloc(W * H);
@@ -709,6 +727,7 @@ int main(int argc, char **argv)
     tex_case("tex-fog", TEX_ARGB1555, 8, 1, 1, 0, ENV_DECAL, 0, 1, 0.2f, 1.0f, 0.02, 2);
 
     radeon_sync(1000000);
+    radeon_cp_stop();
     radeon_text_mode();
     hx_done(hx_failures() ? 1 : 0);
 }

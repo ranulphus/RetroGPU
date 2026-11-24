@@ -128,6 +128,25 @@ void radeon_3d_format(int what);
 void radeon_tri(const radeon_vertex *a, const radeon_vertex *b, const radeon_vertex *c);
 void radeon_2d_begin(void);             /* (engine2d.c calls it: 2D after 3D waits for the 3D engine) */
 
+/* cp.c: the command processor (RD3). radeon_cp_init loads the microcode (pairs: 256 x low, high words; NULL: the
+ * embedded R100 table) and starts the chip fetching a ring of bytes (a power of two, 4 KB to 256 KB) in
+ * conventional memory through its PCI GART: 0, or -1 with everything put back (drawing then stays on plain
+ * register writes). While it runs, every drawing-engine register goes as a packet (radeon_out), and radeon_sync
+ * waits for the ring. */
+extern const uint32_t radeon_cp_microcode[256 * 2];
+extern uint32_t radeon_cp_gart_start;
+int  radeon_cp_init(const uint32_t *pairs, uint32_t bytes);
+int  radeon_cp_running(void);
+void radeon_cp_out(const uint32_t *d, int n);
+void radeon_cp_reg(uint32_t reg, uint32_t v);
+void radeon_cp_flush(void);
+int  radeon_cp_idle_wait(uint32_t timeout_us);
+void radeon_cp_stop(void);
+void radeon_cp_forget(void);
+void radeon_cp_peek(uint32_t *rp, uint32_t *wp, const volatile uint32_t **base, uint32_t *dwords);
+void radeon_out(uint32_t reg, uint32_t v);      /* a drawing-engine register, either way */
+extern void (*radeon_cp_trace)(const char *stage, uint32_t a, uint32_t b);     /* (a test's log of radeon_cp_init's steps) */
+
 /* cursor.c: the hardware cursor (64 x 64), as the Rage 128 layer's: the AND and XOR masks, rows of 8 bytes, the
  * leftmost pixel in bit 7; stored at off (a multiple of 16); colours 0xRRGGBB; radeon_cursor_move takes the image's
  * top left corner, as far as 63 pixels off the top or the left. */

@@ -108,7 +108,8 @@ build/djgpp/libr128.a: $(R128_SRCS:%.c=build/djgpp/%.o)
 	@rm -f $@
 	$(DJAR) rcs $@ $^
 # The ATI Radeon (docs/radeon.md): its register layer, a library of its own as the Rage 128's.
-RADEON_SRCS := hal/src/radeon/chip.c hal/src/radeon/engine2d.c hal/src/radeon/cursor.c hal/src/radeon/tri.c
+RADEON_SRCS := hal/src/radeon/chip.c hal/src/radeon/engine2d.c hal/src/radeon/cursor.c hal/src/radeon/tri.c \
+               hal/src/radeon/cp.c hal/src/radeon/cp_ucode.c
 build/djgpp/libradeon.a: $(RADEON_SRCS:%.c=build/djgpp/%.o)
 	@rm -f $@
 	$(DJAR) rcs $@ $^

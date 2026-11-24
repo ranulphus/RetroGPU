@@ -19,7 +19,10 @@ static int vwhat = RADEON_VTX_RHW | RADEON_VTX_ARGB;
 
 static void fifo(int n)
 {
-    uint32_t t0 = sys_time_us();
+    uint32_t t0;
+    if (radeon_cp_running())
+        return;
+    t0 = sys_time_us();
     while ((int)(radeon_rd(RADEON_RBBM_STATUS) & RADEON_RBBM_FIFOCNT_MASK) < n && sys_time_us() - t0 < 200000u)
         ;
 }
@@ -76,7 +79,17 @@ void radeon_3d_init(uint32_t color_off, int pitch_bytes, int bpp, uint32_t z_off
     radeon_3d_dirty = 1;
 }
 
-#define W1(reg, f) do { if (!known || c->f != sent.f) { fifo(1); radeon_wr(reg, c->f); } } while (0)
+static void out(uint32_t reg, uint32_t v)
+{
+    if (radeon_cp_running())
+        radeon_cp_reg(reg, v);
+    else {
+        fifo(1);
+        radeon_wr(reg, v);
+    }
+}
+
+#define W1(reg, f) do { if (!known || c->f != sent.f) out(reg, c->f); } while (0)
 
 void radeon_3d_emit(void)
 {
@@ -92,8 +105,7 @@ void radeon_3d_emit(void)
     int i, k;
     if (!mode3d) {
         /* (after 2D drawing: the queue held until the 2D engine is idle and its cache clean, RADEON_SWITCH_TO_3D) */
-        fifo(1);
-        radeon_wr(RADEON_WAIT_UNTIL, RADEON_WAIT_2D_IDLECLEAN | RADEON_WAIT_3D_IDLECLEAN | RADEON_WAIT_HOST_IDLECLEAN);
+        out(RADEON_WAIT_UNTIL, RADEON_WAIT_2D_IDLECLEAN | RADEON_WAIT_3D_IDLECLEAN | RADEON_WAIT_HOST_IDLECLEAN);
         mode3d = 1;
     }
     W1(RADEON_SE_CNTL_STATUS, se_cntl_status);
@@ -118,15 +130,11 @@ void radeon_3d_emit(void)
     for (i = 0; i < 3; i++) {
         const uint32_t *now = (const uint32_t *)&c->tex[i], *was = (const uint32_t *)&sent.tex[i];
         for (k = 0; k < 7; k++)
-            if (!known || now[k] != was[k]) {
-                fifo(1);
-                radeon_wr(tx[i][k], now[k]);
-            }
+            if (!known || now[k] != was[k])
+                out(tx[i][k], now[k]);
     }
-    if (!known) {
-        fifo(1);
-        radeon_wr(RADEON_AUX_SC_CNTL, 0);
-    }
+    if (!known)
+        out(RADEON_AUX_SC_CNTL, 0);
     sent = *c;
     known = 1;
     radeon_3d_dirty = 0;
@@ -174,6 +182,18 @@ void radeon_tri(const radeon_vertex *a, const radeon_vertex *b, const radeon_ver
         if (vwhat & RADEON_VTX_ST2) p[n++] = fbits(v[i]->s2), p[n++] = fbits(v[i]->t2);
         if (vwhat & RADEON_VTX_ST3) p[n++] = fbits(v[i]->s3), p[n++] = fbits(v[i]->t3);
     }
+    if (radeon_cp_running()) {
+        /* (3D_DRAW_IMMD: the vertex format, the control word, the vertices; the DRM's and X.org's) */
+        uint32_t h[3];
+        h[0] = RADEON_CP_PACKET3(RADEON_3D_DRAW_IMMD, n + 1);
+        h[1] = vfmt;
+        h[2] = RADEON_VF_PRIM_TYPE_TRIANGLE_LIST | RADEON_CP_VC_WALK_RING | RADEON_CP_VC_MAOS_ENABLE | RADEON_VF_RADEON_MODE |
+               3u << RADEON_VF_NUM_VERTICES_SHIFT;
+        radeon_cp_out(h, 3);
+        radeon_cp_out(p, n);
+        fmt_known = 0;
+        return;
+    }
     if (!fmt_known || fmt_sent != vfmt) {
         fifo(1);
         radeon_wr(RADEON_SE_VTX_FMT, vfmt);
@@ -191,7 +211,6 @@ void radeon_2d_begin(void)
 {
     if (!mode3d)
         return;
-    fifo(1);
-    radeon_wr(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLECLEAN | RADEON_WAIT_HOST_IDLECLEAN);
+    out(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLECLEAN | RADEON_WAIT_HOST_IDLECLEAN);
     mode3d = 0;
 }

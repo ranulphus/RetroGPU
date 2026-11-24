@@ -169,6 +169,38 @@ off of 35,000 to 81,000. What it settled:
 
 RD2 is complete: `DTRI0`, `DTRI`, `DTRI32` and `DMIP` pass on the P3.
 
+## RD3: the command processor and its ring (2026-11-24)
+
+`hal/src/radeon/cp.c` starts the chip's command processor (CP) fetching a ring in system memory, and
+`hal/src/radeon/cp_ucode.c` holds its microcode (`R100_cp_microcode` of Linux 2.6.29's `radeon_microcode.h`, under
+that file's MIT notice). It started at the first attempt on the P3, and `DTRI ring` draws all 13 scenes through it
+with the same pixel counts as by register writes.
+
+- **The memory map first.** The BIOS leaves `MC_FB_LOCATION` at ffff0000: the frame buffer claims every address of
+  the chip's own address space, so nothing could be fetched from outside it. Its top is lowered to 03ff0000 (the
+  frame buffer's 64 MB), X.org's way: only when it must change, with the engine idle, the display's memory requests
+  stopped (`CRTC_DISPLAY_DIS`, `CRTC_DISP_REQ_EN_B`) and `MC_STATUS` idle, then the engine reset and the display's
+  registers put back. It is left lowered at the end, as every driver leaves it.
+- **The PCI GART.** A page of 1,024 entries (`AIC_PT_BASE`), each a page's physical address, covers 4 MB of the
+  chip's address space from 04000000 (`AIC_LO_ADDR`, `AIC_HI_ADDR`), right after the frame buffer; translation is
+  `AIC_CNTL` bit 0. The ring is the range's first pages; entries past it point at the ring's first page.
+- **The ring** (64 KB by default) and the table are in conventional memory, where linear addresses are physical.
+  `CP_RB_BASE`, `CP_RB_CNTL` (its size, with `RB_NO_UPDATE`), `CP_RB_WPTR`; the chip started with `CP_CSQ_CNTL` =
+  `CSQ_PRIBM_INDBM`.
+- **The chip writes nothing to system memory:** the read index is read from `CP_RB_RPTR` and the scratch
+  registers' copy-out is masked off (`SCRATCH_UMSK` 0).
+- **A first fetch is checked** (sixteen no-ops within 50 ms). On failure the CP is stopped, the engine reset, the
+  GART and bus-master bits put back, and drawing stays on plain register writes.
+- **While it runs,** every drawing-engine register write is a type-0 packet (`radeon_out`), a triangle is a
+  `3D_DRAW_IMMD` packet (the vertex format, the control word, the vertices), and `radeon_sync` purges the caches in
+  the stream and waits for the ring fetched, the FIFO empty and the engine not active.
+
+What the first start read on the P3: `AIC_CNTL` 2 before, `CP_RB_RPTR` 0, `MC_STATUS` 7 with the display's requests
+off, `RBBM_STATUS` 140 (64 FIFO entries free, not active) before and after the first fetch.
+
+Still to do in RD3: the 2D tests through the ring, texels through the stream (`CNTL_HOSTDATA_BLT`), flips in the
+stream, the override file, and the cycles a word (`DPIO`).
+
 ## The rest of the family: the RV200 (Radeon 7500) and the first Radeon (R100)
 
 A Radeon 7500 LE (RV200) is to follow this card. What the references say differs, gathered here so it isn't

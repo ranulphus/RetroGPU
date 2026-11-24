@@ -235,6 +235,10 @@ void radeon_vram_written(uint32_t last)
     wc_lock();
     if (radeon.fb && last + 4u <= radeon.vram_bytes)
         (void)*(volatile uint32_t *)(radeon.fb + (last & ~3u));   /* (the last write's own dword read back) */
+    if (radeon.mmio && radeon_cp_running()) {
+        radeon_cp_idle_wait(100000u);           /* (the caches purged in the stream) */
+        return;
+    }
     if (radeon.mmio) {
         uint32_t t0 = 0, spins = 0;
         radeon_wr(RADEON_RB2D_DSTCACHE_CTLSTAT, radeon_rd(RADEON_RB2D_DSTCACHE_CTLSTAT) | RADEON_RB2D_DC_FLUSH_ALL);
