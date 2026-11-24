@@ -91,3 +91,25 @@ sends the base level only): their cube map is the six base levels in one block, 
 `PP_CUBIC_OFFSET_Tn_m` registers and face 5 at `TXOFFSET`, faces 1 to 4's sizes in `PP_CUBIC_FACES_n` and face 5's
 in `TXFORMAT`'s F5 fields (without those the P3's 7500 drew face 5 as one texel), r in the vertex's q slot. t42 on
 the 7500 matches Mesa to the pixel.
+
+## X3: the first silicon results (DTCL0, the P3's 7500, 2026-11-24)
+
+`tests/radeon/dtcl0.c`: DTRI0's three triangles given in object coordinates, taken to the window by the chip. What
+works, as Mesa's radeon driver does it:
+
+- The state: `SE_CNTL_STATUS` without `TCL_BYPASS`; `SE_COORD_FMT` = `VTX_W0_IS_NOT_1_OVER_W0`; `SE_CNTL`'s viewport
+  transforms on and `SE_VPORT_*` set (x: W/2, W/2; y: -H/2, H/2; z: 0.5, 0.5); `SE_TCL_OUTPUT_VTX_FMT` Z0, W0 and a
+  packed diffuse; `SE_TCL_OUTPUT_VTX_SEL` computing x, y, z and w; the matrix slots as Mesa numbers them
+  (model-projection 0, model 1, its inverse transpose 2, texture matrices 3 to 5); the matrix's rows written into
+  the vector memory (`SE_TCL_STATE_FLUSH`, `SE_TCL_VECTOR_INDX_REG`, then `SE_TCL_VECTOR_DATA_REG` as a one-register
+  table); the four guard-band scalars at 1.0.
+- The vertices: an array in video memory (`3D_LOAD_VBPNTR`: one component, its size and stride in dwords, its
+  address in the chip's space), then `3D_DRAW_VBUF` with `MAOS_ENABLE` and `TCL_ENABLE`.
+- The result: coverage identical to the reference (0 pixels differ), colours within 9 levels, with the matrix
+  turning the triangles 0, 30 or 117 degrees (the vertices given turned back).
+- Vertices inline in the stream (`3D_DRAW_IMMD` with `TCL_ENABLE`) are not taken that way: the engine stays well
+  but the triangles come out wrong (the whole screen drawn). Mesa's driver uses arrays alone for T&L; so will X3,
+  dynamic vertices copied into an area the chip reads.
+- The rate: a 64 x 64 grid of 4-pixel cells (7,938 triangles as an unindexed list, 23,814 vertices) drawn 50
+  times: 7.68 million triangles a second, 23 million vertices (DOS-GL's CPU path on the P3: in the hundreds of
+  thousands).

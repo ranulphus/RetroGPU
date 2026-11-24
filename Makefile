@@ -167,6 +167,8 @@ DJ_SRC_DTRI32 := tests/radeon/dtri32.c build/djgpp/libradeon.a
 DJ_SRC_DWC := tests/radeon/dwc.c build/djgpp/libradeon.a
 # DCURSOR (the hardware cursor moved in a circle, for someone watching).
 DJ_SRC_DCURSOR := tests/radeon/dcursor.c build/djgpp/libradeon.a
+# DTCL0 (X3, gl/docs/dx7.md: the 7500's transform engine's first triangles, from an array in video memory).
+DJ_SRC_DTCL0 := tests/radeon/dtcl0.c build/djgpp/libradeon.a
 # RTWOD (R1: the 2D engine against sw2d.c at 8, 16 and 32 bits) and RFLIP (when the start is taken, watched).
 DJ_SRC_RTWOD := tests/r128/rtwod.c tests/hal/sw2d.c build/djgpp/libr128.a
 DJ_SRC_RFLIP := tests/r128/rflip.c build/djgpp/libr128.a
@@ -221,6 +223,7 @@ build/djgpp/DMIP.EXE: tests/radeon/dmip.c build/djgpp/libradeon.a
 build/djgpp/DTRI32.EXE: tests/radeon/dtri32.c build/djgpp/libradeon.a
 build/djgpp/DWC.EXE: tests/radeon/dwc.c build/djgpp/libradeon.a
 build/djgpp/DCURSOR.EXE: tests/radeon/dcursor.c build/djgpp/libradeon.a
+build/djgpp/DTCL0.EXE: tests/radeon/dtcl0.c build/djgpp/libradeon.a
 build/djgpp/RTWOD.EXE: tests/r128/rtwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libr128.a
 build/djgpp/RTWOD.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/RFLIP.EXE: tests/r128/rflip.c build/djgpp/libr128.a
