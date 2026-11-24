@@ -21,16 +21,37 @@ static uint32_t pci_read32(int bus, int dev, int reg)
 uint32_t radeon_rd(uint32_t off) { return *(volatile uint32_t *)(radeon.mmio + off); }
 void radeon_wr(uint32_t off, uint32_t v) { *(volatile uint32_t *)(radeon.mmio + off) = v; }
 
-/* A PLL register through the clock index (radeon_driver.c's INPLL: the index's low 6 bits, PLL_WR_EN clear), then
- * the 5 ms of RADEONPllErrataAfterData. */
+/* A PLL register through the clock index (radeon_driver.c's INPLL: the index's low 6 bits, PLL_WR_EN clear), with
+ * the chips' errata: the RV200's two dummy reads after the index (RADEONPllErrataAfterIndex), the RV100's 5 ms
+ * after the data (RADEONPllErrataAfterData; kept for a chip the table doesn't know either). */
 uint32_t radeon_pll_rd(int index)
 {
     uint32_t v;
     radeon.mmio[RADEON_CLOCK_CNTL_INDEX] = (uint8_t)(index & 0x3F);
+    if (radeon.flags & RADEON_PLL_DUMMYREADS) {
+        (void)radeon_rd(RADEON_CLOCK_CNTL_DATA);
+        (void)radeon_rd(RADEON_CRTC_GEN_CNTL);
+    }
     v = radeon_rd(RADEON_CLOCK_CNTL_DATA);
-    sys_delay_us(5000);
+    if (radeon.flags & RADEON_PLL_DELAY)
+        sys_delay_us(5000);
     return v;
 }
+
+static const struct {
+    uint16_t id;
+    unsigned flags;
+    const char *name;
+} chips[] = {
+    { 0x5144, RADEON_HAS_TCL | RADEON_HAS_HIERZ | RADEON_BROKEN_STENCIL, "Radeon (R100)" },
+    { 0x5145, RADEON_HAS_TCL | RADEON_HAS_HIERZ | RADEON_BROKEN_STENCIL, "Radeon (R100)" },
+    { 0x5146, RADEON_HAS_TCL | RADEON_HAS_HIERZ | RADEON_BROKEN_STENCIL, "Radeon (R100)" },
+    { 0x5147, RADEON_HAS_TCL | RADEON_HAS_HIERZ | RADEON_BROKEN_STENCIL, "Radeon (R100)" },
+    { 0x5157, RADEON_HAS_TCL | RADEON_HAS_HIERZ | RADEON_PLL_DUMMYREADS, "Radeon 7500 (RV200)" },
+    { 0x5158, RADEON_HAS_TCL | RADEON_HAS_HIERZ | RADEON_PLL_DUMMYREADS, "Radeon 7500 (RV200)" },
+    { 0x5159, RADEON_PLL_DELAY, "Radeon 7000 / VE (RV100)" },
+    { 0x515A, RADEON_PLL_DELAY, "Radeon 7000 / VE (RV100)" },
+};
 
 int radeon_find(void)
 {
@@ -38,11 +59,17 @@ int radeon_find(void)
     for (bus = 0; bus < 4; bus++)               /* (an AGP card sits behind the AGP bridge: bus 1) */
         for (dev = 0; dev < 32; dev++) {
             uint32_t id = pci_read32(bus, dev, 0), cls = pci_read32(bus, dev, 0x08) >> 16;
-            if ((id & 0xFFFF) == RADEON_PCI_VENDOR && cls == 0x0300) {
+            unsigned k;
+            for (k = 0; k < sizeof chips / sizeof chips[0]; k++)
+                if (chips[k].id == (uint16_t)(id >> 16))
+                    break;
+            if ((id & 0xFFFF) == RADEON_PCI_VENDOR && cls == 0x0300 && k < sizeof chips / sizeof chips[0]) {
                 memset(&radeon, 0, sizeof radeon);
                 radeon.bus = bus;
                 radeon.dev = dev;
                 radeon.device_id = (uint16_t)(id >> 16);
+                radeon.flags = chips[k].flags;
+                radeon.name = chips[k].name;
                 radeon.revision = (uint8_t)pci_read32(bus, dev, 0x08);
                 radeon.fb_phys = pci_read32(bus, dev, 0x10) & 0xFFFFFFF0u;
                 radeon.mmio_phys = pci_read32(bus, dev, 0x18) & 0xFFFFFFF0u;

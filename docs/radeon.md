@@ -108,3 +108,59 @@ fresh `glos reboot` too), a pattern written through the frame buffer window and 
 ## Next
 
 RD1's rest (DFLIP watched, the cursor with the device), then RD2: the owner's word first on this card's memory.
+
+## RD2, first part: triangles by plain register writes (2026-11-24)
+
+`hal/src/radeon/tri.c` writes the 3D state's registers when they change and sends each triangle as `SE_VF_CNTL`
+followed by its vertices' words to `SE_PORT_DATA0`. There is no command processor and no microcode in this path.
+
+- **The state's first values** are Mesa's (`radeon_state_init.c`), with vertices in window coordinates as X.org's
+  EXA code sends them (`SE_COORD_FMT` = x, y and z premultiplied, the fourth coordinate 1/w).
+- **Vertex rounding:** Mesa's eighths of a pixel, truncated, moved DTRI0's edges (94 pixels of coverage, 56 of depth
+  order). Sixteenths, rounded (`ROUND_MODE_ROUND | ROUND_PREC_16TH_PIX`), brought that to about 25 and 5.
+- **Pixel centres** are at halves (`VTX_PIX_CENTER_OGL`): 18 to 37 pixels differ from the reference with centres at
+  halves, about 610 with centres at wholes.
+- **The 2D and 3D engines take turns:** a `WAIT_UNTIL` for the other engine idle and clean when the kind of drawing
+  changes (X.org's `RADEON_SWITCH_TO_2D` and `_3D`).
+
+**DTRI0 on the P3** (three Gouraud triangles, Z16, LESS; three runs): 999 pixels in 1,000 within 8 of 255 of the
+reference, the mean error 2.2. Three to seven pixels a frame are far off: each lacks one of its two bytes, at
+places that repeat from run to run (near 340,322 and 358,297). That is the card's memory fault, not the layer; the
+test lists them (`DTRI0-PIX`) and judges the colours by the 999th pixel in 1,000.
+
+## The rest of the family: the RV200 (Radeon 7500) and the first Radeon (R100)
+
+A Radeon 7500 LE (RV200) is to follow this card. What the references say differs, gathered here so it isn't
+researched twice. Only the RV100 has been on a bench; the rest of this section is from the sources.
+
+| | RV100 (7000 / VE) | RV200 (7500) | R100 (Radeon / 7200) |
+|---|---|---|---|
+| PCI IDs (desktop) | 5159, 515A | 5157, 5158 | 5144-5147 |
+| Transform and lighting engine | no | yes | yes |
+| Hierarchical Z, Z compression, fast Z clear | no | yes | yes |
+| PLL erratum | 5 ms after each data access | two dummy reads after each index write | none listed |
+| Stencil | sound | sound | a fault in some operations (Mesa falls back) |
+| CP microcode | `R100_cp_microcode` | the same | the same |
+| Texture units | 3 | 3 | 3 |
+| Display controllers | 1 on this card (bandwidth limit in X) | 2 | 1 |
+
+- **The layer already knows them:** `radeon_find` takes the eight desktop IDs, and `radeon.flags` carries
+  `RADEON_HAS_TCL`, `RADEON_HAS_HIERZ`, `RADEON_PLL_DELAY`, `RADEON_PLL_DUMMYREADS` and `RADEON_BROKEN_STENCIL`.
+  `radeon_pll_rd` applies the right erratum.
+- **`SE_CNTL_STATUS`:** a chip with the engine gets 0, one without gets `TCL_BYPASS` (Mesa and X.org agree).
+  Vertices the CPU transformed go the same way on both: `SE_VF_CNTL` without its TCL bit.
+- **Hardware transform and lighting** (Mesa's `radeon_tcl.c`, `radeon_maos_verts.c`, `radeon_state.c`):
+  - a primitive asks for it with `RADEON_CP_VC_CNTL_TCL_ENABLE` in its `SE_VF_CNTL` word;
+  - the matrices, lights, materials, texture-coordinate generation and clip planes are vectors and scalars loaded
+    through `SE_TCL_VECTOR_INDX_REG` (0x2200) and `SE_TCL_SCALAR_INDX_REG` (0x2208) and their data registers;
+  - `SE_TCL_OUTPUT_VTX_FMT` (0x2254) says what the engine passes on to the rasteriser;
+  - vertices come from buffers the chip reads itself (`3D_LOAD_VBPNTR`, then `3D_RNDR_GEN_INDX_PRIM` with indices),
+    so they need memory the chip can fetch: the GART range RD3 sets up for the ring.
+- **Hierarchical Z** is `RB3D_ZSTENCILCNTL`'s `Z_HIERARCHY_ENABLE` (bit 8) and `Z_COMPRESSION_ENABLE` (bit 28), with
+  the DRM's clear path (`radeon_state.c`'s `radeon_cp_dispatch_clear`) initialising the hierarchy.
+- **X.org's power code** forces the RV200's `SCLK_MORE_CNTL` clocks on. That is a PLL write, and this layer makes
+  none: the BIOS's setting is kept unless the card shows a need.
+- **What all three share beyond what DOS-GL uses today** (register fields in the DRM's `radeon_drv.h` and Mesa's
+  `radeon_texstate.c`): anisotropic filtering to 16:1 and a level bias (`PP_TXFILTER`), DXT1, DXT3 and DXT5
+  textures (`TXFORMAT` 12, 14, 15), cube maps (`PP_CUBIC_FACES_0-2` at 0x1D24), textures to 2048 a side, and a
+  combiner per unit with add, subtract, signed add, blend, dot3 and a scale of 2 or 4.

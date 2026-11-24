@@ -84,13 +84,16 @@ int main(int argc, char **argv)
     uint32_t zoff, coff;
     int k, i, x, y, cov_half = 0, cov_whole = 0, worst = 0, wrong_winner = 0, drawn = 0;
     char where[96] = "";
+    static int hist[256];
+    int p999 = 0;
     (void)argc;
     hx_init(1, argv, "dtri0");
     if (radeon_find() < 0 || radeon_map() < 0) {
         hx_test("map", 0, "no Radeon mapped");
         hx_done(1);
     }
-    hx_test("map", 1, "Radeon %04x, %u KB", radeon.device_id, (unsigned)(radeon.vram_bytes >> 10));
+    hx_test("map", 1, "%s %04x, %u KB%s%s", radeon.name, radeon.device_id, (unsigned)(radeon.vram_bytes >> 10),
+            radeon.flags & RADEON_HAS_TCL ? ", T&L" : "", radeon.flags & RADEON_HAS_HIERZ ? ", hierarchical Z" : "");
     if (radeon_find_mode(W, H, 16, &m) < 0 || radeon_set_mode(&m) < 0) {
         hx_test("mode", 0, "no 640x480x16 mode");
         hx_done(1);
@@ -150,6 +153,7 @@ int main(int argc, char **argv)
                 e = abs(g - (int)(l[0] * tris[w][0].g + l[1] * tris[w][1].g + l[2] * tris[w][2].g));
             if (abs(b - (int)(l[0] * tris[w][0].b + l[1] * tris[w][1].b + l[2] * tris[w][2].b)) > e)
                 e = abs(b - (int)(l[0] * tris[w][0].b + l[1] * tris[w][1].b + l[2] * tris[w][2].b));
+            hist[e > 255 ? 255 : e]++;
             if (e > worst && e <= 40) {            /* (beyond 40: counted below, another triangle's or a pixel the
                                                     * P3's card's memory lost a byte of) */
                 worst = e;
@@ -166,7 +170,23 @@ int main(int argc, char **argv)
         }
     hx_test("coverage", (cov_half < cov_whole ? cov_half : cov_whole) < 200,
             "pixels differing: %d with centres at halves, %d at wholes", cov_half, cov_whole);
-    hx_test("colour", worst <= 16, "worst %d of 255 %s (%d drawn)", worst, where, drawn);
+    /* The colours by the error 999 pixels in 1,000 stay within (the P3's card loses a byte of a few pixels a frame,
+     * at the same places run after run: those are beyond it, and listed). */
+    {
+        long seen = 0, sum = 0;
+        int beyond = 0;
+        for (i = 0; i < 256; i++) {
+            if (seen * 1000 < (long)drawn * 999)
+                p999 = i;
+            seen += hist[i];
+            sum += (long)hist[i] * i;
+            if (i > 16)
+                beyond += hist[i];
+        }
+        hx_test("colour", drawn > 0 && p999 <= 16, "999 in 1,000 within %d of 255, mean %ld.%02ld, %d beyond 16; worst "
+                "under 40: %d %s (%d drawn)", p999, drawn ? sum / drawn : 0, drawn ? sum * 100 / drawn % 100 : 0, beyond,
+                worst, where, drawn);
+    }
     hx_test("depth", wrong_winner < 50, "%d pixels far from the reference's colour (another triangle's at an edge, or "
             "a byte the card's memory lost: DTRI0-PIX)", wrong_winner);
     radeon_text_mode();

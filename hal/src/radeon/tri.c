@@ -55,7 +55,9 @@ void radeon_3d_init(uint32_t color_off, int pitch_bytes, int bpp, uint32_t z_off
                  RADEON_VTX_PIX_CENTER_OGL | RADEON_ROUND_MODE_ROUND | RADEON_ROUND_PREC_16TH_PIX;
     /* (x, y and z as they come, the fourth coordinate 1/w, textures' s and t divided by the chip) */
     c->se_coord_fmt = RADEON_VTX_XY_PRE_MULT_1_OVER_W0 | RADEON_VTX_Z_PRE_MULT_1_OVER_W0 | RADEON_TEX1_W_ROUTING_USE_W0;
-    c->se_cntl_status = RADEON_TCL_BYPASS;
+    /* (a chip with a transform engine keeps it out of these vertices by SE_VF_CNTL's TCL bit, clear here; one
+     * without is told so: Mesa's radeon_state_init.c, X.org's RADEONInit3DEngine) */
+    c->se_cntl_status = radeon.flags & RADEON_HAS_TCL ? 0u : RADEON_TCL_BYPASS;
     c->rb3d_stencilrefmask = 0xFFu << RADEON_STENCIL_MASK_SHIFT | 0xFFu << RADEON_STENCIL_WRITEMASK_SHIFT;
     c->rb3d_ropcntl = RADEON_ROP_COPY;
     c->rb3d_planemask = 0xFFFFFFFFu;

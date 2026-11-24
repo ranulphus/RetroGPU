@@ -14,13 +14,28 @@ typedef struct {
     uint32_t mmio_phys;                 /* the registers (BAR2, 64 KB) */
     uint32_t vram_bytes;                /* CONFIG_MEMSIZE (64 MB on the P3's) */
     uint32_t fb_location;               /* where the chip's engines see the frame buffer (MC_FB_LOCATION's start) */
+    unsigned flags;                     /* RADEON_HAS_* and RADEON_PLL_* below: what this chip of the family is */
+    const char *name;
     volatile uint8_t *fb;               /* the linear framebuffer, vram_bytes */
     volatile uint8_t *mmio;             /* the registers */
 } radeon_chip;
 extern radeon_chip radeon;              /* the one Radeon this layer drives */
 
+/* The R100 family's chips differ in these (Mesa's radeon_screen.c, the DRM's radeon_cp.c, X.org's radeon_driver.c):
+ *   - the first Radeon (R100, the 7200: 5144-5147) and the RV200 (the 7500: 5157, 5158) have a transform and
+ *     lighting engine and a hierarchical Z buffer; the RV100 (the 7000 / VE: 5159, 515A) has neither;
+ *   - after a PLL register's data access the RV100 needs 5 ms (or can hang); after a PLL index write the RV200 needs
+ *     two dummy reads (or PLL reads return garbage);
+ *   - the R100's stencil operations have a fault (Mesa falls back for some).
+ * One microcode (R100_cp_microcode) and one register set serve them all. Only the RV100 has been on a bench. */
+#define RADEON_HAS_TCL          1u      /* (SE_CNTL_STATUS without TCL_BYPASS; a primitive asks for it in SE_VF_CNTL) */
+#define RADEON_HAS_HIERZ        2u
+#define RADEON_PLL_DELAY        4u
+#define RADEON_PLL_DUMMYREADS   8u
+#define RADEON_BROKEN_STENCIL   16u
+
 /* chip.c */
-int  radeon_find(void);                 /* 0: an ATI display device on PCI (bus 0-3); fills radeon's PCI fields */
+int  radeon_find(void);                 /* 0: a Radeon of the R100 family on PCI (bus 0-3); fills radeon's PCI fields */
 int  radeon_map(void);                  /* 0: registers and framebuffer mapped, the memory size read */
 void radeon_unmap(void);
 uint32_t radeon_rd(uint32_t off);
