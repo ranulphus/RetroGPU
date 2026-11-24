@@ -204,6 +204,15 @@ void radeon_cp_flush(void);
 int  radeon_cp_idle_wait(uint32_t timeout_us);
 void radeon_cp_stop(void);
 void radeon_cp_forget(void);
+/* A vertex area in conventional memory beside the ring, through the same GART (the transform engine's vertices: the
+ * CPU writes cached memory, the chip fetches it): radeon_cp_varea_want bytes (a multiple of 4 KB) asked for before
+ * radeon_cp_init; radeon_cp_varea NULL when there is none (not asked, or DOS hadn't the room). Fences say when the
+ * chip is past what was queued: radeon_cp_fence after it, radeon_cp_fence_wait (0, or -1 at the time-out). */
+extern uint32_t radeon_cp_varea_want;
+extern uint8_t *radeon_cp_varea;
+extern uint32_t radeon_cp_varea_gart, radeon_cp_varea_bytes;
+uint32_t radeon_cp_fence(void);
+int  radeon_cp_fence_wait(uint32_t f, uint32_t timeout_us);
 void radeon_cp_peek(uint32_t *rp, uint32_t *wp, const volatile uint32_t **base, uint32_t *dwords);
 void radeon_out(uint32_t reg, uint32_t v);      /* a drawing-engine register, either way */
 /* (engine2d.c) Bytes into video memory through the command stream, ordered with the drawing around them: texture

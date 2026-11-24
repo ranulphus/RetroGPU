@@ -133,7 +133,67 @@ static void read_normal(const dgl_array *a, GLint i, float out[3])
 }
 
 /* Transform one input vertex (object position + attributes) to clip space. */
-void dgl_transform(const dgl_vin *in, dgl_cvtx *o)
+/* The texture coordinates' rarer forms out of line, so the plain path stays as compact as before X2 (the P3's
+ * instruction cache): r carried (a cube map, glTexCoord3/4) and generated coordinates. */
+static __attribute__((noinline)) void tex_with_r(const dgl_vin *in, dgl_cvtx *o)
+{
+    /* s, t and r (q already divided out at glTexCoord): through the texture matrix where it isn't the identity.
+     * (No arrays, no float compares: X2's first form cost GLQuake a third more in the vertex stage on the P3.) */
+    float r0 = in->texr[0], r1 = in->texr[1];
+    if (dgl_gl.tex_identity) {
+        o->s = in->tex[0]; o->t = in->tex[1]; o->tr = r0;
+    } else {
+        const float *t = dgl_gl.tex.stack[dgl_gl.tex.depth - 1].m;
+        float q = t[3] * in->tex[0] + t[7] * in->tex[1] + t[11] * r0 + t[15];
+        q = q != 0 ? q : 1;
+        o->s = (t[0] * in->tex[0] + t[4] * in->tex[1] + t[8] * r0 + t[12]) / q;
+        o->t = (t[1] * in->tex[0] + t[5] * in->tex[1] + t[9] * r0 + t[13]) / q;
+        o->tr = (t[2] * in->tex[0] + t[6] * in->tex[1] + t[10] * r0 + t[14]) / q;
+    }
+    if (dgl_gl.tex1_identity) {
+        o->s1 = in->tex1[0]; o->t1 = in->tex1[1]; o->tr1 = r1;
+    } else {
+        const float *t = dgl_gl.tex1.stack[dgl_gl.tex1.depth - 1].m;
+        float q = t[3] * in->tex1[0] + t[7] * in->tex1[1] + t[11] * r1 + t[15];
+        q = q != 0 ? q : 1;
+        o->s1 = (t[0] * in->tex1[0] + t[4] * in->tex1[1] + t[8] * r1 + t[12]) / q;
+        o->t1 = (t[1] * in->tex1[0] + t[5] * in->tex1[1] + t[9] * r1 + t[13]) / q;
+        o->tr1 = (t[2] * in->tex1[0] + t[6] * in->tex1[1] + t[10] * r1 + t[14]) / q;
+    }
+}
+
+static __attribute__((noinline)) void tex_generated(const dgl_vin *in, dgl_cvtx *o)
+{
+    const float *mv = dgl_gl.mv.stack[dgl_gl.mv.depth - 1].m;
+    const float *p = in->pos;
+    /* Generated coordinates (texgen.c): s, t, r and q made before the texture matrix, q dividing again. */
+    float c0[4] = { in->tex[0], in->tex[1], dgl_gl.texr_used ? in->texr[0] : 0.0f, 1 },
+          c1[4] = { in->tex1[0], in->tex1[1], dgl_gl.texr_used ? in->texr[1] : 0.0f, 1 };
+    float pe[4], ne[3];
+    int k, u;
+    for (k = 0; k < 4; k++)
+        pe[k] = mv[k] * p[0] + mv[4 + k] * p[1] + mv[8 + k] * p[2] + mv[12 + k] * p[3];
+    dgl_eye_normal(dgl_gl.nrm_used ? in->nrm : dgl_gl.cur_normal, ne);
+    if (dgl_gl.texgen_on[0])
+        dgl_texgen_vertex(0, in, pe, ne, c0);
+    if (dgl_gl.texgen_on[1])
+        dgl_texgen_vertex(1, in, pe, ne, c1);
+    for (u = 0; u < 2; u++) {
+        const float *c = u ? c1 : c0, *t = u ? dgl_gl.tex1.stack[dgl_gl.tex1.depth - 1].m
+                                             : dgl_gl.tex.stack[dgl_gl.tex.depth - 1].m;
+        float q = t[3] * c[0] + t[7] * c[1] + t[11] * c[2] + t[15] * c[3], s, tt, r;
+        q = q != 0 ? q : 1;
+        s = (t[0] * c[0] + t[4] * c[1] + t[8] * c[2] + t[12] * c[3]) / q;
+        tt = (t[1] * c[0] + t[5] * c[1] + t[9] * c[2] + t[13] * c[3]) / q;
+        r = (t[2] * c[0] + t[6] * c[1] + t[10] * c[2] + t[14] * c[3]) / q;
+        if (u)
+            o->s1 = s, o->t1 = tt, o->tr1 = r;
+        else
+            o->s = s, o->t = tt, o->tr = r;
+    }
+}
+
+MGA_HOT void dgl_transform(const dgl_vin *in, dgl_cvtx *o)
 {
     const dgl_mat4 *m = dgl_mvp();
     const float *mv = dgl_gl.mv.stack[dgl_gl.mv.depth - 1].m;
@@ -143,7 +203,12 @@ void dgl_transform(const dgl_vin *in, dgl_cvtx *o)
     o->z = m->m[2] * p[0] + m->m[6] * p[1] + m->m[10] * p[2] + m->m[14] * p[3];
     o->w = m->m[3] * p[0] + m->m[7] * p[1] + m->m[11] * p[2] + m->m[15] * p[3];
     o->r = in->col[0]; o->g = in->col[1]; o->b = in->col[2]; o->a = in->col[3];
-    if (!(dgl_gl.texgen_on[0] | dgl_gl.texgen_on[1] | dgl_gl.texr_used)) {
+    if (__builtin_expect(dgl_gl.texgen_on[0] | dgl_gl.texgen_on[1] | dgl_gl.texr_used, 0)) {
+        if (dgl_gl.texgen_on[0] | dgl_gl.texgen_on[1])
+            tex_generated(in, o);
+        else
+            tex_with_r(in, o);
+    } else {
         /* Only s and t ever given (GLQuake and most programs): the code before X2, r zero (read only by a cube
          * map's units, and enabling one sets texr_used). */
         o->tr = o->tr1 = 0.0f;
@@ -165,60 +230,10 @@ void dgl_transform(const dgl_vin *in, dgl_cvtx *o)
             o->s1 = (t[0] * in->tex1[0] + t[4] * in->tex1[1] + t[12]) / q;
             o->t1 = (t[1] * in->tex1[0] + t[5] * in->tex1[1] + t[13]) / q;
         }
-    } else if (!(dgl_gl.texgen_on[0] | dgl_gl.texgen_on[1])) {
-        /* s, t and r (q already divided out at glTexCoord): through the texture matrix where it isn't the identity.
-         * (No arrays, no float compares: X2's first form cost GLQuake a third more in the vertex stage on the P3.) */
-        float r0 = in->texr[0], r1 = in->texr[1];
-        if (dgl_gl.tex_identity) {
-            o->s = in->tex[0]; o->t = in->tex[1]; o->tr = r0;
-        } else {
-            const float *t = dgl_gl.tex.stack[dgl_gl.tex.depth - 1].m;
-            float q = t[3] * in->tex[0] + t[7] * in->tex[1] + t[11] * r0 + t[15];
-            q = q != 0 ? q : 1;
-            o->s = (t[0] * in->tex[0] + t[4] * in->tex[1] + t[8] * r0 + t[12]) / q;
-            o->t = (t[1] * in->tex[0] + t[5] * in->tex[1] + t[9] * r0 + t[13]) / q;
-            o->tr = (t[2] * in->tex[0] + t[6] * in->tex[1] + t[10] * r0 + t[14]) / q;
-        }
-        if (dgl_gl.tex1_identity) {
-            o->s1 = in->tex1[0]; o->t1 = in->tex1[1]; o->tr1 = r1;
-        } else {
-            const float *t = dgl_gl.tex1.stack[dgl_gl.tex1.depth - 1].m;
-            float q = t[3] * in->tex1[0] + t[7] * in->tex1[1] + t[11] * r1 + t[15];
-            q = q != 0 ? q : 1;
-            o->s1 = (t[0] * in->tex1[0] + t[4] * in->tex1[1] + t[8] * r1 + t[12]) / q;
-            o->t1 = (t[1] * in->tex1[0] + t[5] * in->tex1[1] + t[9] * r1 + t[13]) / q;
-            o->tr1 = (t[2] * in->tex1[0] + t[6] * in->tex1[1] + t[10] * r1 + t[14]) / q;
-        }
-    } else {
-        /* Generated coordinates (texgen.c): s, t, r and q made before the texture matrix, q dividing again. */
-        float c0[4] = { in->tex[0], in->tex[1], dgl_gl.texr_used ? in->texr[0] : 0.0f, 1 },
-              c1[4] = { in->tex1[0], in->tex1[1], dgl_gl.texr_used ? in->texr[1] : 0.0f, 1 };
-        float pe[4], ne[3];
-        int k, u;
-        for (k = 0; k < 4; k++)
-            pe[k] = mv[k] * p[0] + mv[4 + k] * p[1] + mv[8 + k] * p[2] + mv[12 + k] * p[3];
-        dgl_eye_normal(dgl_gl.nrm_used ? in->nrm : dgl_gl.cur_normal, ne);
-        if (dgl_gl.texgen_on[0])
-            dgl_texgen_vertex(0, in, pe, ne, c0);
-        if (dgl_gl.texgen_on[1])
-            dgl_texgen_vertex(1, in, pe, ne, c1);
-        for (u = 0; u < 2; u++) {
-            const float *c = u ? c1 : c0, *t = u ? dgl_gl.tex1.stack[dgl_gl.tex1.depth - 1].m
-                                                 : dgl_gl.tex.stack[dgl_gl.tex.depth - 1].m;
-            float q = t[3] * c[0] + t[7] * c[1] + t[11] * c[2] + t[15] * c[3], s, tt, r;
-            q = q != 0 ? q : 1;
-            s = (t[0] * c[0] + t[4] * c[1] + t[8] * c[2] + t[12] * c[3]) / q;
-            tt = (t[1] * c[0] + t[5] * c[1] + t[9] * c[2] + t[13] * c[3]) / q;
-            r = (t[2] * c[0] + t[6] * c[1] + t[10] * c[2] + t[14] * c[3]) / q;
-            if (u)
-                o->s1 = s, o->t1 = tt, o->tr1 = r;
-            else
-                o->s = s, o->t = tt, o->tr = r;
-        }
     }
     /* Eye distance for fog: -z_eye (PRD §7). */
     o->eye_d = dgl_gl.fog ? -(mv[2] * p[0] + mv[6] * p[1] + mv[10] * p[2] + mv[14] * p[3]) : 0.0f;
-    if (dgl_gl.lighting)
+    if (__builtin_expect(dgl_gl.lighting, 0))
         dgl_light_vertex(in, o);
 }
 
@@ -248,7 +263,7 @@ static void plan_one(const dgl_array *a, int on, aplan *o)
 
 /* Immediate mode's vertices (glEnd) as arrays, for the fast path: the
  * values fetch() would read from them are these. */
-static void plan_imm(const dgl_vin *v, GLsizei n)
+MGA_HOT static void plan_imm(const dgl_vin *v, GLsizei n)
 {
     GLsizei i;
     pl_v.p = (const unsigned char *)v->pos; pl_v.stride = sizeof *v; pl_v.type = GL_FLOAT; pl_v.size = 4; pl_v.on = 1;
@@ -387,7 +402,7 @@ static vcache vc;
 dgl_cvtx dgl_vslot[DGL_VSLOTS];
 unsigned char dgl_vslot_sink[DGL_VSLOTS];
 
-static const dgl_cvtx *get(GLint idx, const dgl_vin *imm)
+MGA_HOT static const dgl_cvtx *get(GLint idx, const dgl_vin *imm)
 {
     unsigned slot = (unsigned)idx & (VCACHE - 1);
     dgl_vin in;
@@ -452,13 +467,19 @@ static void tri_extra(dgl_cvtx *v)
         dgl_sink.triangle(&v[0], &v[1], &v[2], &v[3]);
 }
 
-static void tri(GLint a, GLint b, GLint c, GLint prov, const dgl_vin *imm)
+/* (out of line: tri_extra's clipping arrays inline made tri's frame 1.5 KB and its code three times the size) */
+static __attribute__((noinline)) void tri_slow_path(GLint a, GLint b, GLint c, GLint prov, const dgl_vin *imm)
+{
+    dgl_cvtx v[4];
+    v[0] = *get(a, imm); v[1] = *get(b, imm); v[2] = *get(c, imm); v[3] = *get(prov, imm);
+    tri_extra(v);
+}
+
+MGA_HOT static void tri(GLint a, GLint b, GLint c, GLint prov, const dgl_vin *imm)
 {
 #define CLASH(x, y) ((x) != (y) && !(((x) ^ (y)) & (VCACHE - 1)))
-    if (tri_slow && dgl_sink.triangle) {
-        dgl_cvtx v[4];
-        v[0] = *get(a, imm); v[1] = *get(b, imm); v[2] = *get(c, imm); v[3] = *get(prov, imm);
-        tri_extra(v);
+    if (__builtin_expect(tri_slow, 0) && dgl_sink.triangle) {
+        tri_slow_path(a, b, c, prov, imm);
         return;
     }
     if (!CLASH(a, b) && !CLASH(a, c) && !CLASH(b, c)) {
@@ -475,7 +496,7 @@ static void tri(GLint a, GLint b, GLint c, GLint prov, const dgl_vin *imm)
 #undef CLASH
 }
 
-void dgl_tri_general(GLint a, GLint b, GLint c, GLint provoking)
+MGA_HOT void dgl_tri_general(GLint a, GLint b, GLint c, GLint provoking)
 {
     tri(a, b, c, provoking, NULL);
 }
@@ -497,7 +518,7 @@ void dgl_vertex_of(GLint i, dgl_vin *v)
         fetch(i, v);
 }
 
-int dgl_poly_general(const GLint *ids, int n, GLint provoking)
+MGA_HOT int dgl_poly_general(const GLint *ids, int n, GLint provoking)
 {
     dgl_cvtx v[DGL_POLY_MAX], pv;
     int i;
@@ -532,7 +553,7 @@ static void point(GLint a, const dgl_vin *imm)
         dgl_sink.point(&v);
 }
 
-static void assemble(GLenum mode, GLsizei count, const GLint *idx, GLint first, const dgl_vin *imm)
+MGA_HOT static void assemble(GLenum mode, GLsizei count, const GLint *idx, GLint first, const dgl_vin *imm)
 {
     GLsizei i;
 #define I(k) (idx ? idx[k] : first + (k))
@@ -551,7 +572,9 @@ static void assemble(GLenum mode, GLsizei count, const GLint *idx, GLint first, 
         plan_imm(imm, count);
     else
         plan_arrays();
-    clip_user = dgl_clip_user_begin();
+    clip_user = dgl_gl.clip_enabled ? dgl_clip_user_begin() : 0;    /* (no call into texgen.c's code without planes:
+                                                                     * each draw's call there cost the P3 its
+                                                                     * instruction-cache lines) */
     tri_slow = clip_user || (dgl_gl.lighting && dgl_gl.light_two_side);
     cur_imm = imm;
     if (dgl_sink.tnl && dgl_sink.tnl(mode, count, idx, first)) {
@@ -620,7 +643,7 @@ static void assemble(GLenum mode, GLsizei count, const GLint *idx, GLint first, 
         dgl_sink.end();
 }
 
-void dgl_assemble(GLenum mode, GLsizei count, const GLint *idx, GLint first, const dgl_vin *imm)
+MGA_HOT void dgl_assemble(GLenum mode, GLsizei count, const GLint *idx, GLint first, const dgl_vin *imm)
 {
     PROF_SCOPE(PROF_D_XFORM);
     DGL_FPU_ENTER();
@@ -672,7 +695,7 @@ void APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum type, const GLvo
 /* ---- Immediate mode (D6): the same stream from a vertex buffer -------- */
 static struct { int active; GLenum mode; dgl_vin *v; GLsizei n, cap; } imm;
 
-void APIENTRY glBegin(GLenum mode)
+MGA_HOT void APIENTRY glBegin(GLenum mode)
 {
     if (imm.active) { dgl_gl_error(GL_INVALID_OPERATION); return; }
     if (!valid_mode(mode)) { dgl_gl_error(GL_INVALID_ENUM); return; }
@@ -683,7 +706,16 @@ void dgl_imm_vertex(float x, float y, float z, float w);
 
 int dgl_ablate;
 
-static void imm_vertex(float x, float y, float z, float w)
+/* (a normal and r given: out of line, as imm_vertex runs for every immediate-mode vertex) */
+static __attribute__((noinline)) void imm_extra(dgl_vin *v)
+{
+    if (dgl_gl.nrm_used)                /* (not yet given: left unwritten, the readers take GL's defaults) */
+        memcpy(v->nrm, dgl_gl.cur_normal, sizeof v->nrm);
+    if (dgl_gl.texr_used)
+        memcpy(v->texr, dgl_gl.cur_texr, sizeof v->texr);
+}
+
+MGA_HOT static void imm_vertex(float x, float y, float z, float w)
 {
     dgl_vin *v;
     if (!imm.active || (dgl_ablate & 8))
@@ -700,13 +732,11 @@ static void imm_vertex(float x, float y, float z, float w)
     memcpy(v->col, dgl_gl.cur_color, sizeof v->col);
     memcpy(v->tex, dgl_gl.cur_tex, sizeof v->tex);
     memcpy(v->tex1, dgl_gl.cur_tex1, sizeof v->tex1);
-    if (dgl_gl.nrm_used)                /* (not yet given: left unwritten, the readers take GL's defaults) */
-        memcpy(v->nrm, dgl_gl.cur_normal, sizeof v->nrm);
-    if (dgl_gl.texr_used)
-        memcpy(v->texr, dgl_gl.cur_texr, sizeof v->texr);
+    if (__builtin_expect(dgl_gl.nrm_used | dgl_gl.texr_used, 0))
+        imm_extra(v);
 }
 
-void APIENTRY glEnd(void)
+MGA_HOT void APIENTRY glEnd(void)
 {
     if (!imm.active) { dgl_gl_error(GL_INVALID_OPERATION); return; }
     imm.active = 0;
@@ -717,7 +747,7 @@ void APIENTRY glEnd(void)
     dgl_assemble(imm.mode, imm.n, NULL, 0, imm.v);
 }
 
-void dgl_imm_vertex(float x, float y, float z, float w) { imm_vertex(x, y, z, w); }
+MGA_HOT void dgl_imm_vertex(float x, float y, float z, float w) { imm_vertex(x, y, z, w); }
 
 /* glArrayElement: the attribute commands for element i of each enabled array,
  * then (with the vertex array enabled) the vertex itself, as GL 1.1 defines. */
@@ -749,10 +779,10 @@ void APIENTRY glArrayElement(GLint i)
     }
 }
 
-void APIENTRY glVertex3f(GLfloat x, GLfloat y, GLfloat z) { imm_vertex(x, y, z, 1); }
-void APIENTRY glVertex2f(GLfloat x, GLfloat y) { imm_vertex(x, y, 0, 1); }
-void APIENTRY glVertex3fv(const GLfloat *v) { imm_vertex(v[0], v[1], v[2], 1); }
-void APIENTRY glTexCoord2f(GLfloat s, GLfloat t)
+MGA_HOT void APIENTRY glVertex3f(GLfloat x, GLfloat y, GLfloat z) { imm_vertex(x, y, z, 1); }
+MGA_HOT void APIENTRY glVertex2f(GLfloat x, GLfloat y) { imm_vertex(x, y, 0, 1); }
+MGA_HOT void APIENTRY glVertex3fv(const GLfloat *v) { imm_vertex(v[0], v[1], v[2], 1); }
+MGA_HOT void APIENTRY glTexCoord2f(GLfloat s, GLfloat t)
 {
     dgl_gl.cur_tex[0] = s;
     dgl_gl.cur_tex[1] = t;
@@ -760,15 +790,15 @@ void APIENTRY glTexCoord2f(GLfloat s, GLfloat t)
         dgl_gl.cur_texr[0] = 0;
 }
 
-void APIENTRY glColor4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a)
+MGA_HOT void APIENTRY glColor4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a)
 {
     dgl_gl.cur_color[0] = r; dgl_gl.cur_color[1] = g; dgl_gl.cur_color[2] = b; dgl_gl.cur_color[3] = a;
     if (dgl_gl.color_material)
         dgl_color_material_apply();
 }
-void APIENTRY glColor3f(GLfloat r, GLfloat g, GLfloat b) { glColor4f(r, g, b, 1.0f); }
-void APIENTRY glColor4ub(GLubyte r, GLubyte g, GLubyte b, GLubyte a)
+MGA_HOT void APIENTRY glColor3f(GLfloat r, GLfloat g, GLfloat b) { glColor4f(r, g, b, 1.0f); }
+MGA_HOT void APIENTRY glColor4ub(GLubyte r, GLubyte g, GLubyte b, GLubyte a)
 {
     glColor4f(DGL_UB(r), DGL_UB(g), DGL_UB(b), DGL_UB(a));
 }
-void APIENTRY glColor3ub(GLubyte r, GLubyte g, GLubyte b) { glColor4ub(r, g, b, 255); }
+MGA_HOT void APIENTRY glColor3ub(GLubyte r, GLubyte g, GLubyte b) { glColor4ub(r, g, b, 255); }

@@ -21,6 +21,10 @@ static uint32_t ring_dw, ring_mask, wptr, wptr_given, rptr_seen;
 static void *block;
 static uint32_t saved_aic, saved_bus;
 uint32_t radeon_cp_gart_start;          /* where the GART's range begins in the chip's address space (0: none) */
+uint32_t radeon_cp_varea_want;          /* bytes of vertex area to ask for at the next radeon_cp_init (0: none) */
+uint8_t *radeon_cp_varea;               /* the vertex area as the CPU writes it (NULL: none) */
+uint32_t radeon_cp_varea_gart, radeon_cp_varea_bytes;  /* ... where the chip reads it, and its size */
+static uint32_t fence_seq;
 void (*radeon_cp_trace)(const char *stage, uint32_t a, uint32_t b);    /* (a test's log of each step, before it) */
 #define TRACE(s, a, b) do { if (radeon_cp_trace) radeon_cp_trace(s, a, b); } while (0)
 
@@ -80,6 +84,8 @@ static void release(void)
     radeon_wr(RADEON_BUS_CNTL, saved_bus);
     sys_dos_free(block);
     block = NULL;
+    radeon_cp_varea = NULL;
+    radeon_cp_varea_gart = radeon_cp_varea_bytes = 0;
 }
 
 static void stop_now(void)
@@ -97,7 +103,7 @@ int radeon_cp_init(const uint32_t *pairs, uint32_t bytes)
 {
     int i, l2qw = 0, pages;
     uint16_t seg;
-    uint32_t lin, tbl, rb, spare, t0, gart, rp;
+    uint32_t lin, tbl, rb, spare, t0, gart, rp, va, vbytes = radeon_cp_varea_want & ~4095u;
     volatile uint32_t *t;
     uint8_t *blk;
     if (!radeon.mmio || (bytes & (bytes - 1)) || bytes < 4096u || bytes > (1u << 18))
@@ -112,7 +118,14 @@ int radeon_cp_init(const uint32_t *pairs, uint32_t bytes)
     radeon_engine_reset();
     if (engine_idle_wait(500000u) != 0)
         return -1;
-    blk = (uint8_t *)sys_dos_alloc(bytes + 4096u + 4096u + 4096u, &seg);
+    if (vbytes > (1u << 20) || bytes + vbytes > GART_BYTES)
+        vbytes = 0;
+    /* (the vertex area after the spare page; without it when DOS hasn't the room) */
+    blk = (uint8_t *)sys_dos_alloc(bytes + vbytes + 4096u + 4096u + 4096u, &seg);
+    if (!blk && vbytes) {
+        vbytes = 0;
+        blk = (uint8_t *)sys_dos_alloc(bytes + 4096u + 4096u + 4096u, &seg);
+    }
     if (!blk)
         return -1;
     block = blk;
@@ -120,10 +133,13 @@ int radeon_cp_init(const uint32_t *pairs, uint32_t bytes)
     tbl = (lin + 4095u) & ~4095u;
     rb = tbl + 4096u;
     spare = rb + bytes;
+    va = spare + 4096u;
     t = (volatile uint32_t *)(blk + (tbl - lin));
     pages = (int)(bytes / 4096u);
-    for (i = 0; i < 1024; i++)                  /* (entries past the ring: its first page, never anything else's) */
-        t[i] = i < pages ? rb + (uint32_t)i * 4096u : rb;
+    for (i = 0; i < 1024; i++)                  /* (the ring, the vertex area after it; entries past both: the ring's
+                                                 * first page, never anything else's) */
+        t[i] = i < pages ? rb + (uint32_t)i * 4096u
+             : i < pages + (int)(vbytes / 4096u) ? va + (uint32_t)(i - pages) * 4096u : rb;
     if (!pairs)
         pairs = radeon_cp_microcode;
     TRACE("microcode: table, ring (physical)", tbl, rb);
@@ -155,6 +171,8 @@ int radeon_cp_init(const uint32_t *pairs, uint32_t bytes)
     radeon_wr(RADEON_CP_RB_CNTL, RADEON_RB_NO_UPDATE | 1u << 18 | 9u << 8 | (uint32_t)l2qw);
     radeon_wr(RADEON_SCRATCH_ADDR, spare + 32u);
     radeon_wr(RADEON_SCRATCH_UMSK, 0);
+    radeon_wr(RADEON_GUI_SCRATCH_REG1, 0);      /* (the fences count from 0) */
+    fence_seq = 0;
     radeon_wr(RADEON_BUS_CNTL, saved_bus & ~RADEON_BUS_MASTER_DIS);
     if (engine_idle_wait(500000u) != 0) {
         ring = NULL;
@@ -167,6 +185,9 @@ int radeon_cp_init(const uint32_t *pairs, uint32_t bytes)
     radeon_wr(RADEON_CP_CSQ_CNTL, RADEON_CSQ_PRIBM_INDBM);
     running = 1;
     radeon_cp_gart_start = gart;
+    radeon_cp_varea = vbytes ? blk + (va - lin) : NULL;
+    radeon_cp_varea_gart = vbytes ? gart + bytes : 0;   /* (the table's entry for its first page: pages) */
+    radeon_cp_varea_bytes = vbytes;
     /* The first fetch: sixteen no-ops, the read index past them within 50 ms. */
     wptr = (wptr + 16u) & ring_mask;
     radeon_wr(RADEON_CP_RB_WPTR, wptr);
@@ -199,7 +220,7 @@ void radeon_cp_peek(uint32_t *rp, uint32_t *wp, const volatile uint32_t **base, 
 
 /* The ring's new dwords to the chip (the ring is ordinary memory: x86 keeps these stores before the uncached write
  * of the index; the read after it posts the write, as the DRM's COMMIT_RING). */
-void radeon_cp_flush(void)
+MGA_HOT void radeon_cp_flush(void)
 {
     if (!running || wptr == wptr_given)
         return;
@@ -248,7 +269,7 @@ void radeon_cp_out(const uint32_t *d, int n)
 
 /* n contiguous dwords at the write index, for a caller to fill and then radeon_cp_advance(n): the end of the ring
  * padded with no-ops first when they wouldn't fit before it. NULL when the command processor isn't running. */
-uint32_t *radeon_cp_reserve(int n)
+MGA_HOT uint32_t *radeon_cp_reserve(int n)
 {
     if (!running || n <= 0 || n > (int)ring_dw / 2)
         return NULL;
@@ -264,14 +285,14 @@ uint32_t *radeon_cp_reserve(int n)
     return (uint32_t *)&ring[wptr];
 }
 
-void radeon_cp_advance(int n)
+MGA_HOT void radeon_cp_advance(int n)
 {
     wptr = (wptr + (uint32_t)n) & ring_mask;
     if (((wptr - wptr_given) & ring_mask) >= COMMIT_DW)
         radeon_cp_flush();
 }
 
-void radeon_cp_reg(uint32_t reg, uint32_t v)
+MGA_HOT void radeon_cp_reg(uint32_t reg, uint32_t v)
 {
     uint32_t p[2];
     p[0] = RADEON_CP_PACKET0(reg, 0), p[1] = v;
@@ -280,7 +301,7 @@ void radeon_cp_reg(uint32_t reg, uint32_t v)
 
 /* A drawing-engine register: a packet while the command processor runs, else the register itself with room in
  * the FIFO first. */
-void radeon_out(uint32_t reg, uint32_t v)
+MGA_HOT void radeon_out(uint32_t reg, uint32_t v)
 {
     if (running) {
         radeon_cp_reg(reg, v);
@@ -329,4 +350,33 @@ void radeon_cp_stop(void)
 }
 
 /* (after a fault: the layer's own state only) */
-void radeon_cp_forget(void) { running = 0; ring = NULL; }
+void radeon_cp_forget(void)
+{
+    running = 0;
+    ring = NULL;
+    radeon_cp_varea = NULL;
+    radeon_cp_varea_gart = radeon_cp_varea_bytes = 0;
+}
+
+/* A fence: the command processor writes its number into a scratch register when it reaches it, so everything queued
+ * before (a draw's vertices fetched from the vertex area: the DRM ages its vertex buffers the same way) is done
+ * with once the register shows it. */
+uint32_t radeon_cp_fence(void)
+{
+    if (!running)
+        return 0;
+    radeon_cp_reg(RADEON_GUI_SCRATCH_REG1, ++fence_seq);
+    return fence_seq;
+}
+
+int radeon_cp_fence_wait(uint32_t f, uint32_t timeout_us)
+{
+    uint32_t t0 = sys_time_us();
+    if (!running || !f)
+        return 0;
+    radeon_cp_flush();
+    while ((int32_t)(radeon_rd(RADEON_GUI_SCRATCH_REG1) - f) < 0)
+        if (sys_time_us() - t0 > timeout_us)
+            return -1;
+    return 0;
+}

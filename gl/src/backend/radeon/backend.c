@@ -218,7 +218,7 @@ static int room(uint32_t size, uint32_t *block, const dgl_texture *keep)
 }
 
 /* The texture's copy, made or made again when its levels changed. NULL: draw untextured. */
-static rtex *prepare(dgl_texture *t)
+MGA_HOT static rtex *prepare(dgl_texture *t)
 {
     PROF_SCOPE(PROF_D_TEX);
     rtex *x = (rtex *)t->be;
@@ -369,7 +369,7 @@ static int any_cube;                    /* (a chip unit draws one: project() wri
 static float vx_s, vx_o, vy_s, vy_o, vz_s, vz_o;    /* the viewport's scale and offset, from the last validate */
 
 /* 0..1 to a byte without control-word switches (the TNT2 back end's: one add, an integer clamp). */
-static uint32_t ub(float v)
+MGA_HOT static uint32_t ub(float v)
 {
     union { float f; int32_t i; } u;
     int32_t i;
@@ -381,7 +381,7 @@ static uint32_t ub(float v)
 /* A vertex's colour packed, the last one's kept (GLQuake's world: one colour a polygon, or none). */
 static uint32_t col_key[4], col_val, col_set;
 
-static uint32_t colour_of(const dgl_cvtx *c)
+MGA_HOT static uint32_t colour_of(const dgl_cvtx *c)
 {
     uint32_t k[4];
     memcpy(k, &c->r, sizeof k);         /* (r, g, b, a: one after another in dgl_cvtx) */
@@ -474,7 +474,7 @@ static uint32_t alpha_arg(const carg *g, int hw_unit, int first)
 
 /* The register word for a combine: Mesa's forms (radeonUpdateTextureEnv's step 2). arg() gives slot A's value and
  * the complement at bit 15; shifts of 0, 5, 10 (colour) or 0, 4, 8 (alpha) and 15, 16, 17 place them. */
-static uint32_t combine_word(const comb *c, int alpha, int hw_unit, int first)
+MGA_HOT static uint32_t combine_word(const comb *c, int alpha, int hw_unit, int first)
 {
     const int sh[3] = { 0, alpha ? 4 : 5, alpha ? 8 : 10 };
     uint32_t g[3], w = RADEON_CLAMP_TX, one = 1u << 15;     /* (ZERO complemented) */
@@ -535,7 +535,7 @@ static int src_of(GLenum s, int unit, int *tex_unit)
 
 /* GL's environment for a texture of a family as the two combines (OpenGL 1.3's table 3.24; GL_COMBINE_ARB's own
  * arguments as given). hw: the chip's unit holding GL's unit `unit`'s texture (xlat: GL's unit to the chip's). */
-static void env_combines(int unit, const dgl_texenv *e, int family, comb *rgb, comb *al, const int *xlat)
+MGA_HOT static void env_combines(int unit, const dgl_texenv *e, int family, comb *rgb, comb *al, const int *xlat)
 {
     const carg T = { S_TEX, 0, xlat[unit] }, TA = { S_TEX, 2, xlat[unit] }, P = { S_PREVIOUS, 0, 0 },
                K = { S_CONST, 0, 0 }, Z = { S_ZERO, 0, 0 };
@@ -600,7 +600,67 @@ static void env_combines(int unit, const dgl_texenv *e, int family, comb *rgb, c
 }
 
 /* A chip unit's texture words: its filters and wrap, its format and size, its offset; NULL for no texture. */
-static rtex *unit_words(dgl_texture *t, int hw, int gl_unit)
+/* (unit_words' rarer parts out of line: GLQuake validates on every bind, and the P3's instruction cache holds the
+ * plain path better without them) */
+static __attribute__((noinline)) uint32_t quality_min(dgl_texture *t, int gl_unit, int mip, uint32_t min)
+{
+    /* Anisotropic filtering: the chip's own minifying filters (Mesa's radeonSetTexFilter: they keep the mipmap
+     * choice, not the bilinear one) and its ratio, the next one up (2, 4, 8, 16). */
+    GLfloat a = dgl_tex_aniso_on(t) ? dgl_tex_aniso(t) : 1.0f;
+    if (a > 1.0f) {
+        int linear = t->min_filter == GL_LINEAR || t->min_filter == GL_LINEAR_MIPMAP_NEAREST ||
+                     t->min_filter == GL_LINEAR_MIPMAP_LINEAR;
+        if (!mip)
+            min = linear ? RADEON_MIN_FILTER_ANISO_LINEAR : RADEON_MIN_FILTER_ANISO_NEAREST;
+        else if (t->min_filter == GL_NEAREST_MIPMAP_LINEAR || t->min_filter == GL_LINEAR_MIPMAP_LINEAR)
+            min = RADEON_MIN_FILTER_ANISO_NEAREST_MIP_LINEAR;
+        else
+            min = RADEON_MIN_FILTER_ANISO_NEAREST_MIP_NEAREST;
+        min |= a <= 2.0f ? RADEON_MAX_ANISO_2_TO_1 : a <= 4.0f ? RADEON_MAX_ANISO_4_TO_1
+             : a <= 8.0f ? RADEON_MAX_ANISO_8_TO_1 : RADEON_MAX_ANISO_16_TO_1;
+    }
+    /* The level-of-detail bias: signed 8 bits, a 128th of a level each, -1 to +127/128 (measured on the P3's 7500
+     * by t36 and raw values: 64 gave +0.51, 96 +0.78, 127 +0.99; Mesa's radeonTexEnv takes the positive half as a
+     * 32nd, which draws a quarter of the bias asked for). */
+    if (dgl_tex_lod_bias_on(gl_unit)) {
+        GLfloat b = dgl_tex_lod_bias(gl_unit);
+        int f = (int)(b * 128.0f + (b >= 0 ? 0.5f : -0.5f));
+        f = f > 127 ? 127 : f < -128 ? -128 : f;
+        min |= (uint32_t)(uint8_t)f << RADEON_LOD_BIAS_SHIFT;
+    }
+    return min;
+}
+
+/* A cube map (Mesa's radeonSetTexImages and its state emit): faces 0 to 4 at the CUBIC_OFFSETs, face 5 at TXOFFSET;
+ * faces 1 to 4's sizes in CUBIC_FACES, face 0's and face 5's in TXFORMAT (F5: without it the P3's 7500 drew face 5
+ * as 1 x 1); s, t and r as directions (no shift by whole periods). */
+static __attribute__((noinline)) void cube_words(const rtex *x, int hw)
+{
+    int f;
+    for (f = 0; f < 5; f++)
+        radeon_3d.tex[hw].cubic_off[f] = radeon.fb_location + x->lvoff[f];
+    radeon_3d.tex[hw].txoffset = radeon.fb_location + x->lvoff[5];
+    radeon_3d.tex[hw].txformat |= RADEON_TXFORMAT_CUBIC_MAP_ENABLE | (uint32_t)x->lw << RADEON_TXFORMAT_F5_WIDTH_SHIFT |
+                                  (uint32_t)x->lh << RADEON_TXFORMAT_F5_HEIGHT_SHIFT;
+    radeon_3d.tex[hw].cubic_faces =
+        (uint32_t)x->lw << RADEON_FACE_WIDTH_1_SHIFT | (uint32_t)x->lh << RADEON_FACE_HEIGHT_1_SHIFT |
+        (uint32_t)x->lw << RADEON_FACE_WIDTH_2_SHIFT | (uint32_t)x->lh << RADEON_FACE_HEIGHT_2_SHIFT |
+        (uint32_t)x->lw << RADEON_FACE_WIDTH_3_SHIFT | (uint32_t)x->lh << RADEON_FACE_HEIGHT_3_SHIFT |
+        (uint32_t)x->lw << RADEON_FACE_WIDTH_4_SHIFT | (uint32_t)x->lh << RADEON_FACE_HEIGHT_4_SHIFT;
+}
+
+/* (validate's dot3 case out of line too) */
+static __attribute__((noinline)) uint32_t dot3_alpha(GLenum fn, uint32_t txablend)
+{
+    if (fn == GL_DOT3_RGB_ARB)                  /* (Mesa: the dot product goes to the alpha too unless told not) */
+        return txablend | RADEON_DOT_ALPHA_DONT_REPLICATE;
+    /* (DOT3_RGBA: the P3's 7500 didn't take the product into the alpha with Mesa's words or with the alpha's own
+     * dot3: the alpha's combine draws it) */
+    warn_once(7, "DOT3_RGBA: the alpha drawn by the alpha's combine, not the dot product");
+    return txablend;
+}
+
+MGA_HOT static rtex *unit_words(dgl_texture *t, int hw, int gl_unit)
 {
     rtex *x = t ? prepare(t) : NULL;
     int mip, n;
@@ -620,34 +680,8 @@ static rtex *unit_words(dgl_texture *t, int hw, int gl_unit)
     default: min = RADEON_MIN_FILTER_NEAREST; break;
     }
     n = mip ? x->levels : 1;
-    {
-        /* Anisotropic filtering: the chip's own minifying filters (Mesa's radeonSetTexFilter: they keep the
-         * mipmap choice, not the bilinear one) and its ratio, the next one up (2, 4, 8, 16). */
-        GLfloat a = dgl_tex_aniso_on(t) ? dgl_tex_aniso(t) : 1.0f;
-        if (a > 1.0f) {
-            int linear = t->min_filter == GL_LINEAR || t->min_filter == GL_LINEAR_MIPMAP_NEAREST ||
-                         t->min_filter == GL_LINEAR_MIPMAP_LINEAR;
-            if (!mip)
-                min = linear ? RADEON_MIN_FILTER_ANISO_LINEAR : RADEON_MIN_FILTER_ANISO_NEAREST;
-            else if (t->min_filter == GL_NEAREST_MIPMAP_LINEAR || t->min_filter == GL_LINEAR_MIPMAP_LINEAR)
-                min = RADEON_MIN_FILTER_ANISO_NEAREST_MIP_LINEAR;
-            else
-                min = RADEON_MIN_FILTER_ANISO_NEAREST_MIP_NEAREST;
-            min |= a <= 2.0f ? RADEON_MAX_ANISO_2_TO_1 : a <= 4.0f ? RADEON_MAX_ANISO_4_TO_1
-                 : a <= 8.0f ? RADEON_MAX_ANISO_8_TO_1 : RADEON_MAX_ANISO_16_TO_1;
-        }
-    }
-    {
-        /* The level-of-detail bias: signed 8 bits, a 128th of a level each, -1 to +127/128 (measured on the P3's
-         * 7500 by t36 and raw values: 64 gave +0.51, 96 +0.78, 127 +0.99; Mesa's radeonTexEnv takes the positive
-         * half as a 32nd, which draws a quarter of the bias asked for). */
-        if (dgl_tex_lod_bias_on(gl_unit)) {
-            GLfloat b = dgl_tex_lod_bias(gl_unit);
-            int f = (int)(b * 128.0f + (b >= 0 ? 0.5f : -0.5f));
-            f = f > 127 ? 127 : f < -128 ? -128 : f;
-            min |= (uint32_t)(uint8_t)f << RADEON_LOD_BIAS_SHIFT;
-        }
-    }
+    if (__builtin_expect(dgl_tex_aniso_on(t) | dgl_tex_lod_bias_on(gl_unit), 0))
+        min = quality_min(t, gl_unit, mip, min);
     radeon_3d.tex[hw].txfilter = mag | min | (uint32_t)(n - 1) << RADEON_MAX_MIP_LEVEL_SHIFT |
         (t->wrap_s == GL_REPEAT ? RADEON_CLAMP_S_WRAP : RADEON_CLAMP_S_CLAMP_LAST) |   /* (GL_CLAMP as clamp to the edge) */
         (t->wrap_t == GL_REPEAT ? RADEON_CLAMP_T_WRAP : RADEON_CLAMP_T_CLAMP_LAST);
@@ -656,21 +690,8 @@ static rtex *unit_words(dgl_texture *t, int hw, int gl_unit)
         (uint32_t)hw << 24 | RADEON_TXFORMAT_PERSPECTIVE_ENABLE;       /* (its own coordinates: ST_ROUTE_STQn) */
     radeon_3d.tex[hw].txoffset = radeon.fb_location + x->lvoff[0];
     radeon_3d.tex[hw].cubic_faces = 0;
-    if (x->cube) {
-        /* A cube map (Mesa's radeonSetTexImages and its state emit): faces 0 to 4 at the CUBIC_OFFSETs, face 5 at
-         * TXOFFSET; faces 1 to 4's sizes in CUBIC_FACES, face 0's and face 5's in TXFORMAT (F5: without it the
-         * P3's 7500 drew face 5 as 1 x 1); s, t and r as directions (no shift by whole periods). */
-        int f;
-        for (f = 0; f < 5; f++)
-            radeon_3d.tex[hw].cubic_off[f] = radeon.fb_location + x->lvoff[f];
-        radeon_3d.tex[hw].txoffset = radeon.fb_location + x->lvoff[5];
-        radeon_3d.tex[hw].txformat |= RADEON_TXFORMAT_CUBIC_MAP_ENABLE | (uint32_t)x->lw << RADEON_TXFORMAT_F5_WIDTH_SHIFT |
-                                      (uint32_t)x->lh << RADEON_TXFORMAT_F5_HEIGHT_SHIFT;
-        radeon_3d.tex[hw].cubic_faces =
-            (uint32_t)x->lw << RADEON_FACE_WIDTH_1_SHIFT | (uint32_t)x->lh << RADEON_FACE_HEIGHT_1_SHIFT |
-            (uint32_t)x->lw << RADEON_FACE_WIDTH_2_SHIFT | (uint32_t)x->lh << RADEON_FACE_HEIGHT_2_SHIFT |
-            (uint32_t)x->lw << RADEON_FACE_WIDTH_3_SHIFT | (uint32_t)x->lh << RADEON_FACE_HEIGHT_3_SHIFT |
-            (uint32_t)x->lw << RADEON_FACE_WIDTH_4_SHIFT | (uint32_t)x->lh << RADEON_FACE_HEIGHT_4_SHIFT;
+    if (__builtin_expect(x->cube, 0)) {
+        cube_words(x, hw);
         cube_unit[gl_unit] = 1;
         return x;
     }
@@ -678,7 +699,7 @@ static rtex *unit_words(dgl_texture *t, int hw, int gl_unit)
     return x;
 }
 
-static void validate(void)
+MGA_HOT static void validate(void)
 {
     dgl_texture *t0 = dgl_gl.texture_cube[0] ? dgl_unit_cube(0) : dgl_gl.texture_2d ? dgl_unit_texture(0) : NULL;
     dgl_texture *t1 = dgl_gl.texture_cube[1] ? dgl_unit_cube(1) : dgl_gl.texture_2d1 ? dgl_unit_texture(1) : NULL;
@@ -733,11 +754,8 @@ static void validate(void)
         env_combines(glu, e, x->family, &rgb, &al, xlat);
         c->tex[i].txcblend = combine_word(&rgb, 0, i, i == 0);
         c->tex[i].txablend = combine_word(&al, 1, i, i == 0);
-        if (rgb.fn == GL_DOT3_RGB_ARB)          /* (Mesa: the dot product goes to the alpha too unless told not) */
-            c->tex[i].txablend |= RADEON_DOT_ALPHA_DONT_REPLICATE;
-        else if (rgb.fn == GL_DOT3_RGBA_ARB)    /* (the P3's 7500 didn't take the product into the alpha with Mesa's
-                                                 * words or with the alpha's own dot3: the alpha's combine draws it) */
-            warn_once(7, "DOT3_RGBA: the alpha drawn by the alpha's combine, not the dot product");
+        if (__builtin_expect(rgb.fn == GL_DOT3_RGB_ARB || rgb.fn == GL_DOT3_RGBA_ARB, 0))
+            c->tex[i].txablend = dot3_alpha(rgb.fn, c->tex[i].txablend);
         c->tex[i].tfactor = ub(e->color[3]) << 24 | ub(e->color[0]) << 16 | ub(e->color[1]) << 8 | ub(e->color[2]);
         pp |= i ? RADEON_TEX_1_ENABLE | RADEON_TEX_BLEND_1_ENABLE : RADEON_TEX_0_ENABLE;
     }
@@ -805,7 +823,7 @@ static void validate(void)
 
 /* ---- Drawing ---------------------------------------------------------------- */
 
-static int rb_begin(void)
+MGA_HOT static int rb_begin(void)
 {
     if (!dgl_ctx.active || !rg_radeon.active)
         return 0;
@@ -813,9 +831,9 @@ static int rb_begin(void)
     return 1;
 }
 
-static void rb_end(void) { }
+MGA_HOT static void rb_end(void) { }
 
-static float fog_factor(float d)
+MGA_HOT static float fog_factor(float d)
 {
     float f;
     d = fabsf(d);
@@ -828,7 +846,7 @@ static float fog_factor(float d)
     return f < 0 ? 0 : f > 1 ? 1 : f;
 }
 
-static void project(const dgl_cvtx *c, radeon_vertex *v, const dgl_cvtx *colour)
+MGA_HOT static void project(const dgl_cvtx *c, radeon_vertex *v, const dgl_cvtx *colour)
 {
     float iw = 1.0f / c->w;
     v->x = c->x * iw * vx_s + vx_o;
@@ -925,7 +943,7 @@ static int finish(radeon_vertex *v, int n)
     return 1;
 }
 
-static void draw_triangle(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *c, const dgl_cvtx *prov)
+MGA_HOT static void draw_triangle(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *c, const dgl_cvtx *prov)
 {
     PROF_SCOPE(PROF_D_PROJ);
     dgl_cvtx in[3], out[9];
@@ -999,7 +1017,7 @@ static void fog_split(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *c, c
     fog_split(&ab, &bc, &ca, prov, depth + 1);
 }
 
-static void rb_triangle(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *c, const dgl_cvtx *prov)
+MGA_HOT static void rb_triangle(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *c, const dgl_cvtx *prov)
 {
     if (fogging)
         fog_split(a, b, c, prov, 0);
@@ -1009,7 +1027,7 @@ static void rb_triangle(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *c,
 
 /* A polygon wholly inside the guard band, unfogged, of up to 16 vertices: each vertex projected once and the whole
  * sent as one triangle fan (radeon_poly); else triangle by triangle. */
-static void rb_polygon(const dgl_cvtx *v, int n, const dgl_cvtx *prov)
+MGA_HOT static void rb_polygon(const dgl_cvtx *v, int n, const dgl_cvtx *prov)
 {
     PROF_SCOPE(PROF_D_PROJ);
     radeon_vertex w[16];
@@ -1089,7 +1107,7 @@ static void rb_point(const dgl_cvtx *a)
 }
 
 /* GL_POLYGON whole to rb_polygon (each vertex projected and sent once), as the TNT2 back end's. */
-static int rb_fast(GLenum mode, GLsizei count, const GLint *idx, GLint first)
+MGA_HOT static int rb_fast(GLenum mode, GLsizei count, const GLint *idx, GLint first)
 {
     GLint ids[DGL_POLY_MAX];
     GLsizei i;
@@ -1110,6 +1128,11 @@ static int rb_fast(GLenum mode, GLsizei count, const GLint *idx, GLint first)
 #define VB_BYTES (1u << 20)
 static int tnl_mode = -1;               /* DGL_TNL: 0 off, 1 on (where the chip has the engine) */
 static uint32_t vb_block, vb_used;      /* the vertex area (0: none yet) and how much of it this frame used */
+/* The command processor's vertex area in system memory (radeon_cp_varea, through the GART: the CPU's writes cached,
+ * not across the bus one by one as into video memory), when there is one: two halves, a fence after each half's last
+ * draw, so a half is written again only once the chip has fetched what was in it. */
+static uint32_t va_used, va_fence[2];
+static int va_half;
 static float tnl_mvp[16], tnl_vp[6];
 static uint32_t tnl_tris;               /* triangles the engine transformed (DGL-STAT's tnl/s) */
 static int tnl_mvp_ok;
@@ -1239,23 +1262,41 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
 #undef IX
     if (!ni)
         return 1;
-    /* Room in the vertex area (made at the first draw; used again from its start after a sync once full). */
     bytes = (uint32_t)nv * (uint32_t)dwords * 4u;
-    if (bytes > VB_BYTES)
-        return 0;
-    if (!vb_block && room(VB_BYTES + 32u, &vb_block, NULL) != 0) {
-        vb_block = 0;
-        tnl_mode = 0;
-        warn_once(8, "no video memory for the transform engine's vertices: transformed by the CPU");
-        return 0;
+    if (radeon_cp_varea) {
+        /* Room in the system-memory area: this half, else the other once its fence has passed. */
+        uint32_t half = radeon_cp_varea_bytes / 2u;
+        if (bytes > half)
+            return 0;
+        if (va_used + bytes > half) {
+            va_fence[va_half] = radeon_cp_fence();
+            va_half ^= 1;
+            va_used = 0;
+            if (va_fence[va_half] && radeon_cp_fence_wait(va_fence[va_half], 1000000u) != 0)
+                warn_once(9, "the transform engine's vertex area: a fence not passed in a second");
+        }
+        addr = radeon_cp_varea_gart + (uint32_t)va_half * half + va_used;
+        dst = (volatile uint32_t *)(radeon_cp_varea + (uint32_t)va_half * half + va_used);
+        va_used += (bytes + 31u) & ~31u;
+    } else {
+        /* Room in the vertex area in video memory (made at the first draw; used again from its start after a sync
+         * once full). */
+        if (bytes > VB_BYTES)
+            return 0;
+        if (!vb_block && room(VB_BYTES + 32u, &vb_block, NULL) != 0) {
+            vb_block = 0;
+            tnl_mode = 0;
+            warn_once(8, "no video memory for the transform engine's vertices: transformed by the CPU");
+            return 0;
+        }
+        if (vb_used + bytes > VB_BYTES) {
+            radeon_sync(1000000);
+            vb_used = 0;
+        }
+        addr = ((vb_block + 31u) & ~31u) + vb_used;
+        vb_used += (bytes + 31u) & ~31u;
+        dst = (volatile uint32_t *)(radeon.fb + addr);
     }
-    if (vb_used + bytes > VB_BYTES) {
-        radeon_sync(1000000);
-        vb_used = 0;
-    }
-    addr = ((vb_block + 31u) & ~31u) + vb_used;
-    vb_used += (bytes + 31u) & ~31u;
-    dst = (volatile uint32_t *)(radeon.fb + addr);
     for (i = 0; i < nv; i++, dst += dwords) {
         union { float f; uint32_t u; } c;
         dgl_vertex_of(vmin + i, &v);
@@ -1342,7 +1383,9 @@ static void install(void)
     dgl_sink.begin = rb_begin;
     dgl_sink.triangle = rb_triangle;
     dgl_sink.fast = rb_fast;
-    dgl_sink.tnl = rb_tnl;
+    /* (the hook only where the engine will draw: every draw's call into it cost GLQuake instruction-cache lines on the
+     * P3, with DGL_TNL=0 or on a 7000 too) */
+    dgl_sink.tnl = dgl_radeon_tnl_active() ? rb_tnl : NULL;
     dgl_sink.polygon = rb_polygon;
     dgl_sink.line = rb_line;
     dgl_sink.point = rb_point;
@@ -1453,6 +1496,7 @@ static void tex_reset(uint32_t start, uint32_t end)
     dgl_texture *t;
     valid_ok = 0;
     vb_block = 0, vb_used = 0, tnl_mvp_ok = 0;     /* (a new context: the vertex area and the engine's state anew) */
+    va_used = 0, va_half = 0, va_fence[0] = va_fence[1] = 0;
     memset(tnl_vp, 0, sizeof tnl_vp);
     radeon_tcl_forget();
     radeon_tcl_defaults();

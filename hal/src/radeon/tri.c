@@ -18,7 +18,7 @@ static int tex_stale;                   /* texels were written: the units' regis
 static uint32_t vfmt;
 static int vwhat = RADEON_VTX_RHW | RADEON_VTX_ARGB;
 
-static void fifo(int n)
+MGA_HOT static void fifo(int n)
 {
     uint32_t t0;
     if (radeon_cp_running())
@@ -92,7 +92,7 @@ static void out(uint32_t reg, uint32_t v)
 
 #define W1(reg, f) do { if (!known || c->f != sent.f) out(reg, c->f); } while (0)
 
-void radeon_3d_emit(void)
+MGA_HOT void radeon_3d_emit(void)
 {
 #define CUBE_OFF(b) (b), (b) + 4, (b) + 8, (b) + 12, (b) + 16
     static const uint32_t tx[3][13] = {
@@ -157,7 +157,7 @@ void radeon_3d_tex_written(void)
     radeon_3d_dirty = 1;
 }
 
-void radeon_3d_format(int what)
+MGA_HOT void radeon_3d_format(int what)
 {
     vwhat = what;
     vfmt = RADEON_SE_VTX_FMT_XY | RADEON_SE_VTX_FMT_Z;
@@ -183,25 +183,30 @@ static uint32_t fbits(float f)
  * SE_VF_CNTL (the primitive, its vertices following as data, the Radeon's own vertex layout), then each vertex's
  * words in the format's order; with the command processor one 3D_DRAW_IMMD packet (the DRM's and X.org's). */
 /* A vertex's words in the format's order into d: how many. */
-static int pack(uint32_t *d, const radeon_vertex *v)
+/* A cube map's vertex: each unit's q (its r) after its s and t (out of line: pack runs for every vertex) */
+static MGA_NOINLINE int pack_q(uint32_t *d, const radeon_vertex *v, int n)
 {
-    int n = 0;
-    d[n++] = fbits(v->x), d[n++] = fbits(v->y), d[n++] = fbits(v->z);
-    if (vwhat & RADEON_VTX_RHW) d[n++] = fbits(v->rhw);
-    if (vwhat & RADEON_VTX_ARGB) d[n++] = v->argb;
-    if (vwhat & RADEON_VTX_SPEC) d[n++] = v->spec;
-    if (!(vwhat & (RADEON_VTX_Q | RADEON_VTX_Q2 | RADEON_VTX_Q3))) {   /* (no cube map: the words before X2d's) */
-        if (vwhat & RADEON_VTX_ST) d[n++] = fbits(v->s), d[n++] = fbits(v->t);
-        if (vwhat & RADEON_VTX_ST2) d[n++] = fbits(v->s2), d[n++] = fbits(v->t2);
-        if (vwhat & RADEON_VTX_ST3) d[n++] = fbits(v->s3), d[n++] = fbits(v->t3);
-        return n;
-    }
     if (vwhat & RADEON_VTX_ST) d[n++] = fbits(v->s), d[n++] = fbits(v->t);
     if (vwhat & RADEON_VTX_Q) d[n++] = fbits(v->q);
     if (vwhat & RADEON_VTX_ST2) d[n++] = fbits(v->s2), d[n++] = fbits(v->t2);
     if (vwhat & RADEON_VTX_Q2) d[n++] = fbits(v->q2);
     if (vwhat & RADEON_VTX_ST3) d[n++] = fbits(v->s3), d[n++] = fbits(v->t3);
     if (vwhat & RADEON_VTX_Q3) d[n++] = fbits(v->q3);
+    return n;
+}
+
+MGA_HOT static int pack(uint32_t *d, const radeon_vertex *v)
+{
+    int n = 0;
+    d[n++] = fbits(v->x), d[n++] = fbits(v->y), d[n++] = fbits(v->z);
+    if (vwhat & RADEON_VTX_RHW) d[n++] = fbits(v->rhw);
+    if (vwhat & RADEON_VTX_ARGB) d[n++] = v->argb;
+    if (vwhat & RADEON_VTX_SPEC) d[n++] = v->spec;
+    if (MGA_UNLIKELY(vwhat & (RADEON_VTX_Q | RADEON_VTX_Q2 | RADEON_VTX_Q3)))
+        return pack_q(d, v, n);
+    if (vwhat & RADEON_VTX_ST) d[n++] = fbits(v->s), d[n++] = fbits(v->t);
+    if (vwhat & RADEON_VTX_ST2) d[n++] = fbits(v->s2), d[n++] = fbits(v->t2);
+    if (vwhat & RADEON_VTX_ST3) d[n++] = fbits(v->s3), d[n++] = fbits(v->t3);
     return n;
 }
 
@@ -216,7 +221,7 @@ static int vwords(void)
  * processor one 3D_DRAW_IMMD packet (the DRM's and X.org's: the vertex format, the control word, the vertices'
  * words) written straight into the ring; else SE_VF_CNTL (the primitive, its vertices following as data, the
  * Radeon's own vertex layout) and the words to SE_PORT_DATA0. */
-static void prim(uint32_t type, const radeon_vertex *const *v, int nv)
+MGA_HOT static void prim(uint32_t type, const radeon_vertex *const *v, int nv)
 {
     static uint32_t fmt_sent;
     static int fmt_known;
@@ -260,14 +265,14 @@ static void prim(uint32_t type, const radeon_vertex *const *v, int nv)
     }
 }
 
-void radeon_tri(const radeon_vertex *a, const radeon_vertex *b, const radeon_vertex *c)
+MGA_HOT void radeon_tri(const radeon_vertex *a, const radeon_vertex *b, const radeon_vertex *c)
 {
     const radeon_vertex *v[3];
     v[0] = a, v[1] = b, v[2] = c;
     prim(RADEON_VF_PRIM_TYPE_TRIANGLE_LIST, v, 3);
 }
 
-void radeon_poly(const radeon_vertex *v, int n)
+MGA_HOT void radeon_poly(const radeon_vertex *v, int n)
 {
     const radeon_vertex *p[16];
     int i;

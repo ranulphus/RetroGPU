@@ -366,7 +366,15 @@ static int open_screen(const rg_open *o, rg_opened *out)
     /* The command processor from a ring in system memory (radeon_cp_init: the CPU writes memory, the chip as far
      * behind as the ring holds), else plain register writes. DGL_RADEON_RING=0: not tried. */
     line_flips = 0;
+    radeon_cp_varea_want = 0;
 #if !defined(__WATCOMC__)
+    /* With the transform engine (gl/docs/dx7.md X3), a vertex area beside the ring for its draws' vertices:
+     * DGL_RADEON_VAREA kilobytes (default 128; 0: none, they go to video memory), none when DGL_TNL=0. */
+    if ((radeon.flags & RADEON_HAS_TCL) && !(getenv("DGL_TNL") && *getenv("DGL_TNL") == '0')) {
+        const char *e = getenv("DGL_RADEON_VAREA");
+        long kb = e && *e ? strtol(e, NULL, 10) : 128;
+        radeon_cp_varea_want = kb > 0 && kb <= 1024 ? (uint32_t)kb * 1024u : 0u;
+    }
     if (getenv("DGL_RADEON_RING") && *getenv("DGL_RADEON_RING") == '0')
         ring_on = 0;
     else
@@ -374,6 +382,8 @@ static int open_screen(const rg_open *o, rg_opened *out)
     ring_on = radeon_cp_init(microcode(), 0x10000u) == 0;
     if (ring_on) {
         RG_WARN("DGL-RADEON the command processor from a 64 KB ring in system memory");     /* (always said) */
+        if (radeon_cp_varea)
+            RG_INFO("DGL-RADEON a %u KB vertex area for the transform engine beside it", (unsigned)(radeon_cp_varea_bytes / 1024u));
         radeon_cp_reg(RADEON_GUI_SCRATCH_REG0, 0);      /* (the flips' sequence number: it keeps its last value) */
     } else
         RG_WARN("DGL-RADEON no command processor: drawing by plain register writes");

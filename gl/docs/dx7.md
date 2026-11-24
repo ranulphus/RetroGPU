@@ -120,8 +120,7 @@ The front end tries a back end's `tnl` sink hook before anything else for every 
 back end takes it where its engine does the state (so far: no lighting, fog, texture-coordinate generation, clip
 planes, texture matrix, cube map, polygon offset or line and point primitives; texture coordinates within 1,024, as
 the chip's floats lose a fraction beyond, conformance t14). It writes the draw's vertices in object coordinates
-(x, y, z, w, the colour, the units' s and t) into a 1 MB vertex area in video memory (made at the first such draw;
-from its start again after a sync when full), makes indices for GL's primitive (strips and fans as the chip's below
+(x, y, z, w, the colour, the units' s and t) into a vertex area, makes indices for GL's primitive (strips and fans as the chip's below
 4,092 vertices, else lists; quads and quad strips as lists with the general path's diagonal, or ending at the quad's
 last vertex when flat; a flat polygon's first vertex as the provoking one), sets the engine's state (the
 model-view-projection matrix and the viewport where they changed, outputs, shading, culling in both the setup engine
@@ -133,3 +132,50 @@ on; `DGL_TNL=0` keeps every draw on the CPU; `DGL-STAT` counts `tnl/s`; the firs
 On the P3's 7500 (2026-11-24): the whole suite passes with it, 32 of the 42 tests drawn through the engine (the rest:
 fog, lighting, texture generation, cube maps, lines and points, a capped texture heap), against the same Mesa
 references.
+
+## X3: the vertex area in system memory
+
+The engine's vertices go into a 128 KB area of conventional memory beside the command processor's ring, mapped
+through the same PCI GART (`radeon_cp_varea`, asked for at device open on chips with the engine unless `DGL_TNL=0`;
+`DGL_RADEON_VAREA` kilobytes, 0 for none). The CPU writes it cached; the chip fetches it as it fetches the ring. It is
+used in two halves: when one is full, a fence (the command processor writes its number into `SCRATCH_REG1` when it
+gets there, as the DRM ages its vertex buffers) marks the half's last draw, and the other half is written again only
+once its own fence has passed. Without it (DOS hadn't the room, or `DGL_RADEON_VAREA=0`) the vertices go to a 1 MB
+area in video memory as before, which the CPU writes uncached across the bus and which is reused after a full sync.
+
+GLQuake on the P3's 7500 (T&L on, 320x200): 89.97 fps from video memory, 91.24 from system memory; the CPU path
+91.00. GLQuake draws polygons of four or five vertices one at a time, so the engine saves it little: its time is the
+CPU's, in its own code and DOS-GL's per-draw work.
+
+## X1 and X2's cost to GLQuake on the P3, and the instruction cache
+
+X1 and X2 made GLQuake's timedemo on the P3's 7500 (a Pentium III, 16 KB instruction cache) 12% slower, though none
+of their new work runs for it. Measured from clean builds only: an incremental build (the archive's members
+replaced in place) and a clean one of the same source differ by up to 4% on this CPU.
+
+| GLQuake M6 / M3, T&L off (fps) | |
+|---|---|
+| before X1 (8148677) | 91.05 / 98.22 |
+| X1 and X2 as merged (608ff23) | 80.11 / 85.29 |
+| the state emission's comparison fixed (17d691b) | 85.58 / 91.99 |
+| dx7-x3b | 87.0 / 93.5 |
+
+The Pentium III's performance counters (GLOS's `glos pmc`, and the profiling build's stages counted by RDPMC) showed
+where it went: instruction fetch. Over the timedemo the merged code took 22% more instruction-cache misses and 19%
+more cycles waiting for instructions; the vertex stage's misses per triangle doubled, validation's rose a third.
+Each draw now called into code elsewhere in memory (the clip planes' setup, the transform engine's hook) even when
+it did nothing, and the hot functions carried X1/X2's rare cases inline. What brought most of it back:
+
+- the per-draw calls made only when they do something (`clip_enabled`; the engine's hook installed only when the
+  engine will draw);
+- rare cases out of line: the transform's r and generated coordinates, two-sided lighting and clip planes in
+  `tri`, normals and r in `imm_vertex`, anisotropy, bias and cube maps in `unit_words`, dot3 in validation, the
+  cube map's q in `pack`, cube maps in `glBindTexture`;
+- `MGA_HOT` (`hal/include/mga/types.h`): the functions run for every vertex, draw or bind go to `.text.hot`, which
+  DJGPP's linker places together after all other code, so they no longer collide with each other in the cache
+  wherever their objects land (21 KB).
+
+Instruction-cache misses are back to before X1 (22.6 million against 21.8); what is left is about 5% more
+instructions retired. Copying the larger vertex (76 bytes against 52) by GCC's dword loop is part of it, but an
+unrolled copy, inline or shared, measured slower: on this CPU code size costs more than those instructions.
+

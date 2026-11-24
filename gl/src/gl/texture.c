@@ -31,7 +31,7 @@ static dgl_texenv env_u[2];             /* per texture unit (env_defaults) */
 
 dgl_tex_counts dgl_texc;
 
-const dgl_texenv *dgl_tex_env(int unit) { return &env_u[unit]; }
+MGA_HOT const dgl_texenv *dgl_tex_env(int unit) { return &env_u[unit]; }
 GLenum dgl_tex_env_mode(int unit) { return env_u[unit].mode; }
 const GLfloat *dgl_tex_env_color(int unit) { return env_u[unit].color; }
 
@@ -128,7 +128,7 @@ static int far_index(GLuint name)
     return -1;
 }
 
-static dgl_texture *get(GLuint name, int create)
+MGA_HOT static dgl_texture *get(GLuint name, int create)
 {
     dgl_texture *t;
     if (name >= MAX_TEXTURES) {
@@ -231,7 +231,7 @@ void dgl_textures_reset(uint32_t heap_start, uint32_t heap_end)
     dgl_be->tex_reset(heap_start, heap_end);
 }
 
-dgl_texture *dgl_unit_texture(int unit)
+MGA_HOT dgl_texture *dgl_unit_texture(int unit)
 {
     dgl_texture *t = get(bound_u[unit], 0);
     return t && DGL_LEVEL_DEFINED(&t->level[0]) ? t : NULL;
@@ -343,19 +343,27 @@ void APIENTRY glGenTextures(GLsizei n, GLuint *names)
     }
 }
 
-void APIENTRY glBindTexture(GLenum target, GLuint name)
+/* (out of line: glBindTexture is called for every surface in GLQuake) */
+static __attribute__((noinline)) void bind_cube(GLenum target, GLuint name)
+{
+    dgl_texture *t = name ? get(name, 1) : NULL;
+    if (name && !t) { dgl_gl_error(GL_OUT_OF_MEMORY); return; }
+    if (t && t->target && t->target != target) { dgl_gl_error(GL_INVALID_OPERATION); return; }
+    if (name && !get_cube(name, 1)) { dgl_gl_error(GL_OUT_OF_MEMORY); return; }
+    bound_cube = name;
+    dgl_gl.dirty |= DGL_DIRTY_TEXTURE;
+}
+
+MGA_HOT void APIENTRY glBindTexture(GLenum target, GLuint name)
 {
     dgl_texture *t;
-    if (target == GL_TEXTURE_CUBE_MAP_ARB && cube_caps()) {
-        t = name ? get(name, 1) : NULL;
-        if (name && !t) { dgl_gl_error(GL_OUT_OF_MEMORY); return; }
-        if (t && t->target && t->target != target) { dgl_gl_error(GL_INVALID_OPERATION); return; }
-        if (name && !get_cube(name, 1)) { dgl_gl_error(GL_OUT_OF_MEMORY); return; }
-        bound_cube = name;
-        dgl_gl.dirty |= DGL_DIRTY_TEXTURE;
+    if (__builtin_expect(target != GL_TEXTURE_2D, 0)) {
+        if (target == GL_TEXTURE_CUBE_MAP_ARB && cube_caps())
+            bind_cube(target, name);
+        else
+            dgl_gl_error(GL_INVALID_ENUM);
         return;
     }
-    if (target != GL_TEXTURE_2D) { dgl_gl_error(GL_INVALID_ENUM); return; }
     t = name ? get(name, 1) : NULL;
     if (name && !t) { dgl_gl_error(GL_OUT_OF_MEMORY); return; }
     if (t && t->target && t->target != target) { dgl_gl_error(GL_INVALID_OPERATION); return; }

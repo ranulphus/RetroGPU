@@ -97,7 +97,7 @@ void APIENTRY glGetClipPlane(GLenum plane, GLdouble *eq)
 }
 
 /* The enabled planes into clip coordinates for this draw; nonzero when there are any. */
-int dgl_clip_user_begin(void)
+MGA_HOT int dgl_clip_user_begin(void)
 {
     dgl_mat4 inv;
     int i;

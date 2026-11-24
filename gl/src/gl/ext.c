@@ -25,7 +25,7 @@ void dgl_get_caps(dgl_caps *out)
     *out = c;
 }
 
-int dgl_texture_units(void)
+MGA_HOT int dgl_texture_units(void)
 {
     static const void *be, *dev;
     static int n;
@@ -40,7 +40,7 @@ int dgl_texture_units(void)
 
 /* The unit a GL_TEXTUREi_ARB or GL_TEXTUREi_SGIS names; -1 (and
  * GL_INVALID_ENUM) for any other. */
-static int unit_of(GLenum target)
+MGA_HOT static int unit_of(GLenum target)
 {
     int u = target >= GL_TEXTURE0_ARB && target < GL_TEXTURE0_ARB + 32 ? (int)(target - GL_TEXTURE0_ARB)
           : target == GL_TEXTURE0_SGIS ? 0 : target == GL_TEXTURE1_SGIS ? 1 : -1;
@@ -51,7 +51,7 @@ static int unit_of(GLenum target)
     return u;
 }
 
-void APIENTRY glActiveTextureARB(GLenum target)
+MGA_HOT void APIENTRY glActiveTextureARB(GLenum target)
 {
     int u = unit_of(target);
     if (u >= 0)
@@ -85,7 +85,7 @@ static void coords4(GLenum target, float s, float t, float r, float q)
 }
 
 /* One and two components: r is 0 (only stored once vertices carry r: GLQuake calls this for every vertex). */
-static void coords(GLenum target, float s, float t, float q)
+MGA_HOT static void coords(GLenum target, float s, float t, float q)
 {
     int u = unit_of(target);
     float *c;
@@ -113,11 +113,11 @@ void APIENTRY glMultiTexCoord2dvARB(GLenum u, const GLdouble *v) { coords(u, (fl
 void APIENTRY glMultiTexCoord3dvARB(GLenum u, const GLdouble *v) { coords4(u, (float)v[0], (float)v[1], (float)v[2], 1); }
 void APIENTRY glMultiTexCoord4dvARB(GLenum u, const GLdouble *v) { coords4(u, (float)v[0], (float)v[1], (float)v[2], (float)v[3]); }
 void APIENTRY glMultiTexCoord1fARB(GLenum u, GLfloat s) { coords(u, (float)s, 0, 1); }
-void APIENTRY glMultiTexCoord2fARB(GLenum u, GLfloat s, GLfloat t) { coords(u, (float)s, (float)t, 1); }
+MGA_HOT void APIENTRY glMultiTexCoord2fARB(GLenum u, GLfloat s, GLfloat t) { coords(u, (float)s, (float)t, 1); }
 void APIENTRY glMultiTexCoord3fARB(GLenum u, GLfloat s, GLfloat t, GLfloat r) { coords4(u, (float)s, (float)t, (float)r, 1); }
 void APIENTRY glMultiTexCoord4fARB(GLenum u, GLfloat s, GLfloat t, GLfloat r, GLfloat q) { coords4(u, (float)s, (float)t, (float)r, (float)q); }
 void APIENTRY glMultiTexCoord1fvARB(GLenum u, const GLfloat *v) { coords(u, (float)v[0], 0, 1); }
-void APIENTRY glMultiTexCoord2fvARB(GLenum u, const GLfloat *v) { coords(u, (float)v[0], (float)v[1], 1); }
+MGA_HOT void APIENTRY glMultiTexCoord2fvARB(GLenum u, const GLfloat *v) { coords(u, (float)v[0], (float)v[1], 1); }
 void APIENTRY glMultiTexCoord3fvARB(GLenum u, const GLfloat *v) { coords4(u, (float)v[0], (float)v[1], (float)v[2], 1); }
 void APIENTRY glMultiTexCoord4fvARB(GLenum u, const GLfloat *v) { coords4(u, (float)v[0], (float)v[1], (float)v[2], (float)v[3]); }
 void APIENTRY glMultiTexCoord1iARB(GLenum u, GLint s) { coords(u, (float)s, 0, 1); }
@@ -138,7 +138,7 @@ void APIENTRY glMultiTexCoord3svARB(GLenum u, const GLshort *v) { coords4(u, (fl
 void APIENTRY glMultiTexCoord4svARB(GLenum u, const GLshort *v) { coords4(u, (float)v[0], (float)v[1], (float)v[2], (float)v[3]); }
 
 /* GL_SGIS_multitexture: one selector for both texture state and coordinates. */
-void APIENTRY glSelectTextureSGIS(GLenum target)
+MGA_HOT void APIENTRY glSelectTextureSGIS(GLenum target)
 {
     int u = unit_of(target);
     if (u >= 0)
@@ -152,5 +152,5 @@ void APIENTRY glSelectTextureCoordSetSGIS(GLenum target)
         dgl_gl.client_unit = u;
 }
 
-void APIENTRY glMTexCoord2fSGIS(GLenum target, GLfloat s, GLfloat t) { coords(target, s, t, 1); }
-void APIENTRY glMTexCoord2fvSGIS(GLenum target, const GLfloat *v) { coords(target, v[0], v[1], 1); }
+MGA_HOT void APIENTRY glMTexCoord2fSGIS(GLenum target, GLfloat s, GLfloat t) { coords(target, s, t, 1); }
+MGA_HOT void APIENTRY glMTexCoord2fvSGIS(GLenum target, const GLfloat *v) { coords(target, v[0], v[1], 1); }
