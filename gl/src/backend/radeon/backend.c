@@ -655,13 +655,14 @@ static rtex *unit_words(dgl_texture *t, int hw, int gl_unit)
     radeon_3d.tex[hw].cubic_faces = 0;
     if (x->cube) {
         /* A cube map (Mesa's radeonSetTexImages and its state emit): faces 0 to 4 at the CUBIC_OFFSETs, face 5 at
-         * TXOFFSET; faces 1 to 4's sizes in CUBIC_FACES (face 0's in TXFORMAT); s, t and r as directions (no
-         * shift by whole periods). */
+         * TXOFFSET; faces 1 to 4's sizes in CUBIC_FACES, face 0's and face 5's in TXFORMAT (F5: without it the
+         * P3's 7500 drew face 5 as 1 x 1); s, t and r as directions (no shift by whole periods). */
         int f;
         for (f = 0; f < 5; f++)
             radeon_3d.tex[hw].cubic_off[f] = radeon.fb_location + x->lvoff[f];
         radeon_3d.tex[hw].txoffset = radeon.fb_location + x->lvoff[5];
-        radeon_3d.tex[hw].txformat |= RADEON_TXFORMAT_CUBIC_MAP_ENABLE;
+        radeon_3d.tex[hw].txformat |= RADEON_TXFORMAT_CUBIC_MAP_ENABLE | (uint32_t)x->lw << RADEON_TXFORMAT_F5_WIDTH_SHIFT |
+                                      (uint32_t)x->lh << RADEON_TXFORMAT_F5_HEIGHT_SHIFT;
         radeon_3d.tex[hw].cubic_faces =
             (uint32_t)x->lw << RADEON_FACE_WIDTH_1_SHIFT | (uint32_t)x->lh << RADEON_FACE_HEIGHT_1_SHIFT |
             (uint32_t)x->lw << RADEON_FACE_WIDTH_2_SHIFT | (uint32_t)x->lh << RADEON_FACE_HEIGHT_2_SHIFT |

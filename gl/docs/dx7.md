@@ -7,7 +7,7 @@ file; this file records what is built and what the cards showed.
 | Step | What | State |
 |---|---|---|
 | X1 | Picture-quality features, per card, and settings that apply them to programs that don't ask | under way |
-| X2 | GL 1.1's lighting, normals, texture-coordinate generation and clip planes on the CPU (accepted and ignored until now) | done on the software renderer; the Radeons' cube maps to do |
+| X2 | GL 1.1's lighting, normals, texture-coordinate generation and clip planes on the CPU (accepted and ignored until now) | done |
 | X3 | Hardware transform and lighting on the Radeon 7500 (RV200) and 7200 (R100): `GL_DGL_hw_tnl`, `DGL_TNL=0/1` | to do |
 | X4 | SSE in the software transform (needs GLOS to enable it) | to do |
 
@@ -21,7 +21,7 @@ file; this file records what is built and what the cards showed.
 | `GL_EXT_texture_lod_bias` | +-15 | -1 to +127/128 (reported 1) | not yet (the Rage 128 has a field) |
 | `GL_ARB_texture_env_dot3` | yes | yes (DOT3_RGBA's alpha: see below) | no |
 | `GL_ARB_texture_compression`, `GL_EXT_texture_compression_s3tc` | yes | yes | yes |
-| `GL_ARB_texture_cube_map` | yes | not yet (X2) | no |
+| `GL_ARB_texture_cube_map` | yes | yes (base level only: the chip can't mipmap one) | no |
 
 Compressed textures (DXT1, DXT3, DXT5) are decoded by the CPU into the level's RGBA8 copy (`src/gl/texcomp.c`),
 so every card takes them; the blocks are kept for `glGetCompressedTexImageARB`. Compressed internal formats given
@@ -87,4 +87,7 @@ renderer samples them in its reference span (the face by the major axis, its lev
 coordinates a pixel along); its tiles don't keep cube-mapped drawing, which is drawn at once. t42 (the six faces
 unfolded by explicit directions, an environment-mapped and a normal-mapped sphere, a cube map above a 2D texture,
 the binding and a face read back) matches Mesa to the pixel. The Radeons can't mipmap a cube map (Mesa's driver
-sends the base level only); their part comes with the P3.
+sends the base level only): their cube map is the six base levels in one block, faces 0 to 4 at the
+`PP_CUBIC_OFFSET_Tn_m` registers and face 5 at `TXOFFSET`, faces 1 to 4's sizes in `PP_CUBIC_FACES_n` and face 5's
+in `TXFORMAT`'s F5 fields (without those the P3's 7500 drew face 5 as one texel), r in the vertex's q slot. t42 on
+the 7500 matches Mesa to the pixel.
