@@ -7,7 +7,8 @@
  * Then, at 16 bits, the hardware cursor and the display start, read from the
  * emulated monitor (86Box's unit tester).
  *
- *   DTWOD [8] [16] [32] [ops=N] [each]       (each: checked after every operation, DTWOD-OP lines)
+ *   DTWOD [8] [16] [32] [ops=N] [each] [base=MB]   (each: checked after every operation, DTWOD-OP lines;
+ *                                              base: the surfaces from that megabyte of VRAM on, the screen shown there)
  *
  * HX-TEST lines: map, mode-BPP, fill-BPP, copy-BPP, copy-from-BPP, mono-BPP,
  * image-BPP, mixed-BPP, cursor, cursor-edge, start, start-high. */
@@ -31,6 +32,7 @@ typedef struct {
 
 static uint8_t *shadow;         /* VRAM [0, used) as it should be */
 static uint32_t used;
+static uint32_t vbase;                  /* (DTWOD base=MB: everything that far into VRAM; the display start too) */
 static int bpp, bpp_b;
 static surface scr, s1, s2;
 static unsigned seed = 1;
@@ -52,7 +54,7 @@ static uint32_t rpix(void)
 
 static void target(surface *t, int cx0, int cy0, int cx1, int cy1)
 {
-    radeon_set_target(t->off, t->pitch_b, bpp);
+    radeon_set_target(vbase + t->off, t->pitch_b, bpp);
     radeon_set_clip(cx0, cy0, cx1, cy1);
     t->s.cx0 = cx0, t->s.cy0 = cy0, t->s.cx1 = cx1, t->s.cy1 = cy1;
 }
@@ -74,7 +76,7 @@ static int differs(const surface *t, char *why)
 {
     int y, x;
     for (y = 0; y < t->h; y++) {
-        const uint8_t *a = (const uint8_t *)radeon.fb + t->off + (long)y * t->pitch_b, *b = shadow + t->off + (long)y * t->pitch_b;
+        const uint8_t *a = (const uint8_t *)radeon.fb + vbase + t->off + (long)y * t->pitch_b, *b = shadow + t->off + (long)y * t->pitch_b;
         if (memcmp(a, b, (size_t)(t->w * bpp_b)) == 0)
             continue;
         for (x = 0; x < t->w && !memcmp(a + x * bpp_b, b + x * bpp_b, (size_t)bpp_b); x++)
@@ -85,7 +87,7 @@ static int differs(const surface *t, char *why)
             int n = 0, x0 = x, x1 = x, y1 = y, xx, yy;
             /* (how many pixels differ, and the box they are in) */
             for (yy = y; yy < t->h; yy++) {
-                const uint8_t *a2 = (const uint8_t *)radeon.fb + t->off + (long)yy * t->pitch_b;
+                const uint8_t *a2 = (const uint8_t *)radeon.fb + vbase + t->off + (long)yy * t->pitch_b;
                 const uint8_t *b2 = shadow + t->off + (long)yy * t->pitch_b;
                 for (xx = 0; xx < t->w; xx++)
                     if (memcmp(a2 + xx * bpp_b, b2 + xx * bpp_b, (size_t)bpp_b)) {
@@ -95,14 +97,14 @@ static int differs(const surface *t, char *why)
                         y1 = yy;
                     }
             }
-            v.mem = (uint8_t *)radeon.fb + t->off;
+            v.mem = (uint8_t *)radeon.fb + vbase + t->off;
             sprintf(why, "%s at %d,%d: %0*lx, want %0*lx; %d pixels differ in %d,%d-%d,%d (byte %lu)", t->name, x, y,
                     bpp_b * 2, (unsigned long)sw_get(&v, x, y), bpp_b * 2, (unsigned long)want, n, x0, y, x1, y1,
                     (unsigned long)(t->off + (uint32_t)y * (uint32_t)t->pitch_b + (uint32_t)(x * bpp_b)));
             if (each) {
                 /* Read again: at once, after reading far away (another megabyte), after another sync, and after
                  * half a second: a value that comes right was a stale read, one that stays is in the memory. */
-                volatile uint32_t *far_ = (volatile uint32_t *)(radeon.fb + (20u << 20));
+                volatile uint32_t *far_ = (volatile uint32_t *)(radeon.fb + (30u << 20));
                 uint32_t r1 = sw_get(&v, x, y), r2, r3, r4, t0, sink = 0;
                 int k;
                 for (k = 0; k < 64; k++)
@@ -135,7 +137,7 @@ static int check(const char *name)
     bad = differs(&scr, why) || differs(&s1, why) || differs(&s2, why);
     hx_test(name, !bad, "%s", bad ? why : "same");
     if (bad)                                    /* the next case starts from what the card has */
-        memcpy(shadow, (const void *)radeon.fb, used);
+        memcpy(shadow, (const void *)(radeon.fb + vbase), used);
     return !bad;
 }
 
@@ -161,7 +163,7 @@ static void after_op(void)
         hx_log("DTWOD-OP %d bits, on %s clip %d,%d-%d,%d: %s -> %s", bpp, op_t ? op_t->name : "?", op_t ? op_t->s.cx0 : 0,
                op_t ? op_t->s.cy0 : 0, op_t ? op_t->s.cx1 : 0, op_t ? op_t->s.cy1 : 0, last_op, why);
         each_said++;
-        memcpy(shadow, (const void *)radeon.fb, used);
+        memcpy(shadow, (const void *)(radeon.fb + vbase), used);
     }
 }
 
@@ -194,7 +196,7 @@ static void do_copy_from(surface *t, surface *from)
 {
     int w = rint_(1, from->w), h = rint_(1, from->h);
     int sx = rint_(0, from->w - w), sy = rint_(0, from->h - h), dx = rint_(-10, t->w - 1), dy = rint_(-10, t->h - 1);
-    radeon_copy_from(from->off, from->pitch_b, sx, sy, dx, dy, w, h);
+    radeon_copy_from(vbase + from->off, from->pitch_b, sx, sy, dx, dy, w, h);
     sw_copy(&t->s, dx, dy, &from->s, sx, sy, w, h);
     sprintf(last_op, "copy-from %s %d,%d -> %d,%d %dx%d", from->name, sx, sy, dx, dy, w, h), op_t = t;
     after_op();
@@ -469,7 +471,8 @@ static int depth(int b)
      * the layer moves the rest of its offset into x) */
     place(&s1, "s1", off, 300, 200, 384);
     place(&s2, "s2", ((off + 384u * bpp_b * 200 + 1023) & ~1023u) + (aligned ? 0u : 64u), 500, 120, 576);
-    memset((void *)radeon.fb, 0, used);
+    memset((void *)(radeon.fb + vbase), 0, used);
+    radeon_set_start(vbase);                    /* (the test's screen shown) */
     memset(shadow, 0, used);
     depth_cases();
     if (b == 16 && hx_ut_present()) {
@@ -490,6 +493,8 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "32")) d32 = 1;
         else if (!strcmp(argv[i], "each")) each = 1;
         else if (!strcmp(argv[i], "aligned")) aligned = 1;
+        else if (!strncmp(argv[i], "base=", 5)) vbase += (uint32_t)atoi(argv[i] + 5) << 20;
+        else if (!strncmp(argv[i], "shift=", 6)) vbase += (uint32_t)atoi(argv[i] + 6) << 10;   /* (KB more) */
         else if (!strncmp(argv[i], "ops=", 4)) nops = atoi(argv[i] + 4);
     }
     if (!d8 && !d16 && !d32)

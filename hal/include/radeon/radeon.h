@@ -76,6 +76,42 @@ void radeon_mono(int x, int y, int w, int h, const uint8_t *bits, int stride, ui
  * with the engine idle. */
 void radeon_image(int x, int y, int w, int h, const void *px, int stride);
 
+/* tri.c: the 3D engine by plain register writes (RD2): the state's registers, then each triangle as SE_VF_CNTL and
+ * its vertices' words to SE_PORT_DATA0. radeon_3d holds the state as the registers take it (regs3d_radeon.h's
+ * fields); a caller changes its words and sets radeon_3d_dirty, and the next triangle writes the registers that
+ * differ from what the chip has. 2D drawing between leaves the 3D registers alone, but the engines take turns:
+ * the layer waits for the other to be idle and clean when the kind of drawing changes. */
+typedef struct {
+    uint32_t pp_misc, pp_fog_color, re_solid_color, rb3d_blendcntl, rb3d_depthoffset, rb3d_depthpitch,
+             rb3d_zstencilcntl, pp_cntl, rb3d_cntl, rb3d_coloroffset, re_width_height, rb3d_colorpitch, se_cntl,
+             se_coord_fmt, re_top_left, rb3d_stencilrefmask, rb3d_ropcntl, rb3d_planemask, se_cntl_status;
+    struct {
+        uint32_t txfilter, txformat, txoffset, txcblend, txablend, tfactor, border_color;
+    } tex[3];
+} radeon_ctx3d;
+extern radeon_ctx3d radeon_3d;
+extern int radeon_3d_dirty;             /* (set by a caller that changed radeon_3d's words) */
+typedef struct {
+    float x, y, z, rhw;                 /* window coordinates (pixel centres at halves), z 0..1, 1/w */
+    uint32_t argb, spec;                /* (the specular's top byte: the fog factor) */
+    float s, t, s2, t2;
+} radeon_vertex;
+/* The state for a colour buffer at color_off (pitch_bytes a row, 16 or 32 bits) and a depth buffer at z_off (16
+ * bits, or 24 with stencil; z_off 0 and zbits 0: none): Mesa's defaults, vertices in window coordinates. */
+void radeon_3d_init(uint32_t color_off, int pitch_bytes, int bpp, uint32_t z_off, int z_pitch_bytes, int zbits,
+                    int width, int height);
+void radeon_3d_emit(void);
+/* What a vertex carries after x, y, z: RADEON_VF_* below, in this order: rhw, the colour, the specular and fog,
+ * s and t, s2 and t2. */
+#define RADEON_VTX_RHW   1
+#define RADEON_VTX_ARGB  2
+#define RADEON_VTX_SPEC  4
+#define RADEON_VTX_ST    8
+#define RADEON_VTX_ST2   16
+void radeon_3d_format(int what);
+void radeon_tri(const radeon_vertex *a, const radeon_vertex *b, const radeon_vertex *c);
+void radeon_2d_begin(void);             /* (engine2d.c calls it: 2D after 3D waits for the 3D engine) */
+
 /* cursor.c: the hardware cursor (64 x 64), as the Rage 128 layer's: the AND and XOR masks, rows of 8 bytes, the
  * leftmost pixel in bit 7; stored at off (a multiple of 16); colours 0xRRGGBB; radeon_cursor_move takes the image's
  * top left corner, as far as 63 pixels off the top or the left. */

@@ -53,6 +53,7 @@ static int cache_flush(uint32_t t0, uint32_t timeout_us)
  * (DTWOD on the P3: 2 to 9 stray pixels a case, the same ones each run). */
 static void settle(void)
 {
+    radeon_2d_begin();                  /* (after 3D drawing: that engine idle and clean first) */
     fifo_wait(2);
     eng_wr(RADEON_DSTCACHE_CTLSTAT, RADEON_RB2D_DC_FLUSH_ALL);
     eng_wr(RADEON_WAIT_UNTIL, RADEON_WAIT_2D_IDLECLEAN | RADEON_WAIT_DMA_GUI_IDLE);
