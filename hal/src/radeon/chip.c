@@ -260,6 +260,8 @@ int radeon_set_mode(const radeon_mode *m)
     if (radeon.mmio) {
         radeon_cp_stop();               /* (the BIOS's mode set with the command processor off) */
         radeon_flip_at_line(0);
+        if (radeon.flags & RADEON_TILED_Z)  /* (no surface left over a former depth buffer for the next user) */
+            radeon_depth_surface_off();
         radeon_sync(100000);
     }
     memset(&r, 0, sizeof r);
@@ -278,6 +280,8 @@ void radeon_text_mode(void)
     if (radeon.mmio) {
         radeon_cp_stop();
         radeon_flip_at_line(0);
+        if (radeon.flags & RADEON_TILED_Z)  /* (no surface left over a former depth buffer for the next user) */
+            radeon_depth_surface_off();
         radeon_sync(100000);
     }
     memset(&r, 0, sizeof r);
