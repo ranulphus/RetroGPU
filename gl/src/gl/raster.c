@@ -46,16 +46,33 @@ static unsigned cap_dirty(GLenum cap)
     }
 }
 
+/* The enables kept as bits: clip planes, and the active unit's texture-coordinate generation. */
+static unsigned *cap_bits(GLenum cap, unsigned *bit)
+{
+    if (cap >= GL_CLIP_PLANE0 && cap <= GL_CLIP_PLANE5) {
+        *bit = 1u << (cap - GL_CLIP_PLANE0);
+        return &dgl_gl.clip_enabled;
+    }
+    if (cap == GL_TEXTURE_GEN_S || cap == GL_TEXTURE_GEN_T || cap == GL_TEXTURE_GEN_R || cap == GL_TEXTURE_GEN_Q) {
+        *bit = 1u << (cap == GL_TEXTURE_GEN_S ? 0 : cap == GL_TEXTURE_GEN_T ? 1 : cap == GL_TEXTURE_GEN_R ? 2 : 3);
+        return &dgl_gl.texgen_on[dgl_gl.active_unit];
+    }
+    return NULL;
+}
+
 static void set_cap(GLenum cap, int on)
 {
+    unsigned bit, *bits = cap_bits(cap, &bit);
     int *f = cap_flag(cap);
+    if (bits) {
+        *bits = on ? *bits | bit : *bits & ~bit;
+        return;
+    }
     if (!f) {
         switch (cap) {                                       /* accepted and ignored (PRD §2.2) */
         case GL_POINT_SMOOTH: case GL_LINE_SMOOTH: case GL_POLYGON_SMOOTH:
         case GL_LINE_STIPPLE: case GL_POLYGON_STIPPLE: case GL_POLYGON_OFFSET_POINT: case GL_POLYGON_OFFSET_LINE:
-        case GL_TEXTURE_1D: case GL_TEXTURE_GEN_S: case GL_TEXTURE_GEN_T:
-        case GL_CLIP_PLANE0: case GL_CLIP_PLANE1: case GL_CLIP_PLANE2: case GL_CLIP_PLANE3:
-        case GL_CLIP_PLANE4: case GL_CLIP_PLANE5:
+        case GL_TEXTURE_1D:
             break;
         default:
             dgl_gl_error(GL_INVALID_ENUM);
@@ -75,7 +92,10 @@ void APIENTRY glDisable(GLenum cap) { set_cap(cap, 0); }
 
 GLboolean APIENTRY glIsEnabled(GLenum cap)
 {
+    unsigned bit, *bits = cap_bits(cap, &bit);
     int *f = cap_flag(cap);
+    if (bits)
+        return (GLboolean)((*bits & bit) != 0);
     if (f)
         return (GLboolean)(*f != 0);
     switch (cap) {
@@ -85,9 +105,7 @@ GLboolean APIENTRY glIsEnabled(GLenum cap)
     case GL_NORMAL_ARRAY:        return (GLboolean)dgl_gl.na.enabled;
     case GL_POINT_SMOOTH: case GL_LINE_SMOOTH: case GL_POLYGON_SMOOTH:
     case GL_LINE_STIPPLE: case GL_POLYGON_STIPPLE: case GL_POLYGON_OFFSET_POINT: case GL_POLYGON_OFFSET_LINE:
-    case GL_TEXTURE_1D: case GL_TEXTURE_GEN_S: case GL_TEXTURE_GEN_T:
-    case GL_CLIP_PLANE0: case GL_CLIP_PLANE1: case GL_CLIP_PLANE2: case GL_CLIP_PLANE3:
-    case GL_CLIP_PLANE4: case GL_CLIP_PLANE5:
+    case GL_TEXTURE_1D:
         return GL_FALSE;
     default: dgl_gl_error(GL_INVALID_ENUM); return GL_FALSE;
     }

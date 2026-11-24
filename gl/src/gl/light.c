@@ -118,6 +118,22 @@ static void shade(const float pe[3], const float n[3], const dgl_material *m, fl
     out[3] = clamp01(m->diffuse[3]);
 }
 
+void dgl_eye_normal(const float nin[3], float n[3])
+{
+    float len;
+    int k;
+    if (!dgl_nm_ok)
+        normal_matrix();
+    for (k = 0; k < 3; k++)
+        n[k] = nm[k][0] * nin[0] + nm[k][1] * nin[1] + nm[k][2] * nin[2];
+    if (dgl_gl.normalize || dgl_gl.rescale_normal) {
+        len = sqrtf(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+        if (len > 0)
+            for (k = 0; k < 3; k++)
+                n[k] /= len;
+    }
+}
+
 void dgl_light_vertex(const dgl_vin *in, dgl_cvtx *o)
 {
     const float *mv = dgl_gl.mv.stack[dgl_gl.mv.depth - 1].m, *p = in->pos;

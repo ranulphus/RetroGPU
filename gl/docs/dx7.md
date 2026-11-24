@@ -7,7 +7,7 @@ file; this file records what is built and what the cards showed.
 | Step | What | State |
 |---|---|---|
 | X1 | Picture-quality features, per card, and settings that apply them to programs that don't ask | under way |
-| X2 | GL 1.1's lighting, normals, texture-coordinate generation and clip planes on the CPU (accepted and ignored until now) | lighting done; texgen, clip planes, cube maps to do |
+| X2 | GL 1.1's lighting, normals, texture-coordinate generation and clip planes on the CPU (accepted and ignored until now) | lighting, clip planes, texgen (s, t) done; r, q and cube maps to do |
 | X3 | Hardware transform and lighting on the Radeon 7500 (RV200) and 7200 (R100): `GL_DGL_hw_tnl`, `DGL_TNL=0/1` | to do |
 | X4 | SSE in the software transform (needs GLOS to enable it) | to do |
 
@@ -64,3 +64,13 @@ determinant of x, y and w, which holds for the part a clip leaves). While lighti
 vertex path: no back end's fast path transforms them (`DGL_VTX_EXTRA`). t40 matches Mesa to the pixel on the
 software renderer at 8, 16 and 32 bits. Display lists still execute state calls at compile time (FR-DL-3), so a
 `glMaterial` inside a list takes effect then, not at its call.
+
+## X2: clip planes and texture-coordinate generation
+
+`src/gl/texgen.c`. A clip plane is taken into eye coordinates at `glClipPlane` (the modelview's inverse) and into
+clip coordinates at each draw (the projection's inverse), where a point's distance is the same linear function;
+the assembly cuts a triangle (fanned back out with its provoking vertex), a line or a point against the enabled
+planes before the back end sees it, so no back end changed. Texture coordinates s and t of each unit are generated
+object-linear, eye-linear (the plane into eye coordinates at `glTexGen`) or sphere-mapped, before the texture
+matrix. Both take the general vertex path. t41 matches Mesa to the pixel on the software renderer (orthographic and
+perspective frames).

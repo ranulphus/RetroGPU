@@ -85,6 +85,12 @@ static int query(GLenum p, double *v)
     case GL_LIGHT_MODEL_AMBIENT: for (i = 0; i < 4; i++) v[i] = dgl_gl.light_model_ambient[i]; return 4;
     case GL_LIGHT_MODEL_LOCAL_VIEWER: v[0] = dgl_gl.light_local_viewer; return 1;
     case GL_LIGHT_MODEL_TWO_SIDE: v[0] = dgl_gl.light_two_side; return 1;
+    case GL_CLIP_PLANE0: case GL_CLIP_PLANE1: case GL_CLIP_PLANE2: case GL_CLIP_PLANE3: case GL_CLIP_PLANE4:
+    case GL_CLIP_PLANE5: v[0] = (dgl_gl.clip_enabled >> (p - GL_CLIP_PLANE0)) & 1; return 1;
+    case GL_TEXTURE_GEN_S: case GL_TEXTURE_GEN_T: case GL_TEXTURE_GEN_R: case GL_TEXTURE_GEN_Q:
+        v[0] = (dgl_gl.texgen_on[dgl_gl.active_unit] >> (p == GL_TEXTURE_GEN_S ? 0 : p == GL_TEXTURE_GEN_T ? 1
+                                                          : p == GL_TEXTURE_GEN_R ? 2 : 3)) & 1;
+        return 1;
     case GL_TEXTURE_COORD_ARRAY: v[0] = (dgl_gl.client_unit ? dgl_gl.ta1 : dgl_gl.ta).enabled; return 1;
     case GL_POLYGON_MODE: v[0] = v[1] = dgl_gl.polygon_mode; return 2;
     /* The framebuffer DOS-GL has (16-bit RGB, no stencil, accumulation or aux buffers). */

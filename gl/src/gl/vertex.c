@@ -136,23 +136,45 @@ void dgl_transform(const dgl_vin *in, dgl_cvtx *o)
     o->z = m->m[2] * p[0] + m->m[6] * p[1] + m->m[10] * p[2] + m->m[14] * p[3];
     o->w = m->m[3] * p[0] + m->m[7] * p[1] + m->m[11] * p[2] + m->m[15] * p[3];
     o->r = in->col[0]; o->g = in->col[1]; o->b = in->col[2]; o->a = in->col[3];
-    if (dgl_gl.tex_identity) {
-        o->s = in->tex[0]; o->t = in->tex[1];
-    } else {
-        const float *t = dgl_gl.tex.stack[dgl_gl.tex.depth - 1].m;
-        float q = t[3] * in->tex[0] + t[7] * in->tex[1] + t[15];
-        q = q != 0 ? q : 1;
-        o->s = (t[0] * in->tex[0] + t[4] * in->tex[1] + t[12]) / q;
-        o->t = (t[1] * in->tex[0] + t[5] * in->tex[1] + t[13]) / q;
-    }
-    if (dgl_gl.tex1_identity) {
-        o->s1 = in->tex1[0]; o->t1 = in->tex1[1];
-    } else {
-        const float *t = dgl_gl.tex1.stack[dgl_gl.tex1.depth - 1].m;
-        float q = t[3] * in->tex1[0] + t[7] * in->tex1[1] + t[15];
-        q = q != 0 ? q : 1;
-        o->s1 = (t[0] * in->tex1[0] + t[4] * in->tex1[1] + t[12]) / q;
-        o->t1 = (t[1] * in->tex1[0] + t[5] * in->tex1[1] + t[13]) / q;
+    {
+        const float *tx0 = in->tex, *tx1 = in->tex1;
+        float g0[2], g1[2];
+        if (dgl_gl.texgen_on[0] | dgl_gl.texgen_on[1]) {
+            /* Texture-coordinate generation (texgen.c): s and t made before the texture matrix. */
+            float pe[4], ne[3];
+            int k;
+            for (k = 0; k < 4; k++)
+                pe[k] = mv[k] * p[0] + mv[4 + k] * p[1] + mv[8 + k] * p[2] + mv[12 + k] * p[3];
+            dgl_eye_normal(in->nrm, ne);
+            if (dgl_gl.texgen_on[0]) {
+                g0[0] = in->tex[0], g0[1] = in->tex[1];
+                dgl_texgen_vertex(0, in, pe, ne, g0);
+                tx0 = g0;
+            }
+            if (dgl_gl.texgen_on[1]) {
+                g1[0] = in->tex1[0], g1[1] = in->tex1[1];
+                dgl_texgen_vertex(1, in, pe, ne, g1);
+                tx1 = g1;
+            }
+        }
+        if (dgl_gl.tex_identity) {
+            o->s = tx0[0]; o->t = tx0[1];
+        } else {
+            const float *t = dgl_gl.tex.stack[dgl_gl.tex.depth - 1].m;
+            float q = t[3] * tx0[0] + t[7] * tx0[1] + t[15];
+            q = q != 0 ? q : 1;
+            o->s = (t[0] * tx0[0] + t[4] * tx0[1] + t[12]) / q;
+            o->t = (t[1] * tx0[0] + t[5] * tx0[1] + t[13]) / q;
+        }
+        if (dgl_gl.tex1_identity) {
+            o->s1 = tx1[0]; o->t1 = tx1[1];
+        } else {
+            const float *t = dgl_gl.tex1.stack[dgl_gl.tex1.depth - 1].m;
+            float q = t[3] * tx1[0] + t[7] * tx1[1] + t[15];
+            q = q != 0 ? q : 1;
+            o->s1 = (t[0] * tx1[0] + t[4] * tx1[1] + t[12]) / q;
+            o->t1 = (t[1] * tx1[0] + t[5] * tx1[1] + t[13]) / q;
+        }
     }
     /* Eye distance for fog: -z_eye (PRD §7). */
     o->eye_d = dgl_gl.fog ? -(mv[2] * p[0] + mv[6] * p[1] + mv[10] * p[2] + mv[14] * p[3]) : 0.0f;
@@ -315,30 +337,52 @@ static const dgl_cvtx *get(GLint idx, const dgl_vin *imm)
  * later get() would refill it); then copies, as it always had. */
 /* Two-sided lighting: a back-facing triangle drawn with its vertices' back colours. Facing by the sign of the
  * homogeneous determinant of (x, y, w): the orientation of the part in front of the eye, as clipping leaves it. */
-static void tri_two_sided(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *c, const dgl_cvtx *p)
+static int clip_user;                   /* user clip planes enabled for the draw being assembled (texgen.c) */
+
+/* A triangle cut by the user clip planes: the pieces fanned to the sink with the original provoking vertex. */
+static void tri_clipped(dgl_cvtx *v)
 {
-    double det = (double)a->x * ((double)b->y * c->w - (double)c->y * b->w) -
-                 (double)b->x * ((double)a->y * c->w - (double)c->y * a->w) +
-                 (double)c->x * ((double)a->y * b->w - (double)b->y * a->w);
-    dgl_cvtx v[4];
-    int i;
-    if ((det >= 0) == (dgl_gl.front_face != GL_CW)) {
-        dgl_sink.triangle(a, b, c, p);
+    dgl_cvtx out[16];
+    unsigned ca = dgl_clip_user_code(&v[0]), cb = dgl_clip_user_code(&v[1]), cc = dgl_clip_user_code(&v[2]);
+    int n, i;
+    if (!(ca | cb | cc)) {
+        dgl_sink.triangle(&v[0], &v[1], &v[2], &v[3]);
         return;
     }
-    v[0] = *a, v[1] = *b, v[2] = *c, v[3] = *p;
-    for (i = 0; i < 4; i++)
-        v[i].r = v[i].br, v[i].g = v[i].bg, v[i].b = v[i].bb, v[i].a = v[i].ba;
-    dgl_sink.triangle(&v[0], &v[1], &v[2], &v[3]);
+    if (ca & cb & cc)
+        return;
+    n = dgl_clip_user(v, 3, out);
+    for (i = 1; i + 1 < n; i++)
+        dgl_sink.triangle(&out[0], &out[i], &out[i + 1], &v[3]);
+}
+
+/* Two-sided lighting (a back-facing triangle takes its vertices' back colours; facing by the homogeneous
+ * determinant of x, y and w, which holds for the part a clip leaves), then the user clip planes. v: the triangle
+ * and its provoking vertex, copies. */
+static void tri_extra(dgl_cvtx *v)
+{
+    if (dgl_gl.lighting && dgl_gl.light_two_side) {
+        double det = (double)v[0].x * ((double)v[1].y * v[2].w - (double)v[2].y * v[1].w) -
+                     (double)v[1].x * ((double)v[0].y * v[2].w - (double)v[2].y * v[0].w) +
+                     (double)v[2].x * ((double)v[0].y * v[1].w - (double)v[1].y * v[0].w);
+        int i;
+        if ((det >= 0) != (dgl_gl.front_face != GL_CW))
+            for (i = 0; i < 4; i++)
+                v[i].r = v[i].br, v[i].g = v[i].bg, v[i].b = v[i].bb, v[i].a = v[i].ba;
+    }
+    if (clip_user)
+        tri_clipped(v);
+    else
+        dgl_sink.triangle(&v[0], &v[1], &v[2], &v[3]);
 }
 
 static void tri(GLint a, GLint b, GLint c, GLint prov, const dgl_vin *imm)
 {
 #define CLASH(x, y) ((x) != (y) && !(((x) ^ (y)) & (VCACHE - 1)))
-    if (dgl_gl.lighting && dgl_gl.light_two_side && dgl_sink.triangle) {
+    if ((clip_user || (dgl_gl.lighting && dgl_gl.light_two_side)) && dgl_sink.triangle) {
         dgl_cvtx v[4];
         v[0] = *get(a, imm); v[1] = *get(b, imm); v[2] = *get(c, imm); v[3] = *get(prov, imm);
-        tri_two_sided(&v[0], &v[1], &v[2], &v[3]);
+        tri_extra(v);
         return;
     }
     if (!CLASH(a, b) && !CLASH(a, c) && !CLASH(b, c)) {
@@ -380,14 +424,22 @@ int dgl_poly_general(const GLint *ids, int n, GLint provoking)
 
 static void line(GLint a, GLint b, const dgl_vin *imm)
 {
-    dgl_cvtx v0 = *get(a, imm), v1 = *get(b, imm);
+    dgl_cvtx v[2], out[8];
+    v[0] = *get(a, imm), v[1] = *get(b, imm);
+    if (clip_user && (dgl_clip_user_code(&v[0]) | dgl_clip_user_code(&v[1]))) {
+        if (dgl_clip_user(v, 2, out) == 2 && dgl_sink.line)
+            dgl_sink.line(&out[0], &out[1]);
+        return;
+    }
     if (dgl_sink.line)
-        dgl_sink.line(&v0, &v1);
+        dgl_sink.line(&v[0], &v[1]);
 }
 
 static void point(GLint a, const dgl_vin *imm)
 {
     dgl_cvtx v = *get(a, imm);
+    if (clip_user && dgl_clip_user_code(&v))
+        return;
     if (dgl_sink.point)
         dgl_sink.point(&v);
 }
@@ -411,6 +463,7 @@ static void assemble(GLenum mode, GLsizei count, const GLint *idx, GLint first, 
         plan_imm(imm, count);
     else
         plan_arrays();
+    clip_user = dgl_clip_user_begin();
     cur_imm = imm;
     if (dgl_sink.fast && !DGL_VTX_EXTRA() && dgl_sink.fast(mode, count, idx, first)) {     /* (a list's: indices into
                                                                                          * its vertices) */

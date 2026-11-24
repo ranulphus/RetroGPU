@@ -115,6 +115,11 @@ typedef struct {
 typedef struct {
     GLfloat ambient[4], diffuse[4], specular[4], emission[4], shininess;
 } dgl_material;
+/* A texture coordinate's generation (texgen.c): its mode and planes (the eye plane in eye coordinates). */
+typedef struct {
+    GLenum  mode;
+    GLfloat object[4], eye[4];
+} dgl_texgen;
 
 typedef struct {
     /* Matrices */
@@ -159,6 +164,11 @@ typedef struct {
     GLfloat light_model_ambient[4];
     dgl_light light[8];
     dgl_material material[2];          /* front, back */
+    /* Clip planes and texture-coordinate generation (texgen.c) */
+    GLfloat clip_plane[6][4];          /* eye coordinates */
+    unsigned clip_enabled;             /* GL_CLIP_PLANEi: bit i */
+    dgl_texgen texgen[2][4];           /* per unit: s, t, r, q */
+    unsigned texgen_on[2];             /* per unit: GL_TEXTURE_GEN_S .. Q as bits 0..3 */
     /* Errors */
     GLenum      error;
     unsigned    dirty;
@@ -206,8 +216,17 @@ void dgl_arrays_forget_buffer(const dgl_buffer *b);
 void dgl_light_reset(void);
 void dgl_color_material_apply(void);
 extern int dgl_nm_ok;                  /* the normal matrix is the modelview's (dgl_mvp clears it) */
-/* The state needs the general vertex path (a back end's fast path transforms without it): lighting. */
-#define DGL_VTX_EXTRA() (dgl_gl.lighting)
+/* The state needs the general vertex path (a back end's fast path transforms without it): lighting, clip
+ * planes, texture-coordinate generation. */
+#define DGL_VTX_EXTRA() (dgl_gl.lighting | dgl_gl.clip_enabled | dgl_gl.texgen_on[0] | dgl_gl.texgen_on[1])
+void dgl_eye_normal(const float n[3], float out[3]);       /* light.c: n into eye coordinates (normalised if asked) */
+
+/* texgen.c */
+int  dgl_mat_inverse(dgl_mat4 *r, const dgl_mat4 *m);
+void dgl_texgen_reset(void);
+int  dgl_clip_user_begin(void);                            /* a draw's planes; nonzero when any are enabled */
+unsigned dgl_clip_user_code(const dgl_cvtx *v);
+int  dgl_clip_user(const dgl_cvtx *in, int n, dgl_cvtx *out);   /* n 2: a segment; out holds n + 6 */
 
 /* matrix.c */
 void dgl_mat_identity(dgl_mat4 *r);

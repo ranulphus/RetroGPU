@@ -6,6 +6,7 @@
 /* An input vertex: object position (x, y, z, w), colour 0..1, texcoord. */
 typedef struct { float pos[4], col[4], tex[2], tex1[2], nrm[3]; } dgl_vin;   /* tex1: texture unit 1 */
 void dgl_light_vertex(const dgl_vin *in, dgl_cvtx *o);      /* light.c: o's colour (and back colour) lit */
+void dgl_texgen_vertex(int unit, const dgl_vin *in, const float pe[4], const float ne[3], float tc[2]);   /* texgen.c */
 
 /* vertex.c's cache of transformed vertices: a triangle sink gets pointers
  * into dgl_vslot when it can (no two of the triangle's vertices share a
