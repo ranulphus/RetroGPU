@@ -81,5 +81,11 @@
    "frac": 0.02,
    "_why": "8 bits: the bump map is nearest-filtered at 2.25 pixels a texel, so texel edges (steps of up to 40 levels in the dot product) fall inside the 4x4 boxes that compare dithered frames; 0.7% of pixels differ beyond 24 (worst 39) where the 16- and 32-bit frames match Mesa to 0.02%."
   }
+ },
+ "t39_0": {
+  "soft8": {
+   "frac": 0.02,
+   "_why": "8 bits: as t38's: the textures are nearest-filtered at 2.25 pixels a texel with steps of up to 200 levels between neighbouring texels, so texel edges fall inside the 4x4 boxes that compare dithered frames; 0.46% (this PC) to 0.56% (devserver's merge tier, 2026-11-24) of pixels differ beyond 24, where the 16- and 32-bit frames match Mesa to 0.01%."
+  }
  }
 }
