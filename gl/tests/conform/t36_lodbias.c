@@ -1,8 +1,8 @@
 /* t36: GL_EXT_texture_lod_bias. A 256x256 texture whose nine levels are each one colour, drawn on screen-aligned
  * squares at a constant level of detail (lambda 1 or 2: 2 or 4 texels a pixel), with biases chosen so the biased
  * lambda never sits on a level boundary: which level (GL_NEAREST_MIPMAP_NEAREST) or which mix of two
- * (GL_LINEAR_MIPMAP_LINEAR) each square shows says what bias was applied. Biases stay within -1..3 (the Radeon's
- * range is -1..4). Skipped where the extension isn't advertised. */
+ * (GL_LINEAR_MIPMAP_LINEAR) each square shows says what bias was applied. Biases stay within -1..+1 (the Radeon's
+ * range: -1 to +127/128). Skipped where the extension isn't advertised. */
 #include "ct_tex.h"
 
 static const unsigned char level_rgb[9][3] = {
@@ -35,7 +35,7 @@ static void square(float x, float y, int lam, float bias)
 
 void ct_run(void)
 {
-    static const float near_biases[6] = { -1.0f, 0.0f, 1.0f, 2.0f, 3.0f, -0.75f };   /* lambda 1 (the last: 2) */
+    static const float near_biases[6] = { -1.0f, 0.0f, 1.0f, 0.75f, 1.0f, -0.75f };  /* lambda 1 (the last two: 2) */
     static const float mix_biases[6] = { 0.0f, 0.5f, 0.25f, -0.25f, -0.5f, 0.75f };  /* lambda 1 */
     GLfloat got = -9, max = 0;
     GLuint t;
@@ -47,7 +47,7 @@ void ct_run(void)
     glGetFloatv(GL_MAX_TEXTURE_LOD_BIAS_EXT, &max);
     glTexEnvf(GL_TEXTURE_FILTER_CONTROL_EXT, GL_TEXTURE_LOD_BIAS_EXT, 0.5f);
     glGetTexEnvfv(GL_TEXTURE_FILTER_CONTROL_EXT, GL_TEXTURE_LOD_BIAS_EXT, &got);
-    ct_check("bias-query", got == 0.5f && max >= 3.0f, "bias read back %g, GL_MAX_TEXTURE_LOD_BIAS_EXT %g", got, max);
+    ct_check("bias-query", got == 0.5f && max >= 1.0f, "bias read back %g, GL_MAX_TEXTURE_LOD_BIAS_EXT %g", got, max);
 
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
@@ -64,11 +64,12 @@ void ct_run(void)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
-    /* Top row: one level each (nearest), a whole level apart; the last at lambda 2 biased down by 0.75 (level 1). */
+    /* Top row: one level each (nearest): lambda 1 biased to 0, 1, 2 and 1.75 (level 2); then lambda 2 biased up by 1
+     * (level 3) and down by 0.75 (1.25: level 1). */
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     for (i = 0; i < 6; i++)
-        square(40.0f + i * 96.0f, 320.0f, i == 5 ? 2 : 1, near_biases[i]);
+        square(40.0f + i * 96.0f, 320.0f, i >= 4 ? 2 : 1, near_biases[i]);
     /* Middle row: two levels mixed (trilinear) in quarters. */
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);

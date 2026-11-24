@@ -64,5 +64,18 @@
    "frac": 0.03,
    "_why": "8 bits: checkerboards fine enough to change colour at the dither's own scale; their 4x4 averages cannot come back exactly through a 3-3-2 palette (worst 50 levels on 1.5% of pixels)."
   }
+ },
+ "t38_0": {
+  "radeon": {
+   "ignore": [
+    [
+     24,
+     216,
+     312,
+     312
+    ]
+   ],
+   "_why": "DOT3_RGBA's quad (the left of the middle row): the 7500 didn't take the dot product into the alpha with Mesa's combine words or with the alpha's own dot3 (P3, 2026-11-24), so its alpha is the alpha combine's (said once, DGL-WARN) and the quad isn't blended. The rest of the frame is compared."
+  }
  }
 }

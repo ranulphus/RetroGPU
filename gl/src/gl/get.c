@@ -115,6 +115,12 @@ static int query(GLenum p, double *v)
     case GL_MAX_ATTRIB_STACK_DEPTH: case GL_MAX_CLIENT_ATTRIB_STACK_DEPTH: v[0] = 16; return 1;
     case GL_MAX_TEXTURE_UNITS_ARB: { extern int dgl_texture_units(void); v[0] = dgl_texture_units(); return 1; }
     case GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT: { dgl_caps c; dgl_get_caps(&c); v[0] = c.max_anisotropy; return 1; }
+    case GL_NUM_COMPRESSED_TEXTURE_FORMATS_ARB: v[0] = 4; return 1;
+    case GL_COMPRESSED_TEXTURE_FORMATS_ARB:
+        v[0] = GL_COMPRESSED_RGB_S3TC_DXT1_EXT, v[1] = GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
+        v[2] = GL_COMPRESSED_RGBA_S3TC_DXT3_EXT, v[3] = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+        return 4;
+    case GL_TEXTURE_COMPRESSION_HINT_ARB: v[0] = GL_DONT_CARE; return 1;
     case GL_MAX_TEXTURE_LOD_BIAS_EXT: { dgl_caps c; dgl_get_caps(&c); v[0] = c.max_lod_bias; return 1; }
     default: return dgl_buffer_query(p, v);     /* buffer bindings, element limits (buffer.c) */
     }
@@ -184,7 +190,8 @@ static const char *extensions(void)
         strcpy(buf, "GL_EXT_bgra "
                     "GL_EXT_texture_edge_clamp GL_SGIS_texture_edge_clamp "
                     "GL_EXT_paletted_texture GL_EXT_shared_texture_palette "
-                    "GL_ARB_vertex_buffer_object GL_EXT_draw_range_elements ");
+                    "GL_ARB_vertex_buffer_object GL_EXT_draw_range_elements "
+                    "GL_ARB_texture_compression GL_EXT_texture_compression_s3tc ");
         if (c.texture_units >= 2)
             strcat(buf, "GL_ARB_multitexture GL_SGIS_multitexture "
                         "GL_ARB_texture_env_combine GL_EXT_texture_env_combine ");

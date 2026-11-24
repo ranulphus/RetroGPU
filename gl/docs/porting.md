@@ -158,6 +158,11 @@ dglShutdown();
     2 strips, 4 flat polygons; 7 by default). `DGL-PRIMS ... seqs=` counts them.
   - `DGL_TEXHEAP_KB=n` caps the texture heap (to test eviction, or to
     behave like a card with less memory).
+  - Picture quality for programs that don't ask for it (`docs/dx7.md`, X1): `DGL_TRILINEAR=1` draws every
+    mipmapped texture `GL_LINEAR_MIPMAP_LINEAR`; `DGL_ANISO=n` filters every texture at least n:1 anisotropically
+    where the card can (the software renderer and the Radeons: 16); `DGL_LODBIAS=x` adds x to every texture unit's
+    level-of-detail bias (negative: sharper; within the card's range, the Radeons' -1 to +1). `glGet` still reports
+    what the program set.
   - `DGL_SNAP=100,250` writes the frames shown by those swaps to
     `DGL_SNAPDIR` (default `C:\OUT`) as `F00100.PPM`...; a timedemo draws
     every frame, so these are the same pictures on every card and run.

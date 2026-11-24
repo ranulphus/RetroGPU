@@ -619,11 +619,11 @@ static rtex *unit_words(dgl_texture *t, int hw, int gl_unit)
         }
     }
     {
-        /* The level-of-detail bias: signed 8 bits, -128 for -1.0 and 127 for +4.0 (Mesa's radeonTexEnv: two
-         * scales, a 128th of a level below 0 and a 32nd above; measured on the P3 by DMIP bias=). GL's biases
-         * below -1 are drawn at -1. */
+        /* The level-of-detail bias: signed 8 bits, a 128th of a level each, -1 to +127/128 (measured on the P3's
+         * 7500 by t36 and raw values: 64 gave +0.51, 96 +0.78, 127 +0.99; Mesa's radeonTexEnv takes the positive
+         * half as a 32nd, which draws a quarter of the bias asked for). */
         GLfloat b = dgl_tex_lod_bias(gl_unit);
-        int f = b > 0 ? (int)(b * (127.0f / 4.0f) + 0.5f) : (int)(b * 128.0f - 0.5f);
+        int f = (int)(b * 128.0f + (b >= 0 ? 0.5f : -0.5f));
         f = f > 127 ? 127 : f < -128 ? -128 : f;
         min |= (uint32_t)(uint8_t)f << RADEON_LOD_BIAS_SHIFT;
     }
@@ -694,8 +694,9 @@ static void validate(void)
         c->tex[i].txablend = combine_word(&al, 1, i, i == 0);
         if (rgb.fn == GL_DOT3_RGB_ARB)          /* (Mesa: the dot product goes to the alpha too unless told not) */
             c->tex[i].txablend |= RADEON_DOT_ALPHA_DONT_REPLICATE;
-        else if (rgb.fn == GL_DOT3_RGBA_ARB)    /* (and Mesa sets the alpha's scale as the colour's then) */
-            c->tex[i].txablend = (c->tex[i].txablend & ~RADEON_SCALE_MASK) | RADEON_SCALE_4X;
+        else if (rgb.fn == GL_DOT3_RGBA_ARB)    /* (the P3's 7500 didn't take the product into the alpha with Mesa's
+                                                 * words or with the alpha's own dot3: the alpha's combine draws it) */
+            warn_once(7, "DOT3_RGBA: the alpha drawn by the alpha's combine, not the dot product");
         c->tex[i].tfactor = ub(e->color[3]) << 24 | ub(e->color[0]) << 16 | ub(e->color[1]) << 8 | ub(e->color[2]);
         pp |= i ? RADEON_TEX_1_ENABLE | RADEON_TEX_BLEND_1_ENABLE : RADEON_TEX_0_ENABLE;
     }
@@ -1119,7 +1120,7 @@ static void caps(dgl_caps *c)
     c->sub_narrow = 1;                          /* (tex_sub sends whole rows of the rectangle's) */
     c->max_texture_size = 2048;
     c->max_anisotropy = 16;
-    c->max_lod_bias = 4;                        /* (-1 the chip's lowest: unit_words) */
+    c->max_lod_bias = 1;                        /* (+1 drawn as +127/128: unit_words) */
     c->dot3 = 1;
 }
 

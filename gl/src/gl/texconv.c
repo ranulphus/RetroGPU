@@ -50,8 +50,19 @@ int dgl_ifmt_class(GLint f)
     case GL_RGBA16:
         return DGL_IF_RGBA;
     case 3: case GL_RGB: case GL_R3_G3_B2: case GL_RGB4: case GL_RGB5: case GL_RGB8: case GL_RGB10: case GL_RGB12:
-    case GL_RGB16: case GL_RGB2_EXT:
-        return DGL_IF_RGB;
+    case GL_RGB16: case GL_RGB2_EXT: case GL_COMPRESSED_RGB_ARB: case GL_COMPRESSED_RGB_S3TC_DXT1_EXT:
+        return DGL_IF_RGB;              /* (compressed formats with uncompressed texels: kept so, texcomp.c) */
+    case GL_COMPRESSED_RGBA_ARB: case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT: case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
+    case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
+        return DGL_IF_RGBA;
+    case GL_COMPRESSED_LUMINANCE_ARB:
+        return DGL_IF_LUMINANCE;
+    case GL_COMPRESSED_LUMINANCE_ALPHA_ARB:
+        return DGL_IF_LUMINANCE_ALPHA;
+    case GL_COMPRESSED_ALPHA_ARB:
+        return DGL_IF_ALPHA;
+    case GL_COMPRESSED_INTENSITY_ARB:
+        return DGL_IF_INTENSITY;
     case GL_RGB5_A1:
         return DGL_IF_RGB5_A1;
     case 1: case GL_LUMINANCE: case GL_LUMINANCE4: case GL_LUMINANCE8: case GL_LUMINANCE12: case GL_LUMINANCE16:

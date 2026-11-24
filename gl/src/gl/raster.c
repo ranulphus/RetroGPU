@@ -191,6 +191,7 @@ void APIENTRY glHint(GLenum target, GLenum mode)
     case GL_PERSPECTIVE_CORRECTION_HINT: dgl_gl.hint_perspective = mode; break;
     case GL_FOG_HINT: dgl_gl.hint_fog = mode; break;
     case GL_POINT_SMOOTH_HINT: case GL_LINE_SMOOTH_HINT: case GL_POLYGON_SMOOTH_HINT: break;
+    case GL_TEXTURE_COMPRESSION_HINT_ARB: break;     /* (compressed blocks decoded; nothing compressed) */
     default: dgl_gl_error(GL_INVALID_ENUM);
     }
 }

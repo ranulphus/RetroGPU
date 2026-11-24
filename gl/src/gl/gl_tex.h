@@ -26,6 +26,8 @@ typedef struct {
     GLint    ifmt;                 /* the internal format as given */
     unsigned char *rgba;           /* shadow copy, RGBA8, already reduced to the class */
     unsigned char *idx;            /* DGL_IF_INDEX instead: the colour indices */
+    unsigned char *comp;           /* glCompressedTexImage2DARB's blocks as given (texcomp.c), or NULL */
+    int      comp_size;
 } dgl_level;
 #define DGL_LEVEL_DEFINED(L) ((L)->rgba || (L)->idx)
 
@@ -91,6 +93,13 @@ int dgl_texture_units(void);                    /* ext.c: 2 with the G400's comb
 GLenum dgl_tex_env_mode(int unit);
 const GLfloat *dgl_tex_env_color(int unit);
 dgl_palette *dgl_bound_palette(void);           /* the bound texture's own table (created) */
+
+dgl_level *dgl_bound_level(int level);          /* the active unit's bound texture's level (NULL: none) */
+
+/* texcomp.c: S3TC (DXT1, 3, 5) blocks */
+int  dgl_s3tc_format(GLenum f);
+int  dgl_s3tc_size(GLenum f, int w, int h);     /* bytes of a w x h image's blocks */
+void dgl_s3tc_decode(GLenum f, const unsigned char *src, int w, int h, unsigned char *dst);
 
 /* palette.c */
 void dgl_palettes_reset(void);

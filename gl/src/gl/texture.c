@@ -47,7 +47,7 @@ static void env_defaults(dgl_texenv *e)
     e->rgb_scale = e->alpha_scale = 1.0f;
 }
 
-/* Picture quality for programs that don't ask (docs/quality.md): DGL_TRILINEAR=1 draws every mipmapping texture
+/* Picture quality for programs that don't ask (docs/dx7.md, X1): DGL_TRILINEAR=1 draws every mipmapping texture
  * GL_LINEAR_MIPMAP_LINEAR, DGL_ANISO=N filters every texture at least N:1 where the card can, DGL_LODBIAS=x adds x
  * to every unit's level-of-detail bias (negative: sharper). Read once. */
 static struct { int read, trilinear; GLfloat aniso, lod_bias; } q;
@@ -171,6 +171,7 @@ static void destroy(GLuint name)
     for (l = 0; l < DGL_MAX_LEVELS; l++) {
         free(t->level[l].rgba);
         free(t->level[l].idx);
+        free(t->level[l].comp);
     }
     free(t->own);
     free(t);
@@ -358,6 +359,12 @@ void APIENTRY glGetTexParameteriv(GLenum target, GLenum pname, GLint *out)
 
 /* Level parameters of the bound texture, as uploaded (the internal format
  * is the base format DOS-GL stores). */
+dgl_level *dgl_bound_level(int level)
+{
+    dgl_texture *t = get(bound, 0);
+    return t && level >= 0 && level < DGL_MAX_LEVELS ? &t->level[level] : NULL;
+}
+
 void APIENTRY glGetTexLevelParameteriv(GLenum target, GLint level, GLenum pname, GLint *out)
 {
     dgl_texture *t = get(bound, 0);
@@ -378,6 +385,11 @@ void APIENTRY glGetTexLevelParameteriv(GLenum target, GLint level, GLenum pname,
         break;
     }
     case GL_TEXTURE_LUMINANCE_SIZE: case GL_TEXTURE_INTENSITY_SIZE: out[0] = 0; break;
+    case GL_TEXTURE_COMPRESSED_ARB: out[0] = L && L->comp ? 1 : 0; break;
+    case GL_TEXTURE_COMPRESSED_IMAGE_SIZE_ARB:
+        if (!L || !L->comp) { dgl_gl_error(GL_INVALID_OPERATION); return; }
+        out[0] = L->comp_size;
+        break;
     default: dgl_gl_error(GL_INVALID_ENUM);
     }
 }
@@ -650,7 +662,9 @@ void APIENTRY glTexImage2D(GLenum target, GLint level, GLint internalformat, GLs
         dgl_be->tex_change(t);
     free(L->rgba);
     free(L->idx);
-    L->rgba = L->idx = NULL;
+    free(L->comp);
+    L->rgba = L->idx = L->comp = NULL;
+    L->comp_size = 0;
     if (ifc == DGL_IF_INDEX)
         L->idx = (unsigned char *)calloc((size_t)w * h, 1);
     else
@@ -694,6 +708,11 @@ void APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint x, GLint y, GLsi
     }
     if (w && h && dgl_be->tex_change)
         dgl_be->tex_change(t);
+    if (w && h && L->comp) {                    /* (the blocks no longer the texels: compressed no longer) */
+        free(L->comp);
+        L->comp = NULL;
+        L->comp_size = 0;
+    }
     {
         static uint32_t *tmp;
         static size_t tmp_n;
