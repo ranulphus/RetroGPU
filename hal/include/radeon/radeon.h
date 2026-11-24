@@ -145,6 +145,9 @@ void radeon_cp_stop(void);
 void radeon_cp_forget(void);
 void radeon_cp_peek(uint32_t *rp, uint32_t *wp, const volatile uint32_t **base, uint32_t *dwords);
 void radeon_out(uint32_t reg, uint32_t v);      /* a drawing-engine register, either way */
+/* (engine2d.c) Bytes into video memory through the command stream, ordered with the drawing around them: texture
+ * levels without an engine sync. off and bytes multiples of 32. 0, or -1 without the command processor. */
+int  radeon_upload(uint32_t off, const uint32_t *data, uint32_t bytes);
 extern void (*radeon_cp_trace)(const char *stage, uint32_t a, uint32_t b);     /* (a test's log of radeon_cp_init's steps) */
 
 /* cursor.c: the hardware cursor (64 x 64), as the Rage 128 layer's: the AND and XOR masks, rows of 8 bytes, the

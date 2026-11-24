@@ -247,6 +247,7 @@ static uint32_t ub(double v) { return (uint32_t)clampd(floor(v + 0.5), 0, 255); 
 /* (experiments, RD2: cfmt=HEX SE_COORD_FMT's word; vmode=1: s and t multiplied by 1/w here; 2: x, y and z
  * multiplied by w and the fourth coordinate w; 3: both) */
 static int use_ring;                 /* (ring[=KB]: the command processor from a ring, RD3) */
+static int nostream;                 /* (nostream: with the ring, textures still written by the CPU) */
 static uint32_t ring_kb = 64;
 static void cp_log(const char *stage, uint32_t a, uint32_t b)
 {
@@ -498,20 +499,33 @@ static int make_texture(int fmt, int log2size, int levels, int linear, int persp
     /* The levels one after another from TOFF, each starting on a 32-byte boundary, its rows padded to 32 bytes (a
      * level narrower than that: Mesa's radeonSetTexImages and the DRM's radeon_cp_dispatch_texture); written by
      * the CPU with the engine idle, then the chip's caches flushed. */
-    radeon_sync(2000000);
     {
+        /* (through the ring: the levels as bytes in the stream, no sync; nostream: the CPU's writes as without it) */
+        static uint32_t *up;
         uint32_t off = TOFF;
+        if (!up && !(up = malloc(512 * 512 * 4)))
+            return -1;
+        if (!(use_ring && !nostream))
+            radeon_sync(2000000);
         for (n = 0; n < levels; n++) {
             int sz = 1 << (log2size - n), row = sz * cpp, stride = (row + 31) & ~31, y;
-            volatile uint8_t *d = radeon.fb + off;
             const uint8_t *src = (const uint8_t *)lv[n];
+            uint8_t *d = (uint8_t *)up;
             for (y = 0; y < sz; y++)
                 for (i = 0; i < stride; i++)
                     d[y * stride + i] = i < row ? src[y * row + i] : 0;
+            if (use_ring && !nostream)
+                radeon_upload(off, up, (uint32_t)(stride * sz));
+            else {
+                volatile uint8_t *v = radeon.fb + off;
+                for (i = 0; i < stride * sz; i++)
+                    v[i] = d[i];
+            }
             lvoff[n] = off;
             off = (off + (uint32_t)(stride * sz) + 31u) & ~31u;
         }
-        radeon_vram_written(off - 4);
+        if (!(use_ring && !nostream))
+            radeon_vram_written(off - 4);
     }
     return 0;
 }
@@ -595,6 +609,8 @@ int main(int argc, char **argv)
             snap = atoi(argv[i] + 5);
         else if (!strcmp(argv[i], "ring"))
             use_ring = 1;
+        else if (!strcmp(argv[i], "nostream"))
+            nostream = 1;
         else if (!strncmp(argv[i], "ring=", 5))
             use_ring = 1, ring_kb = (uint32_t)atoi(argv[i] + 5);
         else if (!strncmp(argv[i], "seed=", 5))

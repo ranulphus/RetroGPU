@@ -198,8 +198,15 @@ with the same pixel counts as by register writes.
 What the first start read on the P3: `AIC_CNTL` 2 before, `CP_RB_RPTR` 0, `MC_STATUS` 7 with the display's requests
 off, `RBBM_STATUS` 140 (64 FIFO entries free, not active) before and after the first fetch.
 
-Still to do in RD3: the 2D tests through the ring, texels through the stream (`CNTL_HOSTDATA_BLT`), flips in the
-stream, the override file, and the cycles a word (`DPIO`).
+**2D through the ring** (`DTWOD 16 ring`): the same results as by register writes (the same four stray pixels of
+the card's in `mixed-16`), the host-data operations as type-0 packets to the `HOST_DATA` registers.
+
+**Texels through the stream** (`radeon_upload`, a `CNTL_HOSTDATA_BLT` packet as X.org's `RADEONHostDataBlit`): the
+destination is taken as an 8-bit surface 64 bytes wide, so a level's bytes land as they are whatever its format,
+with no engine sync and in order with the drawing around them. `DTRI ring` uploads every texture this way: all 13
+scenes pass. A mode set stops the command processor first (`radeon_set_mode`, `radeon_text_mode`).
+
+Still to do in RD3: flips in the stream, the override file, and the cycles a word (`DPIO`).
 
 ## The rest of the family: the RV200 (Radeon 7500) and the first Radeon (R100)
 

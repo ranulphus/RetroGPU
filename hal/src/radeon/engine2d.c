@@ -287,3 +287,53 @@ void radeon_mono(int x, int y, int w, int h, const uint8_t *bits, int stride, ui
     }
 }
 
+/* Bytes into video memory through the engine, in the command stream (X.org's RADEONHostDataBlit, Mesa's
+ * radeonUploadSubImage): no engine sync, ordered with the drawing before and after it. The destination is taken as
+ * an 8-bit surface 64 bytes wide (the pitch's unit), so the bytes land as they are whatever the texels' format: a
+ * half row first when off is 32 bytes into a row, whole rows, a half row last. off and bytes multiples of 32
+ * (texture levels: 32-byte aligned, rows padded to 32 bytes); data bytes / 4 dwords. Each packet's surface starts
+ * at the kilobyte below its first row, so rows never count high. 0, or -1 (the command processor not running:
+ * the caller writes video memory itself, with the engine idle). */
+static void upload_rows(uint32_t off, int x, int w, int rows, const uint32_t *data)
+{
+    uint32_t p[10], rem = off & 1023u, dwords = (uint32_t)(w / 4) * (uint32_t)rows;
+    int y = (int)(rem / 64u);
+    p[0] = RADEON_CP_PACKET3(RADEON_CNTL_HOSTDATA_BLT, dwords + 8u);
+    p[1] = RADEON_GMC_DST_PITCH_OFFSET_CNTL | RADEON_GMC_DST_CLIPPING | RADEON_GMC_BRUSH_NONE |
+           (uint32_t)RADEON_DT_CI8 << RADEON_GMC_DST_DATATYPE_SHIFT | RADEON_GMC_SRC_DATATYPE_COLOR | RADEON_ROP3_S |
+           RADEON_DP_SRC_SOURCE_HOST_DATA | RADEON_GMC_CLR_CMP_CNTL_DIS | RADEON_GMC_WR_MSK_DIS;
+    p[2] = 1u << 22 | (radeon.fb_location + (off - rem)) >> 10;
+    p[3] = (uint32_t)y << 16 | (uint32_t)x;
+    p[4] = (uint32_t)(y + rows) << 16 | (uint32_t)(x + w);
+    p[5] = 0xFFFFFFFFu, p[6] = 0xFFFFFFFFu;
+    p[7] = (uint32_t)y << 16 | (uint32_t)x;
+    p[8] = (uint32_t)rows << 16 | (uint32_t)w;
+    p[9] = dwords;
+    radeon_cp_out(p, 10);
+    radeon_cp_out(data, (int)dwords);
+}
+
+int radeon_upload(uint32_t off, const uint32_t *data, uint32_t bytes)
+{
+    if (!radeon_cp_running() || (off & 31u) || (bytes & 31u) || !bytes || off + bytes > radeon.vram_bytes)
+        return -1;
+    settle();
+    if (off & 63u) {                            /* (the second half of a 64-byte row) */
+        upload_rows(off - 32u, 32, 32, 1, data);
+        off += 32u, data += 8, bytes -= 32u;
+    }
+    while (bytes >= 64u) {
+        uint32_t rows = bytes / 64u, left = (1024u - (off & 1023u)) / 64u;
+        if (rows > left)
+            rows = left;                        /* (to the next kilobyte: the next packet starts a surface there) */
+        if (rows > 120u)
+            rows = 120u;
+        upload_rows(off, 0, 64, (int)rows, data);
+        off += rows * 64u, data += rows * 16u, bytes -= rows * 64u;
+    }
+    if (bytes)
+        upload_rows(off, 0, 32, 1, data);
+    fifo_wait(1);
+    eng_wr(RADEON_WAIT_UNTIL, RADEON_WAIT_2D_IDLECLEAN | RADEON_WAIT_HOST_IDLECLEAN);
+    return 0;
+}

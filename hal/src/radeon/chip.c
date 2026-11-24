@@ -257,8 +257,10 @@ void radeon_vram_written(uint32_t last)
 int radeon_set_mode(const radeon_mode *m)
 {
     sys_rmregs r;
-    if (radeon.mmio)
+    if (radeon.mmio) {
+        radeon_cp_stop();               /* (the BIOS's mode set with the command processor off) */
         radeon_sync(100000);
+    }
     memset(&r, 0, sizeof r);
     r.eax = 0x4F02;
     r.ebx = 0x4000u | m->mode;                      /* (the linear window) */
@@ -272,8 +274,10 @@ int radeon_set_mode(const radeon_mode *m)
 void radeon_text_mode(void)
 {
     sys_rmregs r;
-    if (radeon.mmio)
+    if (radeon.mmio) {
+        radeon_cp_stop();
         radeon_sync(100000);
+    }
     memset(&r, 0, sizeof r);
     r.eax = 0x0003;
     sys_rm_int(0x10, &r);

@@ -70,6 +70,7 @@ static void random_clip(surface *t)
 }
 
 static int each;                        /* (DTWOD each: below) */
+static int use_ring;                    /* (DTWOD ring: the command processor from a ring, RD3) */
 static int aligned;                     /* (DTWOD aligned: s2 on the engine's 1 KB grid too) */
 
 static int differs(const surface *t, char *why)
@@ -463,6 +464,11 @@ static int depth(int b)
         return 0;
     }
     hx_test(n, 1, "mode %03x, pitch %u", m.mode, m.pitch_bytes);
+    if (use_ring) {
+        int rc = radeon_cp_init(NULL, 65536u);
+        name_of(n, "cp");
+        hx_test(n, rc == 0, rc == 0 ? "running from a 64 KB ring" : "did not start: plain register writes");
+    }
     /* The screen, then two surfaces of other pitches off it. */
     off = (uint32_t)m.pitch_bytes * SH;
     used = off + 1024u * 1024u;                 /* (s1 and s2 at 32 bits: 512 KB) */
@@ -492,6 +498,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "16")) d16 = 1;
         else if (!strcmp(argv[i], "32")) d32 = 1;
         else if (!strcmp(argv[i], "each")) each = 1;
+        else if (!strcmp(argv[i], "ring")) use_ring = 1;
         else if (!strcmp(argv[i], "aligned")) aligned = 1;
         else if (!strncmp(argv[i], "base=", 5)) vbase += (uint32_t)atoi(argv[i] + 5) << 20;
         else if (!strncmp(argv[i], "shift=", 6)) vbase += (uint32_t)atoi(argv[i] + 6) << 10;   /* (KB more) */

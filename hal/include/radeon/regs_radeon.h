@@ -79,6 +79,7 @@
 #define RADEON_DP_GUI_MASTER_CNTL   0x146C
 #define     RADEON_GMC_SRC_PITCH_OFFSET_CNTL (1u << 0)
 #define     RADEON_GMC_DST_PITCH_OFFSET_CNTL (1u << 1)
+#define     RADEON_GMC_DST_CLIPPING          (1u << 3)
 #define     RADEON_GMC_BRUSH_SOLID_COLOR     (13u << 4)
 #define     RADEON_GMC_BRUSH_NONE            (15u << 4)
 #define     RADEON_GMC_DST_DATATYPE_SHIFT    8
