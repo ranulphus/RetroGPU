@@ -113,6 +113,7 @@ typedef struct {
              se_coord_fmt, re_top_left, rb3d_stencilrefmask, rb3d_ropcntl, rb3d_planemask, se_cntl_status;
     struct {
         uint32_t txfilter, txformat, txoffset, txcblend, txablend, tfactor, border_color;
+        uint32_t cubic_faces, cubic_off[5];     /* a cube map's faces 1-4 sizes, 0-4 offsets (TXOFFSET: face 5) */
     } tex[3];
 } radeon_ctx3d;
 extern radeon_ctx3d radeon_3d;
@@ -121,6 +122,7 @@ typedef struct {
     float x, y, z, rhw;                 /* window coordinates (pixel centres at halves), z 0..1, 1/w */
     uint32_t argb, spec;                /* (the specular's top byte: the fog factor) */
     float s, t, s2, t2, s3, t3;         /* (the three units' coordinates) */
+    float q, q2, q3;                    /* a cube map unit's third coordinate (r, sent in q's place: Mesa's swtcl) */
 } radeon_vertex;
 /* The state for a colour buffer at color_off (pitch_bytes a row, 16 or 32 bits) and a depth buffer at z_off (16
  * bits, or 24 with stencil; z_off 0 and zbits 0: none): Mesa's defaults, vertices in window coordinates. */
@@ -133,14 +135,17 @@ void radeon_3d_tex_written(void);       /* texels written under a unit's texture
  * depth's own value (16 or 24 bits); stencil < 0: the stencil left. Wanted where depth is tiled (RADEON_TILED_Z):
  * the 2D engine writes it as if linear. */
 void radeon_3d_depth_clear(int x, int y, int w, int h, uint32_t z, int write_z, int stencil);
-/* What a vertex carries after x, y, z: RADEON_VF_* below, in this order: rhw, the colour, the specular and fog,
- * s and t, s2 and t2, s3 and t3. */
+/* What a vertex carries after x, y, z: RADEON_VTX_* below, in this order: rhw, the colour, the specular and fog,
+ * s and t (and q), s2 and t2 (and q2), s3 and t3 (and q3). */
 #define RADEON_VTX_RHW   1
 #define RADEON_VTX_ARGB  2
 #define RADEON_VTX_SPEC  4
 #define RADEON_VTX_ST    8
 #define RADEON_VTX_ST2   16
 #define RADEON_VTX_ST3   32
+#define RADEON_VTX_Q     64                 /* (each unit's q after its s and t: a cube map's r) */
+#define RADEON_VTX_Q2    128
+#define RADEON_VTX_Q3    256
 void radeon_3d_format(int what);
 void radeon_tri(const radeon_vertex *a, const radeon_vertex *b, const radeon_vertex *c);
 void radeon_poly(const radeon_vertex *v, int n);     /* a convex polygon of 3 to 16 vertices as one triangle fan */

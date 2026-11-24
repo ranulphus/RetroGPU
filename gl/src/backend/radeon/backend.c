@@ -48,6 +48,7 @@ typedef struct {
     unsigned stamp;
     unsigned palgen;                    /* colour-index levels: the palette's generation expanded through */
     const dgl_palette *pal;
+    int      cube;                      /* a cube map: one level, lvoff[0..5] its faces (+X .. -Z) */
 } rtex;
 
 static unsigned stamp;
@@ -253,8 +254,14 @@ static rtex *prepare(dgl_texture *t)
     }
     if (n > 12)
         n = 12;
-    for (i = 0; i < n; i++)
-        size += level_bytes(&t->level[i], cpp);
+    if (t->target == GL_TEXTURE_CUBE_MAP_ARB) {
+        /* A cube map: its six faces' base levels, one after the other (Mesa's radeonSetTexImages: the R100 family
+         * can't mipmap a cube map). */
+        n = 1;
+        size = 6u * ((level_bytes(l0, cpp) + 31u) & ~31u);
+    } else
+        for (i = 0; i < n; i++)
+            size += level_bytes(&t->level[i], cpp);
     {
         /* Made again (its levels or palette changed): into a new block, the old one retired until the next sync,
          * so the chip need not drain first. */
@@ -281,11 +288,20 @@ static rtex *prepare(dgl_texture *t)
         }
     }
     o = (x->block + 31u) & ~31u;
-    for (i = 0; i < n; i++) {
-        x->lvoff[i] = o;
-        send_rows(t, &t->level[i], pal, o, 0, t->level[i].h, dt, cpp);
-        o += level_bytes(&t->level[i], cpp);
-    }
+    if (t->target == GL_TEXTURE_CUBE_MAP_ARB) {
+        for (i = 0; i < 6; i++) {
+            const dgl_level *f = DGL_FACE_LEVEL(t, i, 0);
+            x->lvoff[i] = o;
+            send_rows(t, f, NULL, o, 0, f->h, dt, cpp);
+            o += (level_bytes(f, cpp) + 31u) & ~31u;
+        }
+        x->cube = 1;
+    } else
+        for (i = 0; i < n; i++) {
+            x->lvoff[i] = o;
+            send_rows(t, &t->level[i], pal, o, 0, t->level[i].h, dt, cpp);
+            o += level_bytes(&t->level[i], cpp);
+        }
     if (!radeon_cp_running())
         radeon_vram_written(o - 4u);
     radeon_3d_tex_written();
@@ -348,6 +364,7 @@ static int valid_ok;                    /* radeon_3d holds GL's state now (until
 static const dgl_texture *valid_tex[2];
 static int two;                         /* the second unit on: s2, t2 sent */
 static int shift_s[2], shift_t[2];      /* a repeating texture: coordinates shifted by whole periods per triangle */
+static int cube_unit[2];                /* GL's unit draws a cube map: its r goes in q's place */
 static float vx_s, vx_o, vy_s, vy_o, vz_s, vz_o;    /* the viewport's scale and offset, from the last validate */
 
 /* 0..1 to a byte without control-word switches (the TNT2 back end's: one add, an integer clamp). */
@@ -588,6 +605,7 @@ static rtex *unit_words(dgl_texture *t, int hw, int gl_unit)
     int mip, n;
     uint32_t min, mag;
     shift_s[gl_unit] = shift_t[gl_unit] = 0;
+    cube_unit[gl_unit] = 0;
     if (!x)
         return NULL;
     mip = t->min_filter != GL_NEAREST && t->min_filter != GL_LINEAR && x->levels > 1;
@@ -634,14 +652,32 @@ static rtex *unit_words(dgl_texture *t, int hw, int gl_unit)
         (uint32_t)x->lw << RADEON_TXFORMAT_WIDTH_SHIFT | (uint32_t)x->lh << RADEON_TXFORMAT_HEIGHT_SHIFT |
         (uint32_t)hw << 24 | RADEON_TXFORMAT_PERSPECTIVE_ENABLE;       /* (its own coordinates: ST_ROUTE_STQn) */
     radeon_3d.tex[hw].txoffset = radeon.fb_location + x->lvoff[0];
+    radeon_3d.tex[hw].cubic_faces = 0;
+    if (x->cube) {
+        /* A cube map (Mesa's radeonSetTexImages and its state emit): faces 0 to 4 at the CUBIC_OFFSETs, face 5 at
+         * TXOFFSET; faces 1 to 4's sizes in CUBIC_FACES (face 0's in TXFORMAT); s, t and r as directions (no
+         * shift by whole periods). */
+        int f;
+        for (f = 0; f < 5; f++)
+            radeon_3d.tex[hw].cubic_off[f] = radeon.fb_location + x->lvoff[f];
+        radeon_3d.tex[hw].txoffset = radeon.fb_location + x->lvoff[5];
+        radeon_3d.tex[hw].txformat |= RADEON_TXFORMAT_CUBIC_MAP_ENABLE;
+        radeon_3d.tex[hw].cubic_faces =
+            (uint32_t)x->lw << RADEON_FACE_WIDTH_1_SHIFT | (uint32_t)x->lh << RADEON_FACE_HEIGHT_1_SHIFT |
+            (uint32_t)x->lw << RADEON_FACE_WIDTH_2_SHIFT | (uint32_t)x->lh << RADEON_FACE_HEIGHT_2_SHIFT |
+            (uint32_t)x->lw << RADEON_FACE_WIDTH_3_SHIFT | (uint32_t)x->lh << RADEON_FACE_HEIGHT_3_SHIFT |
+            (uint32_t)x->lw << RADEON_FACE_WIDTH_4_SHIFT | (uint32_t)x->lh << RADEON_FACE_HEIGHT_4_SHIFT;
+        cube_unit[gl_unit] = 1;
+        return x;
+    }
     shift_s[gl_unit] = t->wrap_s == GL_REPEAT, shift_t[gl_unit] = t->wrap_t == GL_REPEAT;
     return x;
 }
 
 static void validate(void)
 {
-    dgl_texture *t0 = dgl_gl.texture_2d ? dgl_unit_texture(0) : NULL;
-    dgl_texture *t1 = dgl_gl.texture_2d1 ? dgl_unit_texture(1) : NULL;
+    dgl_texture *t0 = dgl_gl.texture_cube[0] ? dgl_unit_cube(0) : dgl_gl.texture_2d ? dgl_unit_texture(0) : NULL;
+    dgl_texture *t1 = dgl_gl.texture_cube[1] ? dgl_unit_cube(1) : dgl_gl.texture_2d1 ? dgl_unit_texture(1) : NULL;
     radeon_ctx3d *c = &radeon_3d;
     rtex *x0, *x1;
     comb rgb, al;
@@ -754,7 +790,8 @@ static void validate(void)
     /* (the vertex's words: x, y, z, 1/w and the colour always; the fog factor only fogging, s and t only
      * textured) */
     radeon_3d_format(RADEON_VTX_RHW | RADEON_VTX_ARGB | (fogging ? RADEON_VTX_SPEC : 0) | (x0 ? RADEON_VTX_ST : 0) |
-                     (two ? RADEON_VTX_ST2 : 0));
+                     (two ? RADEON_VTX_ST2 : 0) | (x0 && cube_unit[swap_st ? 1 : 0] ? RADEON_VTX_Q : 0) |
+                     (two && cube_unit[1] ? RADEON_VTX_Q2 : 0));
     radeon_3d_dirty = 1;                        /* (the registers that changed written at the next primitive) */
     dgl_gl.dirty &= ~(DGL_DIRTY_RASTER | DGL_DIRTY_TARGET | DGL_DIRTY_TEXTURE | DGL_DIRTY_FOG | DGL_DIRTY_CLIP);
     valid_ok = 1;
@@ -796,10 +833,10 @@ static void project(const dgl_cvtx *c, radeon_vertex *v, const dgl_cvtx *colour)
     v->argb = colour_of(colour);
     v->spec = (fogging ? ub(fog_factor(c->eye_d)) : 255u) << 24;
     if (swap_st)
-        v->s = c->s1, v->t = c->t1;
+        v->s = c->s1, v->t = c->t1, v->q = c->tr1;
     else
-        v->s = c->s, v->t = c->t;
-    v->s2 = c->s1, v->t2 = c->t1;
+        v->s = c->s, v->t = c->t, v->q = c->tr;
+    v->s2 = c->s1, v->t2 = c->t1, v->q2 = c->tr1;
 }
 
 static double offset_for(const radeon_vertex *p0, const radeon_vertex *p1, const radeon_vertex *p2)
@@ -1122,6 +1159,7 @@ static void caps(dgl_caps *c)
     c->max_anisotropy = 16;
     c->max_lod_bias = 1;                        /* (+1 drawn as +127/128: unit_words) */
     c->dot3 = 1;
+    c->cube = 1;
 }
 
 static void synced(void) { dgl_vram_sync_done(); }   /* (the blocks retired before it are free) */

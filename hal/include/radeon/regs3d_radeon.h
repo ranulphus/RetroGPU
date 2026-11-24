@@ -7,6 +7,21 @@
 #define RADEON_PP_BORDER_COLOR_0            0x1d40
 #define RADEON_PP_BORDER_COLOR_1            0x1d44
 #define RADEON_PP_BORDER_COLOR_2            0x1d48
+/* Cube maps: faces 1 to 4's sizes (face 0's in TXFORMAT), faces 0 to 4's offsets (face 5's in TXOFFSET) */
+#define RADEON_PP_CUBIC_FACES_0             0x1d24
+#define RADEON_PP_CUBIC_FACES_1             0x1d28
+#define RADEON_PP_CUBIC_FACES_2             0x1d2c
+#define     RADEON_FACE_WIDTH_1_SHIFT          0
+#define     RADEON_FACE_HEIGHT_1_SHIFT         4
+#define     RADEON_FACE_WIDTH_2_SHIFT          8
+#define     RADEON_FACE_HEIGHT_2_SHIFT         12
+#define     RADEON_FACE_WIDTH_3_SHIFT          16
+#define     RADEON_FACE_HEIGHT_3_SHIFT         20
+#define     RADEON_FACE_WIDTH_4_SHIFT          24
+#define     RADEON_FACE_HEIGHT_4_SHIFT         28
+#define RADEON_PP_CUBIC_OFFSET_T0_0         0x1dd0  /* (and _1 .. _4, 4 bytes on each) */
+#define RADEON_PP_CUBIC_OFFSET_T1_0         0x1e00
+#define RADEON_PP_CUBIC_OFFSET_T2_0         0x1e14
 #define RADEON_PP_CNTL                      0x1c38
 #define     RADEON_STIPPLE_ENABLE        (1u << 0)
 #define     RADEON_SCISSOR_ENABLE        (1u << 1)
@@ -161,6 +176,7 @@
 #define     RADEON_TXFORMAT_ENDIAN_HALFDW_SWAP (3u << 26)
 #define     RADEON_TXFORMAT_ALPHA_MASK_ENABLE  (1u << 28)
 #define     RADEON_TXFORMAT_CHROMA_KEY_ENABLE  (1u << 29)
+#define     RADEON_TXFORMAT_CUBIC_MAP_ENABLE   (1u << 30)
 #define     RADEON_TXFORMAT_CUBIC_MAP_ENABLE   (1u << 30)
 #define     RADEON_TXFORMAT_PERSPECTIVE_ENABLE (1u << 31)
 #define RADEON_PP_TXOFFSET_0                0x1c5c

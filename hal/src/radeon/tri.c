@@ -94,14 +94,16 @@ static void out(uint32_t reg, uint32_t v)
 
 void radeon_3d_emit(void)
 {
-    static const uint32_t tx[3][7] = {
+#define CUBE_OFF(b) (b), (b) + 4, (b) + 8, (b) + 12, (b) + 16
+    static const uint32_t tx[3][13] = {
         { RADEON_PP_TXFILTER_0, RADEON_PP_TXFORMAT_0, RADEON_PP_TXOFFSET_0, RADEON_PP_TXCBLEND_0, RADEON_PP_TXABLEND_0,
-          RADEON_PP_TFACTOR_0, RADEON_PP_BORDER_COLOR_0 },
+          RADEON_PP_TFACTOR_0, RADEON_PP_BORDER_COLOR_0, RADEON_PP_CUBIC_FACES_0, CUBE_OFF(RADEON_PP_CUBIC_OFFSET_T0_0) },
         { RADEON_PP_TXFILTER_1, RADEON_PP_TXFORMAT_1, RADEON_PP_TXOFFSET_1, RADEON_PP_TXCBLEND_1, RADEON_PP_TXABLEND_1,
-          RADEON_PP_TFACTOR_1, RADEON_PP_BORDER_COLOR_1 },
+          RADEON_PP_TFACTOR_1, RADEON_PP_BORDER_COLOR_1, RADEON_PP_CUBIC_FACES_1, CUBE_OFF(RADEON_PP_CUBIC_OFFSET_T1_0) },
         { RADEON_PP_TXFILTER_2, RADEON_PP_TXFORMAT_2, RADEON_PP_TXOFFSET_2, RADEON_PP_TXCBLEND_2, RADEON_PP_TXABLEND_2,
-          RADEON_PP_TFACTOR_2, RADEON_PP_BORDER_COLOR_2 },
+          RADEON_PP_TFACTOR_2, RADEON_PP_BORDER_COLOR_2, RADEON_PP_CUBIC_FACES_2, CUBE_OFF(RADEON_PP_CUBIC_OFFSET_T2_0) },
     };
+#undef CUBE_OFF
     const radeon_ctx3d *c = &radeon_3d;
     int i, k;
     if (!mode3d) {
@@ -130,7 +132,7 @@ void radeon_3d_emit(void)
     W1(RADEON_RB3D_ROPCNTL, rb3d_ropcntl);
     for (i = 0; i < 3; i++) {
         const uint32_t *now = (const uint32_t *)&c->tex[i], *was = (const uint32_t *)&sent.tex[i];
-        for (k = 0; k < 7; k++)
+        for (k = 0; k < 13; k++)
             if (!known || tex_stale || now[k] != was[k])
                 out(tx[i][k], now[k]);
     }
@@ -162,6 +164,9 @@ void radeon_3d_format(int what)
     if (what & RADEON_VTX_ST) vfmt |= RADEON_SE_VTX_FMT_ST0;
     if (what & RADEON_VTX_ST2) vfmt |= RADEON_SE_VTX_FMT_ST1;
     if (what & RADEON_VTX_ST3) vfmt |= RADEON_SE_VTX_FMT_ST2;
+    if (what & RADEON_VTX_Q) vfmt |= RADEON_SE_VTX_FMT_Q0;
+    if (what & RADEON_VTX_Q2) vfmt |= RADEON_SE_VTX_FMT_Q1;
+    if (what & RADEON_VTX_Q3) vfmt |= RADEON_SE_VTX_FMT_Q2;
 }
 
 static uint32_t fbits(float f)
@@ -183,15 +188,19 @@ static int pack(uint32_t *d, const radeon_vertex *v)
     if (vwhat & RADEON_VTX_ARGB) d[n++] = v->argb;
     if (vwhat & RADEON_VTX_SPEC) d[n++] = v->spec;
     if (vwhat & RADEON_VTX_ST) d[n++] = fbits(v->s), d[n++] = fbits(v->t);
+    if (vwhat & RADEON_VTX_Q) d[n++] = fbits(v->q);
     if (vwhat & RADEON_VTX_ST2) d[n++] = fbits(v->s2), d[n++] = fbits(v->t2);
+    if (vwhat & RADEON_VTX_Q2) d[n++] = fbits(v->q2);
     if (vwhat & RADEON_VTX_ST3) d[n++] = fbits(v->s3), d[n++] = fbits(v->t3);
+    if (vwhat & RADEON_VTX_Q3) d[n++] = fbits(v->q3);
     return n;
 }
 
 static int vwords(void)
 {
     return 3 + !!(vwhat & RADEON_VTX_RHW) + !!(vwhat & RADEON_VTX_ARGB) + !!(vwhat & RADEON_VTX_SPEC) +
-           2 * (!!(vwhat & RADEON_VTX_ST) + !!(vwhat & RADEON_VTX_ST2) + !!(vwhat & RADEON_VTX_ST3));
+           2 * (!!(vwhat & RADEON_VTX_ST) + !!(vwhat & RADEON_VTX_ST2) + !!(vwhat & RADEON_VTX_ST3)) +
+           !!(vwhat & RADEON_VTX_Q) + !!(vwhat & RADEON_VTX_Q2) + !!(vwhat & RADEON_VTX_Q3);
 }
 
 /* A primitive of n vertices (a triangle list's three, or a convex polygon's 3 to 16 as one fan): with the command
