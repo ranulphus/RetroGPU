@@ -327,6 +327,28 @@ theirs wait for a bench.)
 
 Still owed, with someone watching the P3: the games live, DFLIP's phases, the hardware cursor.
 
+## Write-combining on the frame buffer (2026-11-24)
+
+GLOS leaves this card's frame buffer uncached (its `write_combining = auto` list didn't have it). `DWC`
+(`tests/radeon/dwc.c`) times the CPU's writes there; on the P3, as GLOS has it and after `MTRR LFB ON`:
+
+| | Uncached | Write-combining |
+|---|---|---|
+| Dwords, 2 MB | 13 MB/s | 74 MB/s |
+| 16-bit stores, 2 MB (a texture's, the LFB's) | 6 MB/s | 75 MB/s |
+| A 640x480 16-bit frame copied in | 47.8 ms | 12.2 ms |
+| Read back, 2 MB | 13 MB/s | 5 MB/s |
+
+With it on everything still holds: DOS-GL's conformance 35 of 35, Glide's 26 of 27 (t22 as without it), DTWOD 9 of 9,
+DTRI's 13 scenes with textures written by the CPU, and a block written by the CPU then copied by the engine at once
+(`radeon_vram_written`'s locked instruction and read-back put the combining buffers out first). GLQuake is
+unchanged (80.7 and 87.5): its texels go through the ring, which is system memory. The chip's registers are in a
+BAR of their own (dfef0000), outside the frame buffer's, so the range can be combining whole. GLOS has the figures
+for its list; the range `MTRR LFB ON` set was 32 MB of the card's 64.
+
+The P3 was on GLOS main 2faa9e3 for this (updated that morning): the layer's scenes, both suites and GLQuake as
+on the build before.
+
 ## The rest of the family: the RV200 (Radeon 7500) and the first Radeon (R100)
 
 A Radeon 7500 LE (RV200) is to follow this card. What the references say differs, gathered here so it isn't
