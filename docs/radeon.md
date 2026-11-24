@@ -349,6 +349,11 @@ for its list; the range `MTRR LFB ON` set was 32 MB of the card's 64.
 The P3 was on GLOS main 2faa9e3 for this (updated that morning): the layer's scenes, both suites and GLQuake as
 on the build before.
 
+GLOS then put the card in its `write_combining = auto` list with a 64 MB range (GLOS main a39561b): on the P3 the
+range comes on by itself (`GLOS-MTRR wc on var=2 base=d0000000 bytes=4000000`), DWC shows the combining figures with
+nothing set by hand, and the layer's scenes, DOS-GL's t01, t14, t18 and t32, Glide's t13, t17 and t21 and GLQuake
+(80.7, 87.7, 103.8, 97.6) are as before.
+
 ## The rest of the family: the RV200 (Radeon 7500) and the first Radeon (R100)
 
 A Radeon 7500 LE (RV200) is to follow this card. What the references say differs, gathered here so it isn't
