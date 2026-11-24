@@ -2,8 +2,8 @@
  * Linux 2.6.29's drivers/gpu/drm/radeon/radeon_microcode.h, unchanged in value, under that file's notice, which
  * follows. 256 entries, each the low word then the high word, as that file has them: the loader writes
  * CP_ME_RAM_DATAH with the second and CP_ME_RAM_DATAL with the first (radeon_cp_load_microcode). It serves the
- * R100, the RV100 and the RV200 alike. A file RADEONCP.BIN beside the program (256 pairs of little-endian dwords
- * in this order) overrides it. */
+ * R100, the RV100 and the RV200 alike. The device (hal/src/rg/radeon.c) takes linux-firmware's R100_cp.bin beside
+ * the program in its place when it is there. */
 /*
  * Copyright 2007 Advanced Micro Devices, Inc.
  * All Rights Reserved.

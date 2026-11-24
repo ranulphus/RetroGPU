@@ -220,6 +220,25 @@ flips in 3 s, every one seen); without it 553 us.
 
 Still to do in RD3: the override file and the cycles a word (`DPIO`), with the device (RD4).
 
+## RD4: the device (2026-11-24)
+
+`hal/src/rg/radeon.c` puts the layer behind the device table (`rg_radeon_device`, after the Rage 128's in the
+list), made from the Rage 128's device.
+
+- **Open:** the BIOS's mode (16 or 32 bits), a requested pitch (Glide's 1,024 pixels: multiples of 8 pixels and 64
+  bytes), the command processor from a 64 KB ring (plain register writes if it doesn't start, or with
+  `DGL_RADEON_RING=0`), colour buffers, a depth buffer (Z16, or Z24S8 with 32-bit colour) and the heap.
+- **Swap:** a flip in the stream with the ring (the display waited for when vsync is asked; one flip in flight);
+  without vsync the start is taken at the next scan line (`radeon_flip_at_line`).
+- **The microcode's override:** `R100_CP.BIN` beside the program (linux-firmware's `radeon/R100_cp.bin` as it is:
+  512 big-endian dwords, each entry's high word first). The embedded table is used without it.
+- **`DGL_RADEON_VRAM=A-B`** (megabytes; `rg_radeon_vram_mb` for programs): the device keeps everything inside that
+  part of the card's memory and reports its size as the card's. For the P3's faulty card: `16-33`.
+
+`RGDEV dev=radeon` on the P3 with `DGL_RADEON_VRAM=16-33`: every line passes at 16 bits, at the mode's pitch and
+at 1,024 pixels, through the ring. (RGDEV's reference is 16-bit: its `bpp=32` is not a test of a 32-bit device;
+`DTWOD 32` covers the 2D engine there, and passes but for the card's one or two lost bytes a case.)
+
 ## The rest of the family: the RV200 (Radeon 7500) and the first Radeon (R100)
 
 A Radeon 7500 LE (RV200) is to follow this card. What the references say differs, gathered here so it isn't

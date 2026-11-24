@@ -242,6 +242,7 @@ void rg_set_format(int (*fn)(char *buf, size_t size, const char *fmt, va_list ap
 #define RG_INFO(...) do { if (RG_LOG_LEVEL >= 2) rg_logf(__VA_ARGS__); } while (0)
 #define RG_DBG(...)  do { if (RG_LOG_LEVEL >= 3) rg_logf(__VA_ARGS__); } while (0)
 #endif
-extern const rg_device rg_mga_device, rg_virge_device, rg_tnt2_device, rg_r128_device, rg_vbe_device, rg_mem_device;
+extern const rg_device rg_mga_device, rg_virge_device, rg_tnt2_device, rg_r128_device, rg_radeon_device, rg_vbe_device,
+                       rg_mem_device;
 
 #endif

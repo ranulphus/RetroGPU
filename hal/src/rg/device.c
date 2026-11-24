@@ -10,7 +10,7 @@
 
 
 static const rg_device *const devices[] = { &rg_mga_device, &rg_virge_device, &rg_tnt2_device, &rg_r128_device,
-                                            &rg_vbe_device, &rg_mem_device };   /* (DGL_DEVICE unset: in this order) */
+                                            &rg_radeon_device, &rg_vbe_device, &rg_mem_device };   /* (DGL_DEVICE unset: in this order) */
 #define NDEV ((int)(sizeof devices / sizeof devices[0]))
 
 
