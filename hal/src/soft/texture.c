@@ -336,8 +336,19 @@ void soft_combine_apply(const soft_stage *st, const float tex[4], const float pr
     arg(st, st->rgb.src[0], st->rgb.op[0], tex, prim, prev, a0);
     arg(st, st->rgb.src[1], st->rgb.op[1], tex, prim, prev, a1);
     arg(st, st->rgb.src[2], st->rgb.op[2], tex, prim, prev, a2);
-    for (k = 0; k < 3; k++)
-        out[k] = clamp01(func(st->rgb.func, a0[k], a1[k], a2[k]) * st->rgb.scale);
+    if (st->rgb.func == SOFT_C_DOT3_RGB || st->rgb.func == SOFT_C_DOT3_RGBA) {
+        /* GL_ARB_texture_env_dot3: 4 ((r0 - 1/2)(r1 - 1/2) + (g0 - 1/2)(g1 - 1/2) + (b0 - 1/2)(b1 - 1/2)), scaled */
+        float d = 4.0f * ((a0[0] - 0.5f) * (a1[0] - 0.5f) + (a0[1] - 0.5f) * (a1[1] - 0.5f) +
+                          (a0[2] - 0.5f) * (a1[2] - 0.5f));
+        d = clamp01(d * st->rgb.scale);
+        out[0] = out[1] = out[2] = d;
+        if (st->rgb.func == SOFT_C_DOT3_RGBA) {
+            out[3] = d;
+            return;
+        }
+    } else
+        for (k = 0; k < 3; k++)
+            out[k] = clamp01(func(st->rgb.func, a0[k], a1[k], a2[k]) * st->rgb.scale);
     arg(st, st->alpha.src[0], st->alpha.op[0], tex, prim, prev, a0);
     arg(st, st->alpha.src[1], st->alpha.op[1], tex, prim, prev, a1);
     arg(st, st->alpha.src[2], st->alpha.op[2], tex, prim, prev, a2);

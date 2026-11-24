@@ -518,6 +518,22 @@ static void comb8(int unit, const int *tex, const int *prim, int *c)
 {
     const soft_stage *st = &S.stage[unit];
     int out[4], k;
+    if (st->rgb.func == SOFT_C_DOT3_RGB || st->rgb.func == SOFT_C_DOT3_RGBA) {
+        /* dot3: 4 x the sum of (a - 1/2)(b - 1/2) over the colour, in 255ths: 4 sum (a-127.5)(b-127.5) / 255 */
+        int d = 0;
+        for (k = 0; k < 3; k++)
+            d += (2 * arg8(unit, st->rgb.src[0], st->rgb.op[0], tex, prim, c, k) - 255) *
+                 (2 * arg8(unit, st->rgb.src[1], st->rgb.op[1], tex, prim, c, k) - 255);
+        d = (d + (d >= 0 ? 127 : -127)) / 255;      /* (4 x (2a-255)(2b-255)/4 / 255) */
+        d = clamp255(st->rgb.scale == 1.0f ? d : st->rgb.scale == 2.0f ? 2 * d : 4 * d);
+        out[0] = out[1] = out[2] = d;
+        out[3] = st->rgb.func == SOFT_C_DOT3_RGBA ? d
+               : func8(&st->alpha, arg8(unit, st->alpha.src[0], st->alpha.op[0], tex, prim, c, 3),
+                       arg8(unit, st->alpha.src[1], st->alpha.op[1], tex, prim, c, 3),
+                       arg8(unit, st->alpha.src[2], st->alpha.op[2], tex, prim, c, 3));
+        c[0] = out[0], c[1] = out[1], c[2] = out[2], c[3] = out[3];
+        return;
+    }
     for (k = 0; k < 3; k++)
         out[k] = func8(&st->rgb, arg8(unit, st->rgb.src[0], st->rgb.op[0], tex, prim, c, k),
                        arg8(unit, st->rgb.src[1], st->rgb.op[1], tex, prim, c, k),

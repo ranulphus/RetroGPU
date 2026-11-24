@@ -25,6 +25,7 @@ typedef struct {
                                      * given) */
     float max_anisotropy;           /* GL_EXT_texture_filter_anisotropic's limit; 0 or 1: none (not advertised) */
     float max_lod_bias;             /* GL_EXT_texture_lod_bias: biases within +-this; 0: none (not advertised) */
+    int dot3;                       /* GL_ARB_texture_env_dot3's combines (with two units or more) */
 } dgl_caps;
 void dgl_get_caps(dgl_caps *c);     /* ext.c: the back end's caps, zeroed first and made consistent */
 

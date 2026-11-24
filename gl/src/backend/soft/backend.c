@@ -155,6 +155,8 @@ static int func_of(GLenum f)
     case GL_ADD: return SOFT_C_ADD;
     case GL_ADD_SIGNED_ARB: return SOFT_C_ADD_SIGNED;
     case GL_INTERPOLATE_ARB: return SOFT_C_INTERPOLATE;
+    case GL_DOT3_RGB_ARB: return SOFT_C_DOT3_RGB;
+    case GL_DOT3_RGBA_ARB: return SOFT_C_DOT3_RGBA;
     default: return SOFT_C_SUBTRACT;
     }
 }
@@ -502,6 +504,7 @@ static void caps(dgl_caps *c)
     c->max_texture_size = 1024;
     c->max_anisotropy = 16;                     /* (the reference span's soft_sample) */
     c->max_lod_bias = 15;
+    c->dot3 = 1;
 }
 
 static void synced(void) { }

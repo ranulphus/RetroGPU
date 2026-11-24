@@ -485,6 +485,13 @@ static uint32_t combine_word(const comb *c, int alpha, int hw_unit, int first)
         w |= RADEON_BLEND_CTL_BLEND;
         PUT(0, 1), PUT(1, 0), PUT(2, 2);
         break;
+    case GL_DOT3_RGB_ARB:               /* (the colour's only; Mesa: the chip's dot3 at its x4 is GL's at x1) */
+    case GL_DOT3_RGBA_ARB:
+        w |= RADEON_BLEND_CTL_DOT3 | RADEON_SCALE_4X;
+        PUT(0, 0), PUT(1, 1);
+        if (c->scale != 1.0f)
+            warn_once(6, "dot3 with a scale above 1: drawn at 1 (the chip's dot3 has its own x4 only)");
+        return w;
     default:                            /* GL_MODULATE: arg0 x arg1 + 0 */
         w |= RADEON_BLEND_CTL_ADD;
         PUT(0, 0), PUT(1, 1);
@@ -685,6 +692,10 @@ static void validate(void)
         env_combines(glu, e, x->family, &rgb, &al, xlat);
         c->tex[i].txcblend = combine_word(&rgb, 0, i, i == 0);
         c->tex[i].txablend = combine_word(&al, 1, i, i == 0);
+        if (rgb.fn == GL_DOT3_RGB_ARB)          /* (Mesa: the dot product goes to the alpha too unless told not) */
+            c->tex[i].txablend |= RADEON_DOT_ALPHA_DONT_REPLICATE;
+        else if (rgb.fn == GL_DOT3_RGBA_ARB)    /* (and Mesa sets the alpha's scale as the colour's then) */
+            c->tex[i].txablend = (c->tex[i].txablend & ~RADEON_SCALE_MASK) | RADEON_SCALE_4X;
         c->tex[i].tfactor = ub(e->color[3]) << 24 | ub(e->color[0]) << 16 | ub(e->color[1]) << 8 | ub(e->color[2]);
         pp |= i ? RADEON_TEX_1_ENABLE | RADEON_TEX_BLEND_1_ENABLE : RADEON_TEX_0_ENABLE;
     }
@@ -1109,6 +1120,7 @@ static void caps(dgl_caps *c)
     c->max_texture_size = 2048;
     c->max_anisotropy = 16;
     c->max_lod_bias = 4;                        /* (-1 the chip's lowest: unit_words) */
+    c->dot3 = 1;
 }
 
 static void synced(void) { dgl_vram_sync_done(); }   /* (the blocks retired before it are free) */

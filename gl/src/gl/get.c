@@ -188,6 +188,8 @@ static const char *extensions(void)
         if (c.texture_units >= 2)
             strcat(buf, "GL_ARB_multitexture GL_SGIS_multitexture "
                         "GL_ARB_texture_env_combine GL_EXT_texture_env_combine ");
+        if (c.texture_units >= 2 && c.dot3)
+            strcat(buf, "GL_ARB_texture_env_dot3 ");
         if (c.max_anisotropy > 1.0f)
             strcat(buf, "GL_EXT_texture_filter_anisotropic ");
         if (c.max_lod_bias > 0.0f)

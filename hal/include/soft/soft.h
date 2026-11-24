@@ -75,7 +75,9 @@ typedef struct {
  * functions of up to three arguments, each a source through an operand,
  * times a scale (1, 2 or 4), clamped. GL's other environments are said in
  * these terms by GL's back end. */
-enum { SOFT_C_REPLACE, SOFT_C_MODULATE, SOFT_C_ADD, SOFT_C_ADD_SIGNED, SOFT_C_INTERPOLATE, SOFT_C_SUBTRACT };
+enum { SOFT_C_REPLACE, SOFT_C_MODULATE, SOFT_C_ADD, SOFT_C_ADD_SIGNED, SOFT_C_INTERPOLATE, SOFT_C_SUBTRACT,
+       SOFT_C_DOT3_RGB, SOFT_C_DOT3_RGBA };     /* (the dot3s: the colour's function only; RGBA's result is the
+                                                 * alpha too, the alpha's combine unused) */
 enum { SOFT_S_TEXTURE, SOFT_S_CONSTANT, SOFT_S_PRIMARY, SOFT_S_PREVIOUS };
 enum { SOFT_O_COLOR, SOFT_O_ONE_MINUS_COLOR, SOFT_O_ALPHA, SOFT_O_ONE_MINUS_ALPHA };
 typedef struct {

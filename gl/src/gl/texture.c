@@ -438,7 +438,11 @@ static void env(GLenum target, GLenum pname, const GLfloat *v)
         break;
     case GL_COMBINE_RGB_ARB:
     case GL_COMBINE_ALPHA_ARB:
-        if (!one_of(x, combine_rgb_funcs)) { dgl_gl_error(GL_INVALID_ENUM); return; }
+        if (pname == GL_COMBINE_RGB_ARB && (x == GL_DOT3_RGB_ARB || x == GL_DOT3_RGBA_ARB)) {
+            dgl_caps c;                 /* (GL_ARB_texture_env_dot3: the colour's combine only) */
+            dgl_get_caps(&c);
+            if (!c.dot3) { dgl_gl_error(GL_INVALID_ENUM); return; }
+        } else if (!one_of(x, combine_rgb_funcs)) { dgl_gl_error(GL_INVALID_ENUM); return; }
         *(pname == GL_COMBINE_RGB_ARB ? &e->combine_rgb : &e->combine_alpha) = x;
         break;
     case GL_SOURCE0_RGB_ARB: case GL_SOURCE1_RGB_ARB: case GL_SOURCE2_RGB_ARB:
