@@ -6,6 +6,7 @@
  * and VRAM upload follow the usual paths. PrBoom-plus's GL screen wipes copy
  * the frame into a texture this way. */
 #include "gl_state.h"
+#include "gl_tex.h"
 #include <stdlib.h>
 
 /* The rectangle as tightly packed RGBA8 rows, bottom-up; NULL on no memory. */
@@ -28,7 +29,7 @@ void APIENTRY glCopyTexImage2D(GLenum target, GLint level, GLenum internalformat
 {
     unsigned char *buf;
     GLint unpack = dgl_gl.unpack_align, rowlen = dgl_gl.unpack_row_length;
-    if (target != GL_TEXTURE_2D) { dgl_gl_error(GL_INVALID_ENUM); return; }
+    if (!dgl_tex_target_ok(target)) { dgl_gl_error(GL_INVALID_ENUM); return; }
     if (border != 0 || w < 0 || h < 0) { dgl_gl_error(GL_INVALID_VALUE); return; }
     if (!(buf = read_rect(x, y, w, h)))
         return;
@@ -45,7 +46,7 @@ void APIENTRY glCopyTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLi
 {
     unsigned char *buf;
     GLint unpack = dgl_gl.unpack_align, rowlen = dgl_gl.unpack_row_length;
-    if (target != GL_TEXTURE_2D) { dgl_gl_error(GL_INVALID_ENUM); return; }
+    if (!dgl_tex_target_ok(target)) { dgl_gl_error(GL_INVALID_ENUM); return; }
     if (w < 0 || h < 0) { dgl_gl_error(GL_INVALID_VALUE); return; }
     if (!w || !h)
         return;

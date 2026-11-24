@@ -7,7 +7,7 @@ file; this file records what is built and what the cards showed.
 | Step | What | State |
 |---|---|---|
 | X1 | Picture-quality features, per card, and settings that apply them to programs that don't ask | under way |
-| X2 | GL 1.1's lighting, normals, texture-coordinate generation and clip planes on the CPU (accepted and ignored until now) | lighting, clip planes, texgen (s, t) done; r, q and cube maps to do |
+| X2 | GL 1.1's lighting, normals, texture-coordinate generation and clip planes on the CPU (accepted and ignored until now) | done on the software renderer; the Radeons' cube maps to do |
 | X3 | Hardware transform and lighting on the Radeon 7500 (RV200) and 7200 (R100): `GL_DGL_hw_tnl`, `DGL_TNL=0/1` | to do |
 | X4 | SSE in the software transform (needs GLOS to enable it) | to do |
 
@@ -21,6 +21,7 @@ file; this file records what is built and what the cards showed.
 | `GL_EXT_texture_lod_bias` | +-15 | -1 to +127/128 (reported 1) | not yet (the Rage 128 has a field) |
 | `GL_ARB_texture_env_dot3` | yes | yes (DOT3_RGBA's alpha: see below) | no |
 | `GL_ARB_texture_compression`, `GL_EXT_texture_compression_s3tc` | yes | yes | yes |
+| `GL_ARB_texture_cube_map` | yes | not yet (X2) | no |
 
 Compressed textures (DXT1, DXT3, DXT5) are decoded by the CPU into the level's RGBA8 copy (`src/gl/texcomp.c`),
 so every card takes them; the blocks are kept for `glGetCompressedTexImageARB`. Compressed internal formats given
@@ -74,3 +75,16 @@ planes before the back end sees it, so no back end changed. Texture coordinates 
 object-linear, eye-linear (the plane into eye coordinates at `glTexGen`) or sphere-mapped, before the texture
 matrix. Both take the general vertex path. t41 matches Mesa to the pixel on the software renderer (orthographic and
 perspective frames).
+
+## X2: the r coordinate and cube maps
+
+Texture coordinates now carry r through `glTexCoord3/4`, `glMultiTexCoord3/4`, arrays of three or four, the texture
+matrix and clipping; generation covers r and q too, with `GL_REFLECTION_MAP_ARB` and `GL_NORMAL_MAP_ARB`.
+`GL_ARB_texture_cube_map` (where the back end says `cube`): cube-map objects with their own binding per unit and a
+default object, six square faces through every upload and query (`glTexImage2D`, sub-images, copies, compressed
+images, `glGetTexImage`, level parameters), `GL_TEXTURE_CUBE_MAP_ARB` above `GL_TEXTURE_2D` on a unit. The software
+renderer samples them in its reference span (the face by the major axis, its level of detail from the face
+coordinates a pixel along); its tiles don't keep cube-mapped drawing, which is drawn at once. t42 (the six faces
+unfolded by explicit directions, an environment-mapped and a normal-mapped sphere, a cube map above a 2D texture,
+the binding and a face read back) matches Mesa to the pixel. The Radeons can't mipmap a cube map (Mesa's driver
+sends the base level only); their part comes with the P3.

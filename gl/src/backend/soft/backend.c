@@ -61,27 +61,20 @@ static int wrap_of(GLenum w) { return w == GL_CLAMP ? SOFT_CLAMP : w == GL_CLAMP
 
 static int log2_of(int v) { int l = 0; while ((1 << l) < v) l++; return l; }
 
-/* The texture as the core samples it: NULL when it is not complete (GL:
- * texturing is then as if disabled for its unit). */
-static const soft_texture *prepare(dgl_texture *t)
+/* Levels (a 2D texture's, or a cube face's) as the core samples them, into x: NULL when they are not complete
+ * (GL: texturing is then as if disabled for its unit). dirty: GL's levels changed since x was made. */
+static const soft_texture *prepare_levels(stex *x, dgl_texture *t, const dgl_level *lv, const dgl_palette *pal,
+                                          int dirty)
 {
-    stex *x = (stex *)t->be;
-    const dgl_palette *pal = t->level[0].idx ? dgl_palette_for(t) : NULL;
     int l, n = 0, maxl;
-    if (!x) {
-        if (!(x = (stex *)calloc(1, sizeof *x)))
-            return NULL;
-        t->be = x;
-        t->dirty = 1;
-    }
-    if (t->dirty || (pal && (pal != x->pal || pal->gen != x->pal_gen))) {
+    if (dirty || (pal && (pal != x->pal || pal->gen != x->pal_gen))) {
         maxl = t->max_level < SOFT_MAX_LEVELS - 1 ? t->max_level : SOFT_MAX_LEVELS - 1;
         for (l = 0; l <= maxl; l++) {
-            const dgl_level *L = &t->level[l];
+            const dgl_level *L = &lv[l];
             if (!DGL_LEVEL_DEFINED(L))
                 break;
-            if (l && (L->w != (t->level[l - 1].w > 1 ? t->level[l - 1].w / 2 : 1) ||
-                      L->h != (t->level[l - 1].h > 1 ? t->level[l - 1].h / 2 : 1)))
+            if (l && (L->w != (lv[l - 1].w > 1 ? lv[l - 1].w / 2 : 1) ||
+                      L->h != (lv[l - 1].h > 1 ? lv[l - 1].h / 2 : 1)))
                 break;
             if (L->idx) {
                 int bytes = L->w * L->h * 4, i;
@@ -107,14 +100,13 @@ static const soft_texture *prepare(dgl_texture *t)
         }
         x->st.levels = n;
         {
-            int want = log2_of(t->level[0].w > t->level[0].h ? t->level[0].w : t->level[0].h);
+            int want = log2_of(lv[0].w > lv[0].h ? lv[0].w : lv[0].h);
             if (want > t->max_level)
                 want = t->max_level;
             x->complete = n > 0 && (!is_mip(t->min_filter) || n - 1 >= want);
         }
         x->pal = pal;
         x->pal_gen = pal ? pal->gen : 0;
-        t->dirty = 0;
     }
     x->st.wrap_s = wrap_of(t->wrap_s);
     x->st.wrap_t = wrap_of(t->wrap_t);
@@ -125,6 +117,42 @@ static const soft_texture *prepare(dgl_texture *t)
     x->used = 1;
     x->epoch = soft_epoch();
     return x->complete ? &x->st : NULL;
+}
+
+/* The texture's part (t->be): one stex, or six for a cube map (its faces in GL's order). */
+static stex *part(dgl_texture *t, int n)
+{
+    if (!t->be) {
+        if (!(t->be = calloc((size_t)n, sizeof(stex))))
+            return NULL;
+        t->dirty = 1;
+    }
+    return (stex *)t->be;
+}
+
+static const soft_texture *prepare(dgl_texture *t)
+{
+    stex *x = part(t, 1);
+    const soft_texture *r;
+    if (!x)
+        return NULL;
+    r = prepare_levels(x, t, t->level, t->level[0].idx ? dgl_palette_for(t) : NULL, t->dirty);
+    t->dirty = 0;
+    return r;
+}
+
+/* A cube map's six faces (soft.h's soft_stage.cube); 0 when a face isn't complete. */
+static int prepare_cube(dgl_texture *t, const soft_texture *faces[6])
+{
+    stex *x = part(t, 6);
+    int f, ok = 1;
+    if (!x)
+        return 0;
+    for (f = 0; f < 6; f++)
+        if (!(faces[f] = prepare_levels(&x[f], t, DGL_FACE_LEVEL(t, f, 0), NULL, t->dirty)))
+            ok = 0;
+    t->dirty = 0;
+    return ok;
 }
 
 /* ---- Environments in combine terms --------------------------------------- */
@@ -251,9 +279,19 @@ static int sop(GLenum o)
 
 static void stage_for(soft_stage *st, int unit, int on)
 {
-    dgl_texture *t = on ? dgl_unit_texture(unit) : NULL;
-    const soft_texture *tx = t ? prepare(t) : NULL;
-    memset(st, 0, sizeof *st);
+    dgl_texture *t = NULL;
+    const soft_texture *tx = NULL, *faces[6];
+    if (dgl_gl.texture_cube[unit] && (t = dgl_unit_cube(unit)) != NULL) {    /* (a cube map over GL_TEXTURE_2D) */
+        memset(st, 0, sizeof *st);
+        if (!prepare_cube(t, faces))
+            return;
+        memcpy(st->cube, faces, sizeof faces);
+        tx = faces[0];
+    } else {
+        t = on ? dgl_unit_texture(unit) : NULL;
+        tx = t ? prepare(t) : NULL;
+        memset(st, 0, sizeof *st);
+    }
     if (!tx)
         return;
     st->tex = tx;
@@ -357,6 +395,7 @@ static void project(const dgl_cvtx *c, soft_vertex *v)
     v->r = c->r, v->g = c->g, v->b = c->b, v->a = c->a;
     v->tex[0][0] = c->s, v->tex[0][1] = c->t, v->tex[0][2] = 1.0f;
     v->tex[1][0] = c->s1, v->tex[1][1] = c->t1, v->tex[1][2] = 1.0f;
+    v->texr[0] = c->tr, v->texr[1] = c->tr1;
     v->fog = c->eye_d;
 }
 
@@ -505,6 +544,7 @@ static void caps(dgl_caps *c)
     c->max_anisotropy = 16;                     /* (the reference span's soft_sample) */
     c->max_lod_bias = 15;
     c->dot3 = 1;
+    c->cube = 1;
 }
 
 static void synced(void) { }

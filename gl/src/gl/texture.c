@@ -23,6 +23,9 @@ static dgl_texture **far_tex;
 static int nfar, capfar;
 static GLuint bound_u[2];                /* names bound to GL_TEXTURE_2D, per texture unit */
 #define bound (bound_u[dgl_gl.active_unit])   /* the active unit's */
+static GLuint cube_u[2];                 /* ... to GL_TEXTURE_CUBE_MAP_ARB (0: the default cube map, cube0) */
+#define bound_cube (cube_u[dgl_gl.active_unit])
+static dgl_texture *cube0;              /* the default cube map (GL_ARB_texture_cube_map's object 0) */
 static dgl_texenv env_u[2];             /* per texture unit (env_defaults) */
 #define cur_env (env_u[dgl_gl.active_unit])
 
@@ -161,20 +164,36 @@ static dgl_texture *nth(int i)
 int dgl_texture_count(void) { return ALL_TEXTURES; }
 dgl_texture *dgl_texture_nth(int i) { return nth(i); }
 
+static void free_levels(dgl_level *L)
+{
+    int l;
+    for (l = 0; l < DGL_MAX_LEVELS; l++) {
+        free(L[l].rgba);
+        free(L[l].idx);
+        free(L[l].comp);
+    }
+}
+
+static void free_texture(dgl_texture *t)
+{
+    int f;
+    dgl_be->tex_free(t);
+    free_levels(t->level);
+    if (t->faces)
+        for (f = 0; f < 5; f++)
+            free_levels(t->faces[f]);
+    free(t->faces);
+    free(t->own);
+    free(t);
+}
+
 static void destroy(GLuint name)
 {
     dgl_texture *t = get(name, 0);
-    int l, far = name >= MAX_TEXTURES ? far_index(name) : -1;   /* before t is freed */
+    int far = name >= MAX_TEXTURES ? far_index(name) : -1;   /* before t is freed */
     if (!t)
         return;
-    dgl_be->tex_free(t);
-    for (l = 0; l < DGL_MAX_LEVELS; l++) {
-        free(t->level[l].rgba);
-        free(t->level[l].idx);
-        free(t->level[l].comp);
-    }
-    free(t->own);
-    free(t);
+    free_texture(t);
     if (far >= 0)
         far_tex[far] = far_tex[--nfar];
     else
@@ -189,6 +208,10 @@ void dgl_textures_reset(uint32_t heap_start, uint32_t heap_end)
     while (nfar)
         destroy(far_tex[nfar - 1]->name);
     bound_u[0] = bound_u[1] = 0;
+    cube_u[0] = cube_u[1] = 0;
+    if (cube0)
+        free_texture(cube0);
+    cube0 = NULL;
     dgl_palettes_reset();
     env_defaults(&env_u[0]);
     env_defaults(&env_u[1]);
@@ -200,6 +223,86 @@ dgl_texture *dgl_unit_texture(int unit)
     dgl_texture *t = get(bound_u[unit], 0);
     return t && DGL_LEVEL_DEFINED(&t->level[0]) ? t : NULL;
 }
+
+/* ---- Cube maps (GL_ARB_texture_cube_map, docs/dx7.md X2) -------------------------------------------------- */
+
+static int cube_caps(void)
+{
+    dgl_caps c;
+    dgl_get_caps(&c);
+    return c.cube;
+}
+
+/* A cube map by name (0: the default one), made a cube map with its faces when created. */
+static dgl_texture *get_cube(GLuint name, int create)
+{
+    dgl_texture *t = name ? get(name, create) : cube0;
+    if (!t && !name && create) {
+        t = cube0 = (dgl_texture *)calloc(1, sizeof *t);
+        if (!t)
+            return NULL;
+        t->gl_min_filter = GL_NEAREST_MIPMAP_LINEAR;
+        t->min_filter = drawn_min_filter(t->gl_min_filter);
+        t->mag_filter = GL_LINEAR;
+        t->wrap_s = t->wrap_t = GL_REPEAT;
+        t->max_level = 1000;
+        t->max_aniso = 1.0f;
+        t->target = GL_TEXTURE_CUBE_MAP_ARB;
+    }
+    if (t && create && !t->faces && (!t->target || t->target == GL_TEXTURE_CUBE_MAP_ARB)) {
+        t->faces = (dgl_level (*)[DGL_MAX_LEVELS])calloc(5, sizeof *t->faces);
+        if (!t->faces)
+            return NULL;
+        t->target = GL_TEXTURE_CUBE_MAP_ARB;
+    }
+    return t;
+}
+
+static int face_of(GLenum target)
+{
+    return target >= GL_TEXTURE_CUBE_MAP_POSITIVE_X_ARB && target <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z_ARB
+               ? (int)(target - GL_TEXTURE_CUBE_MAP_POSITIVE_X_ARB) : -1;
+}
+
+int dgl_tex_target_ok(GLenum target)
+{
+    return target == GL_TEXTURE_2D || (face_of(target) >= 0 && cube_caps());
+}
+
+/* The texture a target names for the active unit, and its face (0 for GL_TEXTURE_2D); NULL when none. */
+static dgl_texture *target_texture(GLenum target, int create, int *face)
+{
+    *face = 0;
+    if (target == GL_TEXTURE_2D)
+        return get(bound, create);
+    if (face_of(target) < 0 || !cube_caps())
+        return NULL;
+    *face = face_of(target);
+    return get_cube(bound_cube, create);
+}
+
+dgl_level *dgl_target_level(GLenum target, int level)
+{
+    int f;
+    dgl_texture *t = target_texture(target, 0, &f);
+    return t && level >= 0 && level < DGL_MAX_LEVELS && (!f || t->faces) ? DGL_FACE_LEVEL(t, f, level) : NULL;
+}
+
+dgl_texture *dgl_unit_cube(int unit)
+{
+    dgl_texture *t = get_cube(cube_u[unit], 0);
+    int f;
+    if (!t || !t->faces || !DGL_LEVEL_DEFINED(&t->level[0]))
+        return NULL;
+    for (f = 1; f < 6; f++) {                   /* (six square faces of one size) */
+        const dgl_level *L = DGL_FACE_LEVEL(t, f, 0);
+        if (!DGL_LEVEL_DEFINED(L) || L->w != t->level[0].w || L->h != t->level[0].h)
+            return NULL;
+    }
+    return t;
+}
+
+GLuint dgl_bound_cube_name(void) { return bound_cube; }
 
 dgl_palette *dgl_bound_palette(void)
 {
@@ -229,8 +332,22 @@ void APIENTRY glGenTextures(GLsizei n, GLuint *names)
 
 void APIENTRY glBindTexture(GLenum target, GLuint name)
 {
+    dgl_texture *t;
+    if (target == GL_TEXTURE_CUBE_MAP_ARB && cube_caps()) {
+        t = name ? get(name, 1) : NULL;
+        if (name && !t) { dgl_gl_error(GL_OUT_OF_MEMORY); return; }
+        if (t && t->target && t->target != target) { dgl_gl_error(GL_INVALID_OPERATION); return; }
+        if (name && !get_cube(name, 1)) { dgl_gl_error(GL_OUT_OF_MEMORY); return; }
+        bound_cube = name;
+        dgl_gl.dirty |= DGL_DIRTY_TEXTURE;
+        return;
+    }
     if (target != GL_TEXTURE_2D) { dgl_gl_error(GL_INVALID_ENUM); return; }
-    if (name && !get(name, 1)) { dgl_gl_error(GL_OUT_OF_MEMORY); return; }
+    t = name ? get(name, 1) : NULL;
+    if (name && !t) { dgl_gl_error(GL_OUT_OF_MEMORY); return; }
+    if (t && t->target && t->target != target) { dgl_gl_error(GL_INVALID_OPERATION); return; }
+    if (t)
+        t->target = GL_TEXTURE_2D;
     DGL_PCOUNT(binds);
     bound = name;
     dgl_gl.dirty |= DGL_DIRTY_TEXTURE;
@@ -243,9 +360,11 @@ void APIENTRY glDeleteTextures(GLsizei n, const GLuint *names)
     for (i = 0; i < n; i++) {
         if (!names[i])
             continue;
-        if (names[i] == bound_u[0] || names[i] == bound_u[1]) {
+        if (names[i] == bound_u[0] || names[i] == bound_u[1] || names[i] == cube_u[0] || names[i] == cube_u[1]) {
             if (names[i] == bound_u[0]) bound_u[0] = 0;
             if (names[i] == bound_u[1]) bound_u[1] = 0;
+            if (names[i] == cube_u[0]) cube_u[0] = 0;
+            if (names[i] == cube_u[1]) cube_u[1] = 0;
             dgl_gl.dirty |= DGL_DIRTY_TEXTURE;
         }
         destroy(names[i]);
@@ -262,8 +381,11 @@ static void param(GLenum target, GLenum pname, GLfloat f)
 {
     dgl_texture *t;
     GLint v = (GLint)f;
-    if (target != GL_TEXTURE_2D) { dgl_gl_error(GL_INVALID_ENUM); return; }
-    t = get(bound, 1);
+    if (target == GL_TEXTURE_CUBE_MAP_ARB && cube_caps())
+        t = get_cube(bound_cube, 1);
+    else if (target != GL_TEXTURE_2D) { dgl_gl_error(GL_INVALID_ENUM); return; }
+    else
+        t = get(bound, 1);
     if (!t) { dgl_gl_error(GL_OUT_OF_MEMORY); return; }
     switch (pname) {
     case GL_TEXTURE_MIN_FILTER:
@@ -308,7 +430,7 @@ void APIENTRY glTexParameterf(GLenum target, GLenum pname, GLfloat v) { param(ta
 void APIENTRY glTexParameterfv(GLenum target, GLenum pname, const GLfloat *v)
 {
     if (pname == GL_TEXTURE_BORDER_COLOR) {         /* borders are not drawn (PRD §8.3) */
-        if (target != GL_TEXTURE_2D) dgl_gl_error(GL_INVALID_ENUM);
+        if (target != GL_TEXTURE_2D && (target != GL_TEXTURE_CUBE_MAP_ARB || !cube_caps())) dgl_gl_error(GL_INVALID_ENUM);
         return;
     }
     param(target, pname, v[0]);
@@ -317,7 +439,7 @@ void APIENTRY glTexParameterfv(GLenum target, GLenum pname, const GLfloat *v)
 void APIENTRY glTexParameteriv(GLenum target, GLenum pname, const GLint *v)
 {
     if (pname == GL_TEXTURE_BORDER_COLOR) {
-        if (target != GL_TEXTURE_2D) dgl_gl_error(GL_INVALID_ENUM);
+        if (target != GL_TEXTURE_2D && (target != GL_TEXTURE_CUBE_MAP_ARB || !cube_caps())) dgl_gl_error(GL_INVALID_ENUM);
         return;
     }
     param(target, pname, (GLfloat)v[0]);
@@ -325,8 +447,9 @@ void APIENTRY glTexParameteriv(GLenum target, GLenum pname, const GLint *v)
 
 static int get_param(GLenum target, GLenum pname, GLfloat *v)
 {
-    dgl_texture *t = get(bound, 1);
-    if (target != GL_TEXTURE_2D || !t) { dgl_gl_error(GL_INVALID_ENUM); return 0; }
+    dgl_texture *t = target == GL_TEXTURE_CUBE_MAP_ARB && cube_caps() ? get_cube(bound_cube, 1)
+                   : target == GL_TEXTURE_2D ? get(bound, 1) : NULL;
+    if (!t) { dgl_gl_error(GL_INVALID_ENUM); return 0; }
     switch (pname) {
     case GL_TEXTURE_MIN_FILTER: v[0] = (GLfloat)t->gl_min_filter; return 1;
     case GL_TEXTURE_MAX_ANISOTROPY_EXT: v[0] = t->max_aniso; return 1;
@@ -367,10 +490,11 @@ dgl_level *dgl_bound_level(int level)
 
 void APIENTRY glGetTexLevelParameteriv(GLenum target, GLint level, GLenum pname, GLint *out)
 {
-    dgl_texture *t = get(bound, 0);
+    int face;
+    dgl_texture *t = target_texture(target, 0, &face);
     const dgl_level *L;
-    if (target != GL_TEXTURE_2D || level < 0 || level >= DGL_MAX_LEVELS) { dgl_gl_error(GL_INVALID_VALUE); return; }
-    L = t ? &t->level[level] : NULL;
+    if (!dgl_tex_target_ok(target) || level < 0 || level >= DGL_MAX_LEVELS) { dgl_gl_error(GL_INVALID_VALUE); return; }
+    L = t && (!face || t->faces) ? DGL_FACE_LEVEL(t, face, level) : NULL;
     switch (pname) {
     case GL_TEXTURE_WIDTH: out[0] = L ? L->w : 0; break;
     case GL_TEXTURE_HEIGHT: out[0] = L ? L->h : 0; break;
@@ -570,7 +694,7 @@ static int is_pow2(int v) { return v > 0 && !(v & (v - 1)); }
 
 static int check_upload(GLenum target, GLint level, GLenum format, GLenum type)
 {
-    if (target != GL_TEXTURE_2D || type != GL_UNSIGNED_BYTE || !dgl_format_bytes(format)) {
+    if (!dgl_tex_target_ok(target) || type != GL_UNSIGNED_BYTE || !dgl_format_bytes(format)) {
         dgl_gl_error(GL_INVALID_ENUM);
         return 0;
     }
@@ -655,9 +779,16 @@ void APIENTRY glTexImage2D(GLenum target, GLint level, GLint internalformat, GLs
         dgl_gl_error(GL_INVALID_OPERATION);          /* indices only into COLOR_INDEX textures (no pixel maps) */
         return;
     }
-    t = get(bound, 1);
-    if (!t) { dgl_gl_error(GL_OUT_OF_MEMORY); return; }
-    L = &t->level[level];
+    if (target != GL_TEXTURE_2D && (w != h || ifc == DGL_IF_INDEX)) {
+        dgl_gl_error(GL_INVALID_VALUE);              /* (a cube map's faces are square; no paletted cube maps) */
+        return;
+    }
+    {
+        int face;
+        t = target_texture(target, 1, &face);
+        if (!t) { dgl_gl_error(GL_OUT_OF_MEMORY); return; }
+        L = DGL_FACE_LEVEL(t, face, level);
+    }
     if (dgl_be->tex_change)
         dgl_be->tex_change(t);
     free(L->rgba);
@@ -696,8 +827,27 @@ void APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint x, GLint y, GLsi
     DGL_GPU_QUIET();                            /* (the texels into the shadow copy; the engine only if it loads them) */
     if (!check_upload(target, level, format, type))
         return;
-    t = get(bound, 0);
-    L = t ? &t->level[level] : NULL;
+    {
+        int face;
+        t = target_texture(target, 0, &face);
+        L = t && (!face || t->faces) ? DGL_FACE_LEVEL(t, face, level) : NULL;
+        if (face && L) {                        /* (a cube face: the back end makes its copy again) */
+            if (x < 0 || y < 0 || w < 0 || h < 0 || x + w > L->w || y + h > L->h || !DGL_LEVEL_DEFINED(L) || L->idx) {
+                dgl_gl_error(!DGL_LEVEL_DEFINED(L) || L->idx ? GL_INVALID_OPERATION : GL_INVALID_VALUE);
+                return;
+            }
+            if (dgl_be->tex_change)
+                dgl_be->tex_change(t);
+            free(L->comp);
+            L->comp = NULL;
+            L->comp_size = 0;
+            unpack(format, pixels, w, h, L->rgba + ((size_t)y * L->w + x) * 4, L->w * 4, L->ifc);
+            t->dirty = 1;
+            dgl_gl.dirty |= DGL_DIRTY_TEXTURE;
+            FT_END();
+            return;
+        }
+    }
     if (!L || !DGL_LEVEL_DEFINED(L) || (L->idx != NULL) != (format == GL_COLOR_INDEX)) {
         dgl_gl_error(GL_INVALID_OPERATION);
         return;

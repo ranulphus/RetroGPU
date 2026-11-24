@@ -13,6 +13,7 @@ static int *cap_flag(GLenum cap)
     case GL_FOG:          return &dgl_gl.fog;
     case GL_SCISSOR_TEST: return &dgl_gl.scissor_test;
     case GL_TEXTURE_2D:   return dgl_gl.active_unit ? &dgl_gl.texture_2d1 : &dgl_gl.texture_2d;
+    case GL_TEXTURE_CUBE_MAP_ARB: return &dgl_gl.texture_cube[dgl_gl.active_unit];
     case GL_DITHER:       return &dgl_gl.dither;
     case GL_POLYGON_OFFSET_FILL: return &dgl_gl.offset_fill;
     case GL_STENCIL_TEST: return &dgl_gl.stencil_test;
@@ -33,7 +34,7 @@ static unsigned cap_dirty(GLenum cap)
 {
     switch (cap) {
     case GL_SCISSOR_TEST: return DGL_DIRTY_TARGET;
-    case GL_TEXTURE_2D:
+    case GL_TEXTURE_2D: case GL_TEXTURE_CUBE_MAP_ARB:
     case GL_SHARED_TEXTURE_PALETTE_EXT: return DGL_DIRTY_TEXTURE | DGL_DIRTY_RASTER;
     case GL_FOG:          return DGL_DIRTY_FOG | DGL_DIRTY_TEXTURE | DGL_DIRTY_RASTER;   /* (a white texel when untextured) */
     case GL_DEPTH_TEST: case GL_CULL_FACE: case GL_BLEND: case GL_ALPHA_TEST: case GL_DITHER:

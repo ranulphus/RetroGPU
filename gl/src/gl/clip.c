@@ -38,7 +38,7 @@ unsigned dgl_outcode(const dgl_cvtx *v, float gx, float gy)
 static void lerp(dgl_cvtx *o, const dgl_cvtx *a, const dgl_cvtx *b, float t)
 {
 #define L(f) o->f = a->f + (b->f - a->f) * t
-    L(x); L(y); L(z); L(w); L(r); L(g); L(b); L(a); L(s); L(t); L(s1); L(t1); L(eye_d);
+    L(x); L(y); L(z); L(w); L(r); L(g); L(b); L(a); L(s); L(t); L(s1); L(t1); L(eye_d); L(tr); L(tr1);
 #undef L
 }
 

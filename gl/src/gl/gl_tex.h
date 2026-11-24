@@ -53,7 +53,11 @@ typedef struct dgl_texture {
     int      dirty;                 /* its levels changed since the back end's copy was made */
     dgl_palette *own;               /* its GL_TEXTURE_2D colour table, if loaded */
     void    *be;                    /* the drawing back end's part (its copy), NULL until it makes one */
+    GLenum   target;                /* GL_TEXTURE_2D or GL_TEXTURE_CUBE_MAP_ARB once bound (0 before) */
+    dgl_level (*faces)[DGL_MAX_LEVELS];   /* a cube map's faces 1-5 (-X, +Y, -Y, +Z, -Z; +X is level[]) */
 } dgl_texture;
+/* A cube map's face (0 +X .. 5 -Z, GL's order) level, or a 2D texture's (face 0). */
+#define DGL_FACE_LEVEL(t, f, l) ((f) ? &(t)->faces[(f) - 1][l] : &(t)->level[l])
 /* Every texture object, in the table's order (texture.c). */
 int dgl_texture_count(void);
 dgl_texture *dgl_texture_nth(int i);    /* NULL for an empty place */
@@ -95,6 +99,9 @@ const GLfloat *dgl_tex_env_color(int unit);
 dgl_palette *dgl_bound_palette(void);           /* the bound texture's own table (created) */
 
 dgl_level *dgl_bound_level(int level);          /* the active unit's bound texture's level (NULL: none) */
+dgl_level *dgl_target_level(GLenum target, int level);  /* ... of GL_TEXTURE_2D or a cube face (NULL: none) */
+int dgl_tex_target_ok(GLenum target);           /* GL_TEXTURE_2D, or a cube face where the card has cube maps */
+dgl_texture *dgl_unit_cube(int unit);           /* a unit's cube map, NULL when none or its faces incomplete */
 
 /* texcomp.c: S3TC (DXT1, 3, 5) blocks */
 int  dgl_s3tc_format(GLenum f);

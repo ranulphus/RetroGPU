@@ -103,6 +103,7 @@ typedef struct {
     float s, t;
     float s1, t1;                      /* texture unit 1 (GL_ARB_multitexture) */
     float eye_d;
+    float tr, tr1;                     /* r of units 0 and 1 (cube maps), after the texture matrix */
     float br, bg, bb, ba;              /* two-sided lighting: the back's colour (light.c; the assembly picks) */
 } dgl_cvtx;
 
@@ -132,6 +133,7 @@ typedef struct {
     /* Enables */
     int depth_test, cull_face, blend, alpha_test, fog, scissor_test, texture_2d, dither;
     int texture_2d1;                   /* GL_TEXTURE_2D on texture unit 1 */
+    int texture_cube[2];               /* GL_TEXTURE_CUBE_MAP_ARB per unit (above GL_TEXTURE_2D where both are on) */
     int active_unit, client_unit;      /* GL_ARB_multitexture: 0 or 1 */
     /* Raster state */
     GLenum  depth_func, blend_src, blend_dst, alpha_func, cull_mode, front_face, shade_model;
@@ -156,6 +158,7 @@ typedef struct {
     GLenum  draw_buffer, read_buffer;
     /* Current vertex attributes and arrays */
     GLfloat cur_color[4], cur_tex[2], cur_tex1[2], cur_normal[3];
+    GLfloat cur_texr[2];               /* r of each unit (cube maps: over q, as s and t are) */
     dgl_array va, ca, ta, ta1;         /* ta1: unit 1's texture coordinates */
     dgl_array na;                      /* normals */
     /* Lighting (light.c) */
@@ -218,7 +221,8 @@ void dgl_color_material_apply(void);
 extern int dgl_nm_ok;                  /* the normal matrix is the modelview's (dgl_mvp clears it) */
 /* The state needs the general vertex path (a back end's fast path transforms without it): lighting, clip
  * planes, texture-coordinate generation. */
-#define DGL_VTX_EXTRA() (dgl_gl.lighting | dgl_gl.clip_enabled | dgl_gl.texgen_on[0] | dgl_gl.texgen_on[1])
+#define DGL_VTX_EXTRA() (dgl_gl.lighting | dgl_gl.clip_enabled | dgl_gl.texgen_on[0] | dgl_gl.texgen_on[1] | \
+                         dgl_gl.texture_cube[0] | dgl_gl.texture_cube[1])
 void dgl_eye_normal(const float n[3], float out[3]);       /* light.c: n into eye coordinates (normalised if asked) */
 
 /* texgen.c */

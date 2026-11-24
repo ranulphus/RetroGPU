@@ -137,43 +137,39 @@ void dgl_transform(const dgl_vin *in, dgl_cvtx *o)
     o->w = m->m[3] * p[0] + m->m[7] * p[1] + m->m[11] * p[2] + m->m[15] * p[3];
     o->r = in->col[0]; o->g = in->col[1]; o->b = in->col[2]; o->a = in->col[3];
     {
-        const float *tx0 = in->tex, *tx1 = in->tex1;
-        float g0[2], g1[2];
+        /* Texture coordinates: s, t, r (q already divided out), generated where asked (texgen.c), then the texture
+         * matrix (its q dividing them again). */
+        float c0[4] = { in->tex[0], in->tex[1], in->texr[0], 1 }, c1[4] = { in->tex1[0], in->tex1[1], in->texr[1], 1 };
         if (dgl_gl.texgen_on[0] | dgl_gl.texgen_on[1]) {
-            /* Texture-coordinate generation (texgen.c): s and t made before the texture matrix. */
             float pe[4], ne[3];
             int k;
             for (k = 0; k < 4; k++)
                 pe[k] = mv[k] * p[0] + mv[4 + k] * p[1] + mv[8 + k] * p[2] + mv[12 + k] * p[3];
             dgl_eye_normal(in->nrm, ne);
-            if (dgl_gl.texgen_on[0]) {
-                g0[0] = in->tex[0], g0[1] = in->tex[1];
-                dgl_texgen_vertex(0, in, pe, ne, g0);
-                tx0 = g0;
-            }
-            if (dgl_gl.texgen_on[1]) {
-                g1[0] = in->tex1[0], g1[1] = in->tex1[1];
-                dgl_texgen_vertex(1, in, pe, ne, g1);
-                tx1 = g1;
-            }
+            if (dgl_gl.texgen_on[0])
+                dgl_texgen_vertex(0, in, pe, ne, c0);
+            if (dgl_gl.texgen_on[1])
+                dgl_texgen_vertex(1, in, pe, ne, c1);
         }
-        if (dgl_gl.tex_identity) {
-            o->s = tx0[0]; o->t = tx0[1];
+        if (dgl_gl.tex_identity && c0[3] == 1) {
+            o->s = c0[0]; o->t = c0[1]; o->tr = c0[2];
         } else {
             const float *t = dgl_gl.tex.stack[dgl_gl.tex.depth - 1].m;
-            float q = t[3] * tx0[0] + t[7] * tx0[1] + t[15];
+            float q = t[3] * c0[0] + t[7] * c0[1] + t[11] * c0[2] + t[15] * c0[3];
             q = q != 0 ? q : 1;
-            o->s = (t[0] * tx0[0] + t[4] * tx0[1] + t[12]) / q;
-            o->t = (t[1] * tx0[0] + t[5] * tx0[1] + t[13]) / q;
+            o->s = (t[0] * c0[0] + t[4] * c0[1] + t[8] * c0[2] + t[12] * c0[3]) / q;
+            o->t = (t[1] * c0[0] + t[5] * c0[1] + t[9] * c0[2] + t[13] * c0[3]) / q;
+            o->tr = (t[2] * c0[0] + t[6] * c0[1] + t[10] * c0[2] + t[14] * c0[3]) / q;
         }
-        if (dgl_gl.tex1_identity) {
-            o->s1 = tx1[0]; o->t1 = tx1[1];
+        if (dgl_gl.tex1_identity && c1[3] == 1) {
+            o->s1 = c1[0]; o->t1 = c1[1]; o->tr1 = c1[2];
         } else {
             const float *t = dgl_gl.tex1.stack[dgl_gl.tex1.depth - 1].m;
-            float q = t[3] * tx1[0] + t[7] * tx1[1] + t[15];
+            float q = t[3] * c1[0] + t[7] * c1[1] + t[11] * c1[2] + t[15] * c1[3];
             q = q != 0 ? q : 1;
-            o->s1 = (t[0] * tx1[0] + t[4] * tx1[1] + t[12]) / q;
-            o->t1 = (t[1] * tx1[0] + t[5] * tx1[1] + t[13]) / q;
+            o->s1 = (t[0] * c1[0] + t[4] * c1[1] + t[8] * c1[2] + t[12] * c1[3]) / q;
+            o->t1 = (t[1] * c1[0] + t[5] * c1[1] + t[9] * c1[2] + t[13] * c1[3]) / q;
+            o->tr1 = (t[2] * c1[0] + t[6] * c1[1] + t[10] * c1[2] + t[14] * c1[3]) / q;
         }
     }
     /* Eye distance for fog: -z_eye (PRD §7). */
@@ -262,15 +258,21 @@ static void fetch(GLint i, dgl_vin *v)
     } else
         memcpy(v->col, dgl_gl.cur_color, sizeof v->col);
     if (pl_t.on) {
-        v->tex[0] = v->tex[1] = 0;
-        read_plan(&pl_t, i, v->tex, 2, 0);
-    } else
+        float c[3] = { 0, 0, 0 };
+        read_plan(&pl_t, i, c, 3, 0);
+        v->tex[0] = c[0], v->tex[1] = c[1], v->texr[0] = c[2];
+    } else {
         memcpy(v->tex, dgl_gl.cur_tex, sizeof v->tex);
+        v->texr[0] = dgl_gl.cur_texr[0];
+    }
     if (pl_t1.on) {
-        v->tex1[0] = v->tex1[1] = 0;
-        read_plan(&pl_t1, i, v->tex1, 2, 0);
-    } else
+        float c[3] = { 0, 0, 0 };
+        read_plan(&pl_t1, i, c, 3, 0);
+        v->tex1[0] = c[0], v->tex1[1] = c[1], v->texr[1] = c[2];
+    } else {
         memcpy(v->tex1, dgl_gl.cur_tex1, sizeof v->tex1);
+        v->texr[1] = dgl_gl.cur_texr[1];
+    }
     if (dgl_gl.na.enabled)
         read_normal(&dgl_gl.na, i, v->nrm);
     else
@@ -287,15 +289,21 @@ void dgl_fetch_vertex(GLint i, dgl_vin *v)
     } else
         memcpy(v->col, dgl_gl.cur_color, sizeof v->col);
     if (dgl_gl.ta.enabled) {
-        v->tex[0] = v->tex[1] = 0;
-        read_comps(&dgl_gl.ta, i, v->tex, 2, 0);
-    } else
+        float c[3] = { 0, 0, 0 };
+        read_comps(&dgl_gl.ta, i, c, 3, 0);
+        v->tex[0] = c[0], v->tex[1] = c[1], v->texr[0] = c[2];
+    } else {
         memcpy(v->tex, dgl_gl.cur_tex, sizeof v->tex);
+        v->texr[0] = dgl_gl.cur_texr[0];
+    }
     if (dgl_gl.ta1.enabled) {
-        v->tex1[0] = v->tex1[1] = 0;
-        read_comps(&dgl_gl.ta1, i, v->tex1, 2, 0);
-    } else
+        float c[3] = { 0, 0, 0 };
+        read_comps(&dgl_gl.ta1, i, c, 3, 0);
+        v->tex1[0] = c[0], v->tex1[1] = c[1], v->texr[1] = c[2];
+    } else {
         memcpy(v->tex1, dgl_gl.cur_tex1, sizeof v->tex1);
+        v->texr[1] = dgl_gl.cur_texr[1];
+    }
     if (dgl_gl.na.enabled)
         read_normal(&dgl_gl.na, i, v->nrm);
     else
@@ -606,6 +614,7 @@ static void imm_vertex(float x, float y, float z, float w)
     memcpy(v->tex, dgl_gl.cur_tex, sizeof v->tex);
     memcpy(v->tex1, dgl_gl.cur_tex1, sizeof v->tex1);
     memcpy(v->nrm, dgl_gl.cur_normal, sizeof v->nrm);
+    memcpy(v->texr, dgl_gl.cur_texr, sizeof v->texr);
 }
 
 void APIENTRY glEnd(void)
@@ -634,12 +643,14 @@ void APIENTRY glArrayElement(GLint i)
         memcpy(dgl_gl.cur_color, v.col, sizeof v.col);
     }
     if (dgl_gl.ta.enabled) {
-        read_comps(&dgl_gl.ta, i, v.tex, 2, 0);
-        memcpy(dgl_gl.cur_tex, v.tex, sizeof v.tex);
+        float c[3] = { 0, 0, 0 };
+        read_comps(&dgl_gl.ta, i, c, 3, 0);
+        dgl_gl.cur_tex[0] = c[0], dgl_gl.cur_tex[1] = c[1], dgl_gl.cur_texr[0] = c[2];
     }
     if (dgl_gl.ta1.enabled) {
-        read_comps(&dgl_gl.ta1, i, v.tex1, 2, 0);
-        memcpy(dgl_gl.cur_tex1, v.tex1, sizeof v.tex1);
+        float c[3] = { 0, 0, 0 };
+        read_comps(&dgl_gl.ta1, i, c, 3, 0);
+        dgl_gl.cur_tex1[0] = c[0], dgl_gl.cur_tex1[1] = c[1], dgl_gl.cur_texr[1] = c[2];
     }
     if (dgl_gl.na.enabled)
         read_normal(&dgl_gl.na, i, dgl_gl.cur_normal);
@@ -652,7 +663,7 @@ void APIENTRY glArrayElement(GLint i)
 void APIENTRY glVertex3f(GLfloat x, GLfloat y, GLfloat z) { imm_vertex(x, y, z, 1); }
 void APIENTRY glVertex2f(GLfloat x, GLfloat y) { imm_vertex(x, y, 0, 1); }
 void APIENTRY glVertex3fv(const GLfloat *v) { imm_vertex(v[0], v[1], v[2], 1); }
-void APIENTRY glTexCoord2f(GLfloat s, GLfloat t) { dgl_gl.cur_tex[0] = s; dgl_gl.cur_tex[1] = t; }
+void APIENTRY glTexCoord2f(GLfloat s, GLfloat t) { dgl_gl.cur_tex[0] = s; dgl_gl.cur_tex[1] = t; dgl_gl.cur_texr[0] = 0; }
 
 void APIENTRY glColor4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a)
 {

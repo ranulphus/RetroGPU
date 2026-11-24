@@ -124,7 +124,7 @@ void APIENTRY glCompressedTexImage2DARB(GLenum target, GLint level, GLenum ifmt,
 {
     dgl_level *L;
     unsigned char *rgba, *keep;
-    if (target != GL_TEXTURE_2D) { dgl_gl_error(GL_INVALID_ENUM); return; }
+    if (!dgl_tex_target_ok(target)) { dgl_gl_error(GL_INVALID_ENUM); return; }
     if (!dgl_s3tc_format(ifmt)) { dgl_gl_error(GL_INVALID_ENUM); return; }
     if (border != 0 || w < 0 || h < 0 || size != dgl_s3tc_size(ifmt, w, h) || level < 0 || level >= DGL_MAX_LEVELS) {
         dgl_gl_error(GL_INVALID_VALUE);
@@ -140,7 +140,7 @@ void APIENTRY glCompressedTexImage2DARB(GLenum target, GLint level, GLenum ifmt,
         memset(rgba, 0, (size_t)(w ? w : 1) * (h ? h : 1) * 4), memset(keep, 0, (size_t)size);
     glTexImage2D(target, level, ifmt == GL_COMPRESSED_RGB_S3TC_DXT1_EXT ? GL_RGB : GL_RGBA, w, h, 0, GL_RGBA,
                  GL_UNSIGNED_BYTE, data ? rgba : NULL);
-    L = dgl_bound_level(level);
+    L = dgl_target_level(target, level);
     if (!L || !DGL_LEVEL_DEFINED(L) || L->w != w || L->h != h) {   /* (glTexImage2D refused it: its error stands) */
         free(keep);
         return;
@@ -153,10 +153,10 @@ void APIENTRY glCompressedTexImage2DARB(GLenum target, GLint level, GLenum ifmt,
 void APIENTRY glCompressedTexSubImage2DARB(GLenum target, GLint level, GLint x, GLint y, GLsizei w, GLsizei h,
                                            GLenum format, GLsizei size, const GLvoid *data)
 {
-    dgl_level *L = target == GL_TEXTURE_2D ? dgl_bound_level(level) : NULL;
+    dgl_level *L = dgl_tex_target_ok(target) ? dgl_target_level(target, level) : NULL;
     unsigned char *rgba, *keep;
     int bw, bb, rows, n, j;
-    if (target != GL_TEXTURE_2D || !dgl_s3tc_format(format)) { dgl_gl_error(GL_INVALID_ENUM); return; }
+    if (!dgl_tex_target_ok(target) || !dgl_s3tc_format(format)) { dgl_gl_error(GL_INVALID_ENUM); return; }
     if (!L || !DGL_LEVEL_DEFINED(L) || L->ifmt != (GLint)format) { dgl_gl_error(GL_INVALID_OPERATION); return; }
     if (x < 0 || y < 0 || w < 0 || h < 0 || x + w > L->w || y + h > L->h || (x & 3) || (y & 3) ||
         ((w & 3) && x + w != L->w) || ((h & 3) && y + h != L->h) || size != dgl_s3tc_size(format, w, h)) {
@@ -187,8 +187,8 @@ void APIENTRY glCompressedTexSubImage2DARB(GLenum target, GLint level, GLint x, 
 
 void APIENTRY glGetCompressedTexImageARB(GLenum target, GLint level, GLvoid *img)
 {
-    dgl_level *L = target == GL_TEXTURE_2D ? dgl_bound_level(level) : NULL;
-    if (target != GL_TEXTURE_2D) { dgl_gl_error(GL_INVALID_ENUM); return; }
+    dgl_level *L = dgl_tex_target_ok(target) ? dgl_target_level(target, level) : NULL;
+    if (!dgl_tex_target_ok(target)) { dgl_gl_error(GL_INVALID_ENUM); return; }
     if (!L || !L->comp) { dgl_gl_error(GL_INVALID_OPERATION); return; }
     memcpy(img, L->comp, (size_t)L->comp_size);
 }

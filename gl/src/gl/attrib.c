@@ -75,14 +75,17 @@ void APIENTRY glVertex4s(GLshort x, GLshort y, GLshort z, GLshort w) { dgl_imm_v
 void APIENTRY glVertex4sv(const GLshort *v) { dgl_imm_vertex(v[0], v[1], v[2], v[3]); }
 
 /* ---- Texture coordinates ----------------------------------------------------------- */
-static void tc(float s, float t, float q)
+static void tc4(float s, float t, float r, float q)
 {
     if (q != 1.0f && q != 0.0f) {
         s /= q;
         t /= q;
+        r /= q;
     }
     glTexCoord2f(s, t);
+    dgl_gl.cur_texr[0] = r;
 }
+#define tc(s, t, q) tc4(s, t, 0, q)
 
 void APIENTRY glTexCoord1d(GLdouble s) { tc((float)s, 0, 1); }
 void APIENTRY glTexCoord1dv(const GLdouble *v) { tc((float)v[0], 0, 1); }
@@ -99,23 +102,23 @@ void APIENTRY glTexCoord2i(GLint s, GLint t) { tc((float)s, (float)t, 1); }
 void APIENTRY glTexCoord2iv(const GLint *v) { tc((float)v[0], (float)v[1], 1); }
 void APIENTRY glTexCoord2s(GLshort s, GLshort t) { tc(s, t, 1); }
 void APIENTRY glTexCoord2sv(const GLshort *v) { tc(v[0], v[1], 1); }
-void APIENTRY glTexCoord3d(GLdouble s, GLdouble t, GLdouble r) { (void)r; tc((float)s, (float)t, 1); }
-void APIENTRY glTexCoord3dv(const GLdouble *v) { tc((float)v[0], (float)v[1], 1); }
-void APIENTRY glTexCoord3f(GLfloat s, GLfloat t, GLfloat r) { (void)r; tc(s, t, 1); }
-void APIENTRY glTexCoord3fv(const GLfloat *v) { tc(v[0], v[1], 1); }
-void APIENTRY glTexCoord3i(GLint s, GLint t, GLint r) { (void)r; tc((float)s, (float)t, 1); }
-void APIENTRY glTexCoord3iv(const GLint *v) { tc((float)v[0], (float)v[1], 1); }
-void APIENTRY glTexCoord3s(GLshort s, GLshort t, GLshort r) { (void)r; tc(s, t, 1); }
-void APIENTRY glTexCoord3sv(const GLshort *v) { tc(v[0], v[1], 1); }
+void APIENTRY glTexCoord3d(GLdouble s, GLdouble t, GLdouble r) { tc4((float)s, (float)t, (float)r, 1); }
+void APIENTRY glTexCoord3dv(const GLdouble *v) { tc4((float)v[0], (float)v[1], (float)v[2], 1); }
+void APIENTRY glTexCoord3f(GLfloat s, GLfloat t, GLfloat r) { tc4(s, t, r, 1); }
+void APIENTRY glTexCoord3fv(const GLfloat *v) { tc4(v[0], v[1], v[2], 1); }
+void APIENTRY glTexCoord3i(GLint s, GLint t, GLint r) { tc4((float)s, (float)t, (float)r, 1); }
+void APIENTRY glTexCoord3iv(const GLint *v) { tc4((float)v[0], (float)v[1], (float)v[2], 1); }
+void APIENTRY glTexCoord3s(GLshort s, GLshort t, GLshort r) { tc4(s, t, r, 1); }
+void APIENTRY glTexCoord3sv(const GLshort *v) { tc4(v[0], v[1], v[2], 1); }
 void APIENTRY glTexCoord4d(GLdouble s, GLdouble t, GLdouble r, GLdouble q)
-{ (void)r; tc((float)s, (float)t, (float)q); }
-void APIENTRY glTexCoord4dv(const GLdouble *v) { tc((float)v[0], (float)v[1], (float)v[3]); }
-void APIENTRY glTexCoord4f(GLfloat s, GLfloat t, GLfloat r, GLfloat q) { (void)r; tc(s, t, q); }
-void APIENTRY glTexCoord4fv(const GLfloat *v) { tc(v[0], v[1], v[3]); }
-void APIENTRY glTexCoord4i(GLint s, GLint t, GLint r, GLint q) { (void)r; tc((float)s, (float)t, (float)q); }
-void APIENTRY glTexCoord4iv(const GLint *v) { tc((float)v[0], (float)v[1], (float)v[3]); }
-void APIENTRY glTexCoord4s(GLshort s, GLshort t, GLshort r, GLshort q) { (void)r; tc(s, t, q); }
-void APIENTRY glTexCoord4sv(const GLshort *v) { tc(v[0], v[1], v[3]); }
+{ tc4((float)s, (float)t, (float)r, (float)q); }
+void APIENTRY glTexCoord4dv(const GLdouble *v) { tc4((float)v[0], (float)v[1], (float)v[2], (float)v[3]); }
+void APIENTRY glTexCoord4f(GLfloat s, GLfloat t, GLfloat r, GLfloat q) { tc4(s, t, r, q); }
+void APIENTRY glTexCoord4fv(const GLfloat *v) { tc4(v[0], v[1], v[2], v[3]); }
+void APIENTRY glTexCoord4i(GLint s, GLint t, GLint r, GLint q) { tc4((float)s, (float)t, (float)r, (float)q); }
+void APIENTRY glTexCoord4iv(const GLint *v) { tc4((float)v[0], (float)v[1], (float)v[2], (float)v[3]); }
+void APIENTRY glTexCoord4s(GLshort s, GLshort t, GLshort r, GLshort q) { tc4(s, t, r, q); }
+void APIENTRY glTexCoord4sv(const GLshort *v) { tc4(v[0], v[1], v[2], v[3]); }
 
 /* ---- Normals (accepted, no lighting) --------------------------------------------------- */
 void APIENTRY glNormal3b(GLbyte x, GLbyte y, GLbyte z) { glNormal3f(SB(x), SB(y), SB(z)); }

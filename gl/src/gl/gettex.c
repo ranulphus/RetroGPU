@@ -33,7 +33,7 @@ void APIENTRY glGetTexImage(GLenum target, GLint level, GLenum format, GLenum ty
     const dgl_palette *pal;
     unsigned char *row = (unsigned char *)pixels;
     int bpp, stride, x, y;
-    if (target != GL_TEXTURE_2D || type != GL_UNSIGNED_BYTE) { dgl_gl_error(GL_INVALID_ENUM); return; }
+    if (!dgl_tex_target_ok(target) || type != GL_UNSIGNED_BYTE) { dgl_gl_error(GL_INVALID_ENUM); return; }
     if (level < 0 || level >= DGL_MAX_LEVELS) { dgl_gl_error(GL_INVALID_VALUE); return; }
     switch (format) {
     case GL_RGBA: case GL_BGRA_EXT: bpp = 4; break;
@@ -42,13 +42,20 @@ void APIENTRY glGetTexImage(GLenum target, GLint level, GLenum format, GLenum ty
     case GL_RED: case GL_GREEN: case GL_BLUE: case GL_ALPHA: case GL_LUMINANCE: bpp = 1; break;
     default: dgl_gl_error(GL_INVALID_ENUM); return;
     }
-    t = dgl_unit_texture(dgl_gl.active_unit);
-    if (!t)
-        return;
-    L = &t->level[level];
-    if (!DGL_LEVEL_DEFINED(L))
-        return;
-    pal = dgl_palette_for(t);
+    if (target != GL_TEXTURE_2D) {             /* (a cube face) */
+        t = NULL;
+        L = dgl_target_level(target, level);
+        if (!L || !DGL_LEVEL_DEFINED(L))
+            return;
+    } else {
+        t = dgl_unit_texture(dgl_gl.active_unit);
+        if (!t)
+            return;
+        L = &t->level[level];
+        if (!DGL_LEVEL_DEFINED(L))
+            return;
+    }
+    pal = t ? dgl_palette_for(t) : NULL;
     stride = L->w * bpp;
     stride = (stride + dgl_gl.pack_align - 1) / dgl_gl.pack_align * dgl_gl.pack_align;
     for (y = 0; y < L->h; y++, row += stride) {

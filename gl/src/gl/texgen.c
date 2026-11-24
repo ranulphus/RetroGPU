@@ -132,7 +132,8 @@ unsigned dgl_clip_user_code(const dgl_cvtx *v)
 static void lerp(dgl_cvtx *o, const dgl_cvtx *a, const dgl_cvtx *b, float t)
 {
 #define L(f) o->f = a->f + (b->f - a->f) * t
-    L(x); L(y); L(z); L(w); L(r); L(g); L(b); L(a); L(s); L(t); L(s1); L(t1); L(eye_d); L(br); L(bg); L(bb); L(ba);
+    L(x); L(y); L(z); L(w); L(r); L(g); L(b); L(a); L(s); L(t); L(s1); L(t1); L(eye_d); L(tr); L(tr1); L(br); L(bg);
+    L(bb); L(ba);
 #undef L
 }
 
@@ -194,7 +195,8 @@ static void texgen(GLenum c, GLenum p, const GLfloat *v)
     switch (p) {
     case GL_TEXTURE_GEN_MODE: {
         GLenum m = (GLenum)(GLint)v[0];
-        if (m != GL_OBJECT_LINEAR && m != GL_EYE_LINEAR && (m != GL_SPHERE_MAP || c == GL_R || c == GL_Q)) {
+        if (m != GL_OBJECT_LINEAR && m != GL_EYE_LINEAR && (m != GL_SPHERE_MAP || c == GL_R || c == GL_Q) &&
+            ((m != GL_REFLECTION_MAP_ARB && m != GL_NORMAL_MAP_ARB) || c == GL_Q)) {
             dgl_gl_error(GL_INVALID_ENUM);
             return;
         }
@@ -279,13 +281,13 @@ void dgl_texgen_reset(void)
         }
 }
 
-/* A unit's generated s and t into tc (only those enabled); pe, ne: the eye position and normal, made by the caller
- * when a mode needs them. */
-void dgl_texgen_vertex(int unit, const dgl_vin *in, const float pe[4], const float ne[3], float tc[2])
+/* A unit's generated coordinates into tc (s, t, r, q; only those enabled; a generated q divides the others);
+ * pe, ne: the eye position and normal. */
+void dgl_texgen_vertex(int unit, const dgl_vin *in, const float pe[4], const float ne[3], float tc[4])
 {
-    int c;
-    float m = 0, rr[3] = { 0, 0, 0 };
-    for (c = 0; c < 2; c++) {
+    int c, k, have_r = 0, have_m = 0;
+    float rr[3] = { 0, 0, 0 }, m = 1;
+    for (c = 0; c < 4; c++) {
         const dgl_texgen *g = &dgl_gl.texgen[unit][c];
         if (!(dgl_gl.texgen_on[unit] & (1u << c)))
             continue;
@@ -297,18 +299,28 @@ void dgl_texgen_vertex(int unit, const dgl_vin *in, const float pe[4], const flo
         case GL_EYE_LINEAR:
             tc[c] = g->eye[0] * pe[0] + g->eye[1] * pe[1] + g->eye[2] * pe[2] + g->eye[3] * pe[3];
             break;
-        default:                        /* GL_SPHERE_MAP */
-            if (m == 0) {
+        case GL_NORMAL_MAP_ARB:
+            tc[c] = ne[c];
+            break;
+        default:                        /* GL_SPHERE_MAP, GL_REFLECTION_MAP_ARB: the eye vector reflected */
+            if (!have_r) {
                 float u[3], len = sqrtf(pe[0] * pe[0] + pe[1] * pe[1] + pe[2] * pe[2]), d;
-                int k;
                 for (k = 0; k < 3; k++)
                     u[k] = len > 0 ? pe[k] / len : 0;
                 d = ne[0] * u[0] + ne[1] * u[1] + ne[2] * u[2];
                 for (k = 0; k < 3; k++)
                     rr[k] = u[k] - 2 * ne[k] * d;
+                have_r = 1;
+            }
+            if (g->mode == GL_REFLECTION_MAP_ARB) {
+                tc[c] = rr[c];
+                break;
+            }
+            if (!have_m) {
                 m = 2.0f * sqrtf(rr[0] * rr[0] + rr[1] * rr[1] + (rr[2] + 1) * (rr[2] + 1));
                 if (m == 0)
                     m = 1e-30f;
+                have_m = 1;
             }
             tc[c] = rr[c] / m + 0.5f;
             break;

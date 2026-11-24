@@ -313,7 +313,7 @@ typedef struct {
      * coordinates over w as planes. */
     int affine[2];
     fixplane fu[2], fv[2];
-    plane q, f, s[2], t[2];
+    plane q, f, s[2], t[2], rq[2];         /* rq: r over w (cube maps) */
     /* The reference spans': colour and depth as planes. */
     plane r, g, b, a, z;
 } attrs;
@@ -337,9 +337,9 @@ static void span(int j, int xl, int xr, const attrs *A)
     double fx0 = 0.5 - A->ox, fy = (j + 0.5) - A->oy;
 #define ROW(P) ((P).a0 + (P).dx * fx0 + (P).dy * fy)
     double r0 = ROW(A->r), g0 = ROW(A->g), b0 = ROW(A->b), a0 = ROW(A->a), z0 = ROW(A->z), q0 = ROW(A->q),
-           f0 = ROW(A->f), s0r[2], t0r[2];
+           f0 = ROW(A->f), s0r[2], t0r[2], r0r[2];
     for (k = 0; k < 2; k++)
-        s0r[k] = ROW(A->s[k]), t0r[k] = ROW(A->t[k]);
+        s0r[k] = ROW(A->s[k]), t0r[k] = ROW(A->t[k]), r0r[k] = S.stage[k].cube[0] ? ROW(A->rq[k]) : 0;
 #undef ROW
     for (i = xl; i < xr; i++) {
         double r = r0 + A->r.dx * i, g = g0 + A->g.dx * i, bl = b0 + A->b.dx * i, al = a0 + A->a.dx * i;
@@ -360,7 +360,18 @@ static void span(int j, int xl, int xr, const attrs *A)
             float prim[4], tex[4];
             prim[0] = c[0], prim[1] = c[1], prim[2] = c[2], prim[3] = c[3];
             for (k = 0; k < 2; k++)
-                if (S.stage[k].tex) {
+                if (S.stage[k].cube[0]) {     /* (a cube map: the direction s, t, r and its derivatives) */
+                    double d[3], ddx[3], ddy[3];
+                    const plane *pl[3] = { &A->s[k], &A->t[k], &A->rq[k] };
+                    double row[3] = { s0r[k], t0r[k], r0r[k] };
+                    int m;
+                    for (m = 0; m < 3; m++) {
+                        d[m] = (row[m] + pl[m]->dx * i) / q;
+                        ddx[m] = (pl[m]->dx - d[m] * A->q.dx) / q, ddy[m] = (pl[m]->dy - d[m] * A->q.dy) / q;
+                    }
+                    soft_sample_cube(&S.stage[k], d, ddx, ddy, tex);
+                    soft_combine_apply(&S.stage[k], tex, prim, c, c);
+                } else if (S.stage[k].tex) {
                     double s0, t0;
                     sv[k] = s0r[k] + A->s[k].dx * i, tv[k] = t0r[k] + A->t[k].dx * i;
                     s0 = sv[k] / q, t0 = tv[k] / q;
@@ -1144,7 +1155,8 @@ static void select_span(void)
         if (S.stage[k].tex) {
             const soft_texture *tx = S.stage[k].tex;
             int c, w = tx->level[0].w, h = tx->level[0].h;
-            if (w > 1024 || h > 1024 || (w & (w - 1)) || (h & (h - 1)) || tx->levels < 1 || S.stage[k].aniso > 1)
+            if (w > 1024 || h > 1024 || (w & (w - 1)) || (h & (h - 1)) || tx->levels < 1 || S.stage[k].aniso > 1 ||
+                S.stage[k].cube[0])
                 return;                         /* (anisotropic filtering: the reference span's soft_sample) */
             for (c = 0; c < 4; c++)
                 const8[k][c] = to8(S.stage[k].constant[c] * 255.0);
@@ -1400,6 +1412,8 @@ static void fast_planes(attrs *A, const soft_vertex *const *v, const double *px,
                 int c = S.stage[k].coord;
                 PLANE(A->s[k], v[0]->tex[c][0] * v[0]->oow, v[1]->tex[c][0] * v[1]->oow, v[2]->tex[c][0] * v[2]->oow);
                 PLANE(A->t[k], v[0]->tex[c][1] * v[0]->oow, v[1]->tex[c][1] * v[1]->oow, v[2]->tex[c][1] * v[2]->oow);
+                if (S.stage[k].cube[0])
+                    PLANE(A->rq[k], v[0]->texr[c] * v[0]->oow, v[1]->texr[c] * v[1]->oow, v[2]->texr[c] * v[2]->oow);
             }
         fix_tex(A, fx, fy);
     }
@@ -1474,6 +1488,9 @@ static void triangle_now(const soft_vertex *a, const soft_vertex *b, const soft_
                               px, py, det);
             A.t[k] = plane_of(v[0]->tex[cc][1] * v[0]->oow, v[1]->tex[cc][1] * v[1]->oow, v[2]->tex[cc][1] * v[2]->oow,
                               px, py, det);
+            if (S.stage[k].cube[0])
+                A.rq[k] = plane_of(v[0]->texr[cc] * v[0]->oow, v[1]->texr[cc] * v[1]->oow, v[2]->texr[cc] * v[2]->oow,
+                                   px, py, det);
         }
     /* Fog: the coordinate (or, per vertex, the factor) over w. */
     if (S.fog) {
@@ -1534,6 +1551,8 @@ static void line_attrs(attrs *A, const soft_vertex *a, const soft_vertex *b, int
             int c = S.stage[k].coord;
             LINE_PLANE(A->s[k], a->tex[c][0] * a->oow, b->tex[c][0] * b->oow);
             LINE_PLANE(A->t[k], a->tex[c][1] * a->oow, b->tex[c][1] * b->oow);
+            if (S.stage[k].cube[0])
+                LINE_PLANE(A->rq[k], a->texr[c] * a->oow, b->texr[c] * b->oow);
         }
     if (S.fog) {
         double fa = a->fog, fb = b->fog;
@@ -1790,6 +1809,8 @@ static const kept_state *state_kept(void)
 {
     kept_state *k;
     int i;
+    if (U.stage[0].cube[0] || U.stage[1].cube[0])
+        return NULL;                    /* (a cube map's six faces aren't kept: its drawing is done now, after the rest) */
     if (ks_now && (!state_new || same_as_kept(ks_now))) {
         state_new = 0;
         return ks_now;

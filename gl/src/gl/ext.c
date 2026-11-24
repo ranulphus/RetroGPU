@@ -66,7 +66,7 @@ void APIENTRY glClientActiveTextureARB(GLenum target)
 }
 
 /* Texture coordinates for a unit; q divides, as glTexCoord4 does here. */
-static void coords(GLenum target, float s, float t, float q)
+static void coords4(GLenum target, float s, float t, float r, float q)
 {
     int u = unit_of(target);
     float *c;
@@ -76,45 +76,48 @@ static void coords(GLenum target, float s, float t, float q)
     if (q != 0 && q != 1) {
         s /= q;
         t /= q;
+        r /= q;
     }
     c[0] = s;
     c[1] = t;
+    dgl_gl.cur_texr[u] = r;
 }
+#define coords(u, s, t, q) coords4(u, s, t, 0, q)
 
 /* glMultiTexCoord{1,2,3,4}{d,f,i,s}[v]ARB, written out so dglGetProcAddress's
  * generated table finds them. */
 void APIENTRY glMultiTexCoord1dARB(GLenum u, GLdouble s) { coords(u, (float)s, 0, 1); }
 void APIENTRY glMultiTexCoord2dARB(GLenum u, GLdouble s, GLdouble t) { coords(u, (float)s, (float)t, 1); }
-void APIENTRY glMultiTexCoord3dARB(GLenum u, GLdouble s, GLdouble t, GLdouble r) { (void)r; coords(u, (float)s, (float)t, 1); }
-void APIENTRY glMultiTexCoord4dARB(GLenum u, GLdouble s, GLdouble t, GLdouble r, GLdouble q) { (void)r; coords(u, (float)s, (float)t, (float)q); }
+void APIENTRY glMultiTexCoord3dARB(GLenum u, GLdouble s, GLdouble t, GLdouble r) { coords4(u, (float)s, (float)t, (float)r, 1); }
+void APIENTRY glMultiTexCoord4dARB(GLenum u, GLdouble s, GLdouble t, GLdouble r, GLdouble q) { coords4(u, (float)s, (float)t, (float)r, (float)q); }
 void APIENTRY glMultiTexCoord1dvARB(GLenum u, const GLdouble *v) { coords(u, (float)v[0], 0, 1); }
 void APIENTRY glMultiTexCoord2dvARB(GLenum u, const GLdouble *v) { coords(u, (float)v[0], (float)v[1], 1); }
-void APIENTRY glMultiTexCoord3dvARB(GLenum u, const GLdouble *v) { coords(u, (float)v[0], (float)v[1], 1); }
-void APIENTRY glMultiTexCoord4dvARB(GLenum u, const GLdouble *v) { coords(u, (float)v[0], (float)v[1], (float)v[3]); }
+void APIENTRY glMultiTexCoord3dvARB(GLenum u, const GLdouble *v) { coords4(u, (float)v[0], (float)v[1], (float)v[2], 1); }
+void APIENTRY glMultiTexCoord4dvARB(GLenum u, const GLdouble *v) { coords4(u, (float)v[0], (float)v[1], (float)v[2], (float)v[3]); }
 void APIENTRY glMultiTexCoord1fARB(GLenum u, GLfloat s) { coords(u, (float)s, 0, 1); }
 void APIENTRY glMultiTexCoord2fARB(GLenum u, GLfloat s, GLfloat t) { coords(u, (float)s, (float)t, 1); }
-void APIENTRY glMultiTexCoord3fARB(GLenum u, GLfloat s, GLfloat t, GLfloat r) { (void)r; coords(u, (float)s, (float)t, 1); }
-void APIENTRY glMultiTexCoord4fARB(GLenum u, GLfloat s, GLfloat t, GLfloat r, GLfloat q) { (void)r; coords(u, (float)s, (float)t, (float)q); }
+void APIENTRY glMultiTexCoord3fARB(GLenum u, GLfloat s, GLfloat t, GLfloat r) { coords4(u, (float)s, (float)t, (float)r, 1); }
+void APIENTRY glMultiTexCoord4fARB(GLenum u, GLfloat s, GLfloat t, GLfloat r, GLfloat q) { coords4(u, (float)s, (float)t, (float)r, (float)q); }
 void APIENTRY glMultiTexCoord1fvARB(GLenum u, const GLfloat *v) { coords(u, (float)v[0], 0, 1); }
 void APIENTRY glMultiTexCoord2fvARB(GLenum u, const GLfloat *v) { coords(u, (float)v[0], (float)v[1], 1); }
-void APIENTRY glMultiTexCoord3fvARB(GLenum u, const GLfloat *v) { coords(u, (float)v[0], (float)v[1], 1); }
-void APIENTRY glMultiTexCoord4fvARB(GLenum u, const GLfloat *v) { coords(u, (float)v[0], (float)v[1], (float)v[3]); }
+void APIENTRY glMultiTexCoord3fvARB(GLenum u, const GLfloat *v) { coords4(u, (float)v[0], (float)v[1], (float)v[2], 1); }
+void APIENTRY glMultiTexCoord4fvARB(GLenum u, const GLfloat *v) { coords4(u, (float)v[0], (float)v[1], (float)v[2], (float)v[3]); }
 void APIENTRY glMultiTexCoord1iARB(GLenum u, GLint s) { coords(u, (float)s, 0, 1); }
 void APIENTRY glMultiTexCoord2iARB(GLenum u, GLint s, GLint t) { coords(u, (float)s, (float)t, 1); }
-void APIENTRY glMultiTexCoord3iARB(GLenum u, GLint s, GLint t, GLint r) { (void)r; coords(u, (float)s, (float)t, 1); }
-void APIENTRY glMultiTexCoord4iARB(GLenum u, GLint s, GLint t, GLint r, GLint q) { (void)r; coords(u, (float)s, (float)t, (float)q); }
+void APIENTRY glMultiTexCoord3iARB(GLenum u, GLint s, GLint t, GLint r) { coords4(u, (float)s, (float)t, (float)r, 1); }
+void APIENTRY glMultiTexCoord4iARB(GLenum u, GLint s, GLint t, GLint r, GLint q) { coords4(u, (float)s, (float)t, (float)r, (float)q); }
 void APIENTRY glMultiTexCoord1ivARB(GLenum u, const GLint *v) { coords(u, (float)v[0], 0, 1); }
 void APIENTRY glMultiTexCoord2ivARB(GLenum u, const GLint *v) { coords(u, (float)v[0], (float)v[1], 1); }
-void APIENTRY glMultiTexCoord3ivARB(GLenum u, const GLint *v) { coords(u, (float)v[0], (float)v[1], 1); }
-void APIENTRY glMultiTexCoord4ivARB(GLenum u, const GLint *v) { coords(u, (float)v[0], (float)v[1], (float)v[3]); }
+void APIENTRY glMultiTexCoord3ivARB(GLenum u, const GLint *v) { coords4(u, (float)v[0], (float)v[1], (float)v[2], 1); }
+void APIENTRY glMultiTexCoord4ivARB(GLenum u, const GLint *v) { coords4(u, (float)v[0], (float)v[1], (float)v[2], (float)v[3]); }
 void APIENTRY glMultiTexCoord1sARB(GLenum u, GLshort s) { coords(u, (float)s, 0, 1); }
 void APIENTRY glMultiTexCoord2sARB(GLenum u, GLshort s, GLshort t) { coords(u, (float)s, (float)t, 1); }
-void APIENTRY glMultiTexCoord3sARB(GLenum u, GLshort s, GLshort t, GLshort r) { (void)r; coords(u, (float)s, (float)t, 1); }
-void APIENTRY glMultiTexCoord4sARB(GLenum u, GLshort s, GLshort t, GLshort r, GLshort q) { (void)r; coords(u, (float)s, (float)t, (float)q); }
+void APIENTRY glMultiTexCoord3sARB(GLenum u, GLshort s, GLshort t, GLshort r) { coords4(u, (float)s, (float)t, (float)r, 1); }
+void APIENTRY glMultiTexCoord4sARB(GLenum u, GLshort s, GLshort t, GLshort r, GLshort q) { coords4(u, (float)s, (float)t, (float)r, (float)q); }
 void APIENTRY glMultiTexCoord1svARB(GLenum u, const GLshort *v) { coords(u, (float)v[0], 0, 1); }
 void APIENTRY glMultiTexCoord2svARB(GLenum u, const GLshort *v) { coords(u, (float)v[0], (float)v[1], 1); }
-void APIENTRY glMultiTexCoord3svARB(GLenum u, const GLshort *v) { coords(u, (float)v[0], (float)v[1], 1); }
-void APIENTRY glMultiTexCoord4svARB(GLenum u, const GLshort *v) { coords(u, (float)v[0], (float)v[1], (float)v[3]); }
+void APIENTRY glMultiTexCoord3svARB(GLenum u, const GLshort *v) { coords4(u, (float)v[0], (float)v[1], (float)v[2], 1); }
+void APIENTRY glMultiTexCoord4svARB(GLenum u, const GLshort *v) { coords4(u, (float)v[0], (float)v[1], (float)v[2], (float)v[3]); }
 
 /* GL_SGIS_multitexture: one selector for both texture state and coordinates. */
 void APIENTRY glSelectTextureSGIS(GLenum target)

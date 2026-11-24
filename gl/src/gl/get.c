@@ -63,6 +63,9 @@ static int query(GLenum p, double *v)
     case GL_ACTIVE_TEXTURE_ARB: v[0] = GL_TEXTURE0_ARB + dgl_gl.active_unit; return 1;
     case GL_CLIENT_ACTIVE_TEXTURE_ARB: v[0] = GL_TEXTURE0_ARB + dgl_gl.client_unit; return 1;
     case GL_TEXTURE_BINDING_2D: { extern GLuint dgl_bound_name(void); v[0] = dgl_bound_name(); return 1; }
+    case GL_TEXTURE_BINDING_CUBE_MAP_ARB: { extern GLuint dgl_bound_cube_name(void); v[0] = dgl_bound_cube_name(); return 1; }
+    case GL_TEXTURE_CUBE_MAP_ARB: v[0] = dgl_gl.texture_cube[dgl_gl.active_unit]; return 1;
+    case GL_MAX_CUBE_MAP_TEXTURE_SIZE_ARB: { dgl_caps c; dgl_get_caps(&c); v[0] = c.cube ? c.max_texture_size : 0; return 1; }
     case GL_DITHER: v[0] = dgl_gl.dither; return 1;
     case GL_POLYGON_OFFSET_FILL: v[0] = dgl_gl.offset_fill; return 1;
     case GL_STENCIL_TEST: v[0] = dgl_gl.stencil_test; return 1;
@@ -220,6 +223,8 @@ static const char *extensions(void)
                         "GL_ARB_texture_env_combine GL_EXT_texture_env_combine ");
         if (c.texture_units >= 2 && c.dot3)
             strcat(buf, "GL_ARB_texture_env_dot3 ");
+        if (c.cube)
+            strcat(buf, "GL_ARB_texture_cube_map GL_EXT_texture_cube_map ");
         if (c.max_anisotropy > 1.0f)
             strcat(buf, "GL_EXT_texture_filter_anisotropic ");
         if (c.max_lod_bias > 0.0f)

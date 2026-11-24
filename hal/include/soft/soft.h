@@ -47,6 +47,7 @@ typedef struct {
     float x, y, z, oow;
     float r, g, b, a;
     float tex[2][3];
+    float texr[2];                  /* r of each unit's coordinates (a cube map's direction is s, t, r) */
     float fog;
 } soft_vertex;
 
@@ -90,6 +91,8 @@ typedef struct {
     float lod_bias;                 /* added to the level of detail (GL_EXT_texture_lod_bias) */
     float aniso;                    /* the most samples along a footprint's long axis (EXT_texture_filter_anisotropic);
                                      * 0 or 1: none. Above 1 the stage is drawn by the reference span */
+    const soft_texture *cube[6];    /* a cube map's faces (+X, -X, +Y, -Y, +Z, -Z) when cube[0]: the stage samples
+                                     * by s, t and r (the reference span); tex is cube[0] then */
     soft_combine rgb, alpha;
     float constant[4];
 } soft_stage;
@@ -144,6 +147,8 @@ void soft_point(const soft_vertex *v, float size);
  * previous stage's (RGBA 0..1 each). */
 void soft_sample(const soft_texture *tx, double bias, double aniso, double s, double t, double dsdx, double dsdy,
                  double dtdx, double dtdy, float out[4]);
+/* A cube map at the direction d (s, t, r), its derivatives on the screen ddx and ddy (the level of detail). */
+void soft_sample_cube(const soft_stage *st, const double d[3], const double ddx[3], const double ddy[3], float out[4]);
 void soft_combine_apply(const soft_stage *st, const float tex[4], const float prim[4], const float prev[4],
                         float out[4]);
 

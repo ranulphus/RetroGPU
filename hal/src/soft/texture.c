@@ -157,6 +157,48 @@ void soft_sample(const soft_texture *tx, double bias, double aniso, double s, do
     sample_one(tx, bias, s, t, dsdx, dsdy, dtdx, dtdy, out);
 }
 
+/* A direction's face and its coordinates there (GL_ARB_texture_cube_map's table): the major axis picks the face;
+ * s = (sc / |ma| + 1) / 2, t = (tc / |ma| + 1) / 2. */
+static int cube_face(const double d[3])
+{
+    double ax = fabs(d[0]), ay = fabs(d[1]), az = fabs(d[2]);
+    if (ax >= ay && ax >= az)
+        return d[0] >= 0 ? 0 : 1;
+    if (ay >= az)
+        return d[1] >= 0 ? 2 : 3;
+    return d[2] >= 0 ? 4 : 5;
+}
+
+static void cube_coords(int face, const double d[3], double *s, double *t)
+{
+    double sc, tc, ma;
+    switch (face) {
+    case 0: sc = -d[2], tc = -d[1], ma = d[0]; break;
+    case 1: sc = d[2], tc = -d[1], ma = d[0]; break;
+    case 2: sc = d[0], tc = d[2], ma = d[1]; break;
+    case 3: sc = d[0], tc = -d[2], ma = d[1]; break;
+    case 4: sc = d[0], tc = -d[1], ma = d[2]; break;
+    default: sc = -d[0], tc = -d[1], ma = d[2]; break;
+    }
+    ma = fabs(ma);
+    if (ma == 0)
+        ma = 1e-30;
+    *s = (sc / ma + 1) * 0.5, *t = (tc / ma + 1) * 0.5;
+}
+
+/* The face's coordinates' derivatives: by the same face's projection at d + ddx and d + ddy (a pixel on). */
+void soft_sample_cube(const soft_stage *st, const double d[3], const double ddx[3], const double ddy[3], float out[4])
+{
+    int f = cube_face(d), k;
+    double s, t, sx, tx, sy, ty, dx[3], dy[3];
+    for (k = 0; k < 3; k++)
+        dx[k] = d[k] + ddx[k], dy[k] = d[k] + ddy[k];
+    cube_coords(f, d, &s, &t);
+    cube_coords(f, dx, &sx, &tx);
+    cube_coords(f, dy, &sy, &ty);
+    soft_sample(st->cube[f], st->lod_bias, st->aniso, s, t, sx - s, sy - s, tx - t, ty - t, out);
+}
+
 /* ---- Integer sampling (B2.8's fast spans) -------------------------------- */
 
 /* Bilinear filtering in two stages, along u and then v, each rounded to 8
