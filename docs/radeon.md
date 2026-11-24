@@ -321,7 +321,9 @@ tolerance (the worst 36 levels); Screamer Rally's 60, 150, 200 and 240 with at m
 flip in the command stream (295 and 240 queued), no engine time-out, no approximation said.
 
 **The other cards after the core's changes** (the preset's correction, `tex_min_w`, the back ends' tables): Glide's
-conformance on the emulated G100, G200, G400 and G450 in Loop A, 27 of 27 on each; the host tier's 14 steps pass.
+conformance on the emulated G100, G200, G400 and G450 in Loop A, 27 of 27 on each, and on the emulated ViRGE/DX's
+two boards, 27 of 27 on each; the host tier's 14 steps pass. (The TNT2 and the Rage 128 have no emulated card:
+theirs wait for a bench.)
 
 Still owed, with someone watching the P3: the games live, DFLIP's phases, the hardware cursor.
 
