@@ -354,6 +354,34 @@ range comes on by itself (`GLOS-MTRR wc on var=2 base=d0000000 bytes=4000000`), 
 nothing set by hand, and the layer's scenes, DOS-GL's t01, t14, t18 and t32, Glide's t13, t17 and t21 and GLQuake
 (80.7, 87.7, 103.8, 97.6) are as before.
 
+## The Radeon 7500 LE (RV200) in the P3 (2026-11-24)
+
+The owner swapped the P3's 7000 for a Radeon 7500 LE the same day.
+
+- **DPROBE:** `1002:5157` (RV200 QW), revision 00, AGP; the frame buffer at d0000000 (64 MB), the registers in their
+  own BAR at dfef0000; 64 MB of DDR; VBE 2.0, 56 modes, "ATI RADEON 7500". Its BIOS leaves `MC_FB_LOCATION` at
+  1fff0000 (512 MB, where the 7000's had ffff0000) and an AGP range at 20000000; the command processor's set-up
+  lowers the first as before. The probe now reads the PLL with the RV200's two dummy reads as well as the 5 ms.
+- **Its memory is sound:** DMEM over all 64 MB (a pattern, all ones, all zeros; 32 MB held for 16 s): nothing
+  wrong. No `DGL_RADEON_VRAM` window; DTWOD's stray pixels are gone (22 of 22, 25 of 25 through the ring), which
+  confirms they were the 7000's memory.
+- **The layer as on the 7000:** DTRI0, DTRI's 13 scenes by register writes and through the ring, DTRI32, the same
+  mipmap rule (DMIP), RGDEV at both pitches. Its transform engine is bypassed per primitive (`SE_CNTL_STATUS` 0 and
+  no TCL bit in `SE_VF_CNTL`), as X.org does on this chip.
+- **The depth buffer is tiled, always.** Chips with a transform engine (this one and the first Radeon) keep it in
+  tiles (32 by 16 at 16 bits, 16 by 16 at 32: Mesa's `radeon_mba_z16` and `_z32`); the 7000 keeps it linear (Mesa's
+  `depthHasSurface`, X.org's `RADEONChangeSurfaces`). Glide's t06 and t18, which read and write the depth buffer
+  through the LFB, failed. Now, where `RADEON_TILED_Z` is set:
+  - the device pads the depth buffer to whole tiles (its pitch to 32 pixels, its rows to 16) and sets a surface
+    over it (`SURFACE0_INFO` = the pitch in 16-byte units and the depth tiling, the bounds 1 KB aligned), so the
+    CPU's reads and writes there are translated and it sees the buffer linear; the surface goes at close;
+  - depth clears go by the 3D engine (`radeon_3d_depth_clear`: a quad, the colour writes off, the depth test always
+    passing, the stencil replaced or kept), since the 2D engine would write the tiles as if linear.
+- **On the P3:** DOS-GL's conformance 35 of 35; Glide's 26 of 27 (t22, gamma); GLQuake 89.3 and 91.5 fps at 640x480,
+  103.3 and 98.3 at 320x200 (the 7000's: 80.7, 87.7, 103.8, 97.6).
+- **Write-combining** (`MTRR LFB ON` by hand: GLOS's list didn't have the card yet): DWC as on the 7000, 16-bit
+  stores 74 MB/s, a frame copied in 12.3 ms, the checks clean; given to GLOS for its list.
+
 ## The rest of the family: the RV200 (Radeon 7500) and the first Radeon (R100)
 
 A Radeon 7500 LE (RV200) is to follow this card. What the references say differs, gathered here so it isn't

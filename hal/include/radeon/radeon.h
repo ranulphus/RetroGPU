@@ -33,6 +33,9 @@ extern radeon_chip radeon;              /* the one Radeon this layer drives */
 #define RADEON_PLL_DELAY        4u
 #define RADEON_PLL_DUMMYREADS   8u
 #define RADEON_BROKEN_STENCIL   16u
+#define RADEON_TILED_Z          32u     /* the 3D engine's depth buffer is always tiled (the chips with a transform
+                                         * engine: Mesa's radeon_screen.c, X.org's RADEONChangeSurfaces; the RV100's is
+                                         * linear): the CPU sees it through a surface, partial clears by the 3D engine */
 
 /* chip.c */
 int  radeon_find(void);                 /* 0: a Radeon of the R100 family on PCI (bus 0-3); fills radeon's PCI fields */
@@ -125,6 +128,11 @@ void radeon_3d_init(uint32_t color_off, int pitch_bytes, int bpp, uint32_t z_off
                     int width, int height);
 void radeon_3d_emit(void);
 void radeon_3d_tex_written(void);       /* texels written under a unit's texture: its registers out again */
+/* A rectangle of the depth buffer (and the stencil's byte with Z24S8) set by the 3D engine: a quad with the colour
+ * writes off and the depth test always passing, the state put back after (the DRM's R100 depth clears). z: the
+ * depth's own value (16 or 24 bits); stencil < 0: the stencil left. Wanted where depth is tiled (RADEON_TILED_Z):
+ * the 2D engine writes it as if linear. */
+void radeon_3d_depth_clear(int x, int y, int w, int h, uint32_t z, int write_z, int stencil);
 /* What a vertex carries after x, y, z: RADEON_VF_* below, in this order: rhw, the colour, the specular and fog,
  * s and t, s2 and t2, s3 and t3. */
 #define RADEON_VTX_RHW   1
@@ -137,6 +145,12 @@ void radeon_3d_format(int what);
 void radeon_tri(const radeon_vertex *a, const radeon_vertex *b, const radeon_vertex *c);
 void radeon_poly(const radeon_vertex *v, int n);     /* a convex polygon of 3 to 16 vertices as one triangle fan */
 void radeon_2d_begin(void);             /* (engine2d.c calls it: 2D after 3D waits for the 3D engine) */
+
+/* chip.c: a surface over the depth buffer at off (1 KB aligned), bytes long (a multiple of 1 KB), pitch_bytes a row,
+ * 16 or 32 bits (24-bit Z with its stencil): the CPU's reads and writes there translated to the chip's tiling, so
+ * the CPU sees the buffer linear. 0, or -1 (not aligned). radeon_depth_surface_off: none (before text mode). */
+int  radeon_depth_surface(uint32_t off, uint32_t bytes, int pitch_bytes, int bits);
+void radeon_depth_surface_off(void);
 
 /* cp.c: the command processor (RD3). radeon_cp_init loads the microcode (pairs: 256 x low, high words; NULL: the
  * embedded R100 table) and starts the chip fetching a ring of bytes (a power of two, 4 KB to 256 KB) in

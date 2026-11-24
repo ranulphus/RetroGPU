@@ -43,12 +43,12 @@ static const struct {
     unsigned flags;
     const char *name;
 } chips[] = {
-    { 0x5144, RADEON_HAS_TCL | RADEON_HAS_HIERZ | RADEON_BROKEN_STENCIL, "Radeon (R100)" },
-    { 0x5145, RADEON_HAS_TCL | RADEON_HAS_HIERZ | RADEON_BROKEN_STENCIL, "Radeon (R100)" },
-    { 0x5146, RADEON_HAS_TCL | RADEON_HAS_HIERZ | RADEON_BROKEN_STENCIL, "Radeon (R100)" },
-    { 0x5147, RADEON_HAS_TCL | RADEON_HAS_HIERZ | RADEON_BROKEN_STENCIL, "Radeon (R100)" },
-    { 0x5157, RADEON_HAS_TCL | RADEON_HAS_HIERZ | RADEON_PLL_DUMMYREADS, "Radeon 7500 (RV200)" },
-    { 0x5158, RADEON_HAS_TCL | RADEON_HAS_HIERZ | RADEON_PLL_DUMMYREADS, "Radeon 7500 (RV200)" },
+    { 0x5144, RADEON_HAS_TCL | RADEON_HAS_HIERZ | RADEON_BROKEN_STENCIL | RADEON_TILED_Z, "Radeon (R100)" },
+    { 0x5145, RADEON_HAS_TCL | RADEON_HAS_HIERZ | RADEON_BROKEN_STENCIL | RADEON_TILED_Z, "Radeon (R100)" },
+    { 0x5146, RADEON_HAS_TCL | RADEON_HAS_HIERZ | RADEON_BROKEN_STENCIL | RADEON_TILED_Z, "Radeon (R100)" },
+    { 0x5147, RADEON_HAS_TCL | RADEON_HAS_HIERZ | RADEON_BROKEN_STENCIL | RADEON_TILED_Z, "Radeon (R100)" },
+    { 0x5157, RADEON_HAS_TCL | RADEON_HAS_HIERZ | RADEON_PLL_DUMMYREADS | RADEON_TILED_Z, "Radeon 7500 (RV200)" },
+    { 0x5158, RADEON_HAS_TCL | RADEON_HAS_HIERZ | RADEON_PLL_DUMMYREADS | RADEON_TILED_Z, "Radeon 7500 (RV200)" },
     { 0x5159, RADEON_PLL_DELAY, "Radeon 7000 / VE (RV100)" },
     { 0x515A, RADEON_PLL_DELAY, "Radeon 7000 / VE (RV100)" },
 };
@@ -283,6 +283,31 @@ void radeon_text_mode(void)
     memset(&r, 0, sizeof r);
     r.eax = 0x0003;
     sys_rm_int(0x10, &r);
+}
+
+/* ---- The depth buffer's surface (chips that tile depth) ---------------------------------------------------- */
+
+int radeon_depth_surface(uint32_t off, uint32_t bytes, int pitch_bytes, int bits)
+{
+    if (!radeon.mmio || (off & 1023u) || (bytes & 1023u) || !bytes || (pitch_bytes & 15))
+        return -1;
+    radeon_sync(500000);                /* (the DRM's radeon_apply_surface_regs: the engine idle first) */
+    radeon_wr(RADEON_SURFACE_CNTL, radeon_rd(RADEON_SURFACE_CNTL) & ~RADEON_SURF_TRANSLATION_DIS);
+    radeon_wr(RADEON_SURFACE0_INFO, (uint32_t)(pitch_bytes / 16) |
+                                    (bits == 16 ? RADEON_SURF_TILE_DEPTH_16BPP : RADEON_SURF_TILE_DEPTH_32BPP));
+    radeon_wr(RADEON_SURFACE0_LOWER_BOUND, off);
+    radeon_wr(RADEON_SURFACE0_UPPER_BOUND, off + bytes - 1u);
+    return 0;
+}
+
+void radeon_depth_surface_off(void)
+{
+    if (!radeon.mmio)
+        return;
+    radeon_sync(500000);
+    radeon_wr(RADEON_SURFACE0_INFO, 0);
+    radeon_wr(RADEON_SURFACE0_LOWER_BOUND, 0);
+    radeon_wr(RADEON_SURFACE0_UPPER_BOUND, 0);
 }
 
 /* ---- The display ----------------------------------------------------------------------------------------- */

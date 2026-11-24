@@ -245,3 +245,41 @@ void radeon_2d_begin(void)
     out(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLECLEAN | RADEON_WAIT_HOST_IDLECLEAN);
     mode3d = 0;
 }
+
+void radeon_3d_depth_clear(int x, int y, int w, int h, uint32_t z, int write_z, int stencil)
+{
+    radeon_ctx3d keep = radeon_3d, *c = &radeon_3d;
+    int keep_what = vwhat, i, z24 = (c->rb3d_zstencilcntl & 0xFu) != RADEON_DEPTH_FORMAT_16BIT_INT_Z;
+    radeon_vertex v[4];
+    float fz = z24 ? (float)((double)(z & 0xFFFFFFu) / 16777215.0) : (float)((double)(z & 0xFFFFu) / 65535.0);
+    if (w <= 0 || h <= 0 || (!write_z && stencil < 0))
+        return;
+    c->pp_cntl = RADEON_SCISSOR_ENABLE | RADEON_ANTI_ALIAS_NONE | RADEON_TEX_BLEND_0_ENABLE;
+    c->tex[0].txcblend = RADEON_COLOR_ARG_A_ZERO | RADEON_COLOR_ARG_B_ZERO | RADEON_COLOR_ARG_C_DIFFUSE_COLOR |
+                         RADEON_BLEND_CTL_ADD | RADEON_SCALE_1X | RADEON_CLAMP_TX;
+    c->tex[0].txablend = RADEON_ALPHA_ARG_A_ZERO | RADEON_ALPHA_ARG_B_ZERO | RADEON_ALPHA_ARG_C_DIFFUSE_ALPHA |
+                         RADEON_BLEND_CTL_ADD | RADEON_SCALE_1X | RADEON_CLAMP_TX;
+    c->rb3d_cntl = (c->rb3d_cntl & ~(RADEON_ALPHA_BLEND_ENABLE | RADEON_STENCIL_ENABLE)) | RADEON_PLANE_MASK_ENABLE |
+                   RADEON_Z_ENABLE | (stencil >= 0 ? RADEON_STENCIL_ENABLE : 0u);
+    c->rb3d_planemask = 0;
+    c->rb3d_blendcntl = RADEON_COMB_FCN_ADD_CLAMP | RADEON_SRC_BLEND_GL_ONE | RADEON_DST_BLEND_GL_ZERO;
+    c->rb3d_zstencilcntl = (c->rb3d_zstencilcntl & 0xFu) | RADEON_Z_TEST_ALWAYS | (write_z ? RADEON_Z_WRITE_ENABLE : 0u) |
+                           RADEON_STENCIL_TEST_ALWAYS | RADEON_STENCIL_FAIL_KEEP | RADEON_STENCIL_ZFAIL_KEEP |
+                           (stencil >= 0 ? RADEON_STENCIL_ZPASS_REPLACE : RADEON_STENCIL_ZPASS_KEEP);
+    c->rb3d_stencilrefmask = ((uint32_t)(stencil >= 0 ? stencil : 0) & 0xFFu) << RADEON_STENCIL_REF_SHIFT |
+                             0xFFu << RADEON_STENCIL_MASK_SHIFT | (stencil >= 0 ? 0xFFu : 0u) << RADEON_STENCIL_WRITEMASK_SHIFT;
+    c->pp_misc = (c->pp_misc & ~RADEON_ALPHA_TEST_OP_MASK) | RADEON_ALPHA_TEST_PASS;
+    c->re_top_left = (uint32_t)y << 16 | (uint32_t)x;
+    c->re_width_height = (uint32_t)(x + w - 1) << RADEON_RE_WIDTH_SHIFT | (uint32_t)(y + h - 1) << RADEON_RE_HEIGHT_SHIFT;
+    radeon_3d_dirty = 1;
+    radeon_3d_format(RADEON_VTX_RHW | RADEON_VTX_ARGB);
+    memset(v, 0, sizeof v);
+    for (i = 0; i < 4; i++) {
+        v[i].x = (float)(i == 1 || i == 2 ? x + w : x), v[i].y = (float)(i >= 2 ? y + h : y);
+        v[i].z = fz, v[i].rhw = 1.0f, v[i].argb = 0xFF000000u;
+    }
+    radeon_poly(v, 4);
+    radeon_3d = keep;
+    radeon_3d_dirty = 1;
+    radeon_3d_format(keep_what);
+}

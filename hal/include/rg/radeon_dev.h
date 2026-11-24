@@ -9,7 +9,9 @@ typedef struct {
     int      active;
     int      width, height, pitch_bytes, bpp;
     int      double_buffer, depth_bits;     /* depth: 16 with 16-bit colour, 24 (Z24S8) with 32 */
-    int      z_pitch_bytes;                 /* the depth buffer's rows (its own pixels' size at the colour's pitch) */
+    int      z_pitch_bytes;                 /* the depth buffer's rows (its own pixels' size at the colour's pitch: rounded
+                                             * up to 32 pixels where depth is tiled, RADEON_TILED_Z) */
+    int      z_rows;                        /* its rows in memory (the height; rounded up to 16 where tiled) */
     uint32_t front_off, back_off, z_off, heap_off, heap_end;
     int      front_is_a, draw_front;
 } rg_radeon_ctx;

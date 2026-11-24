@@ -125,16 +125,20 @@ static FxBool win_open(int w, int h, GrColorFormat_t color_format, GrOriginLocat
     tex_heap_init(mg.heap_off, mg.heap_end);
     tex_reset();
     /* (the 3D state for this window: Mesa's values; Z16 at the colour's pitch) */
-    radeon_3d_init(mg.buf_off[1], mg.pitch_px * 2, 16, mg.has_aux ? mg.aux_off : 0, mg.pitch_px * 2,
-                   mg.has_aux ? 16 : 0, w, h);
+    radeon_3d_init(mg.buf_off[1], mg.pitch_px * 2, 16, mg.has_aux ? mg.aux_off : 0,
+                   rg_radeon.z_pitch_bytes ? rg_radeon.z_pitch_bytes : mg.pitch_px * 2, mg.has_aux ? 16 : 0, w, h);
     mg.front = 0, mg.back = 1;
     mg.render_buffer = GR_BUFFER_BACKBUFFER;
     mg.open = 1;
     mg.dirty = ~0u;
     mg.st.clip_x0 = 0; mg.st.clip_y0 = 0; mg.st.clip_x1 = w; mg.st.clip_y1 = h;
     mg_validate();
-    if (mg.has_aux)
-        fill16(mg.aux_off, 0, 0, mg.rw, mg.rh, 0);         /* (as the Matrox cards: depth 0) */
+    if (mg.has_aux) {                                   /* (as the Matrox cards: depth 0) */
+        if (radeon.flags & RADEON_TILED_Z)
+            radeon_3d_depth_clear(0, 0, mg.rw, mg.rh, 0, 1, -1);
+        else
+            fill16(mg.aux_off, 0, 0, mg.rw, mg.rh, 0);
+    }
     mg.dirty = ~0u;
     sync_said("open");
     radeon_set_start(mg.buf_off[mg.front]);
@@ -200,8 +204,12 @@ static void clear(int x0, int y0, int x1, int y1, GrColor_t color, FxU16 depth)
 {
     if (mg.st.color_mask_rgb)
         fill16(mg_buffer_offset(mg.render_buffer), x0, y0, x1 - x0, y1 - y0, mg_argb_to_565(mg_color_to_argb(color)));
-    if (mg.has_aux && mg.st.depth_mask && mg.st.depth_mode != GR_DEPTHBUFFER_DISABLE)
-        fill16(mg.aux_off, x0, y0, x1 - x0, y1 - y0, mg_depth_clear_value(depth));
+    if (mg.has_aux && mg.st.depth_mask && mg.st.depth_mode != GR_DEPTHBUFFER_DISABLE) {
+        if (radeon.flags & RADEON_TILED_Z)      /* (a tiled depth buffer: by the 3D engine) */
+            radeon_3d_depth_clear(x0, y0, x1 - x0, y1 - y0, mg_depth_clear_value(depth), 1, -1);
+        else
+            fill16(mg.aux_off, x0, y0, x1 - x0, y1 - y0, mg_depth_clear_value(depth));
+    }
     radeon_cp_flush();
 }
 

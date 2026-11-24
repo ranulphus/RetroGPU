@@ -106,12 +106,16 @@ static const char *far_str(const uint8_t *p, char *out, int n)
 static volatile uint32_t *mmio;
 static uint32_t rd(uint32_t off) { return mmio[off / 4]; }
 
-/* A PLL register through the clock index (radeon_driver.c's INPLL: the index's low 6 bits, PLL_WR_EN clear), then
- * the RV100's 5 ms. */
+/* A PLL register through the clock index (radeon_driver.c's INPLL: the index's low 6 bits, PLL_WR_EN clear), with
+ * both chips' errata: the RV200's two dummy reads after the index (RADEONPllErrataAfterIndex: else the read can
+ * return garbage), the RV100's 5 ms after the data (RADEONPllErrataAfterData). Both kept for every chip: a probe
+ * doesn't yet know which it has, and neither hurts the other. */
 static uint32_t rd_pll(int idx)
 {
     uint32_t v;
     ((volatile uint8_t *)mmio)[RADEON_CLOCK_CNTL_INDEX] = (uint8_t)(idx & 0x3F);
+    (void)rd(RADEON_CLOCK_CNTL_DATA);
+    (void)rd(0x0050);                   /* (CRTC_GEN_CNTL) */
     v = rd(RADEON_CLOCK_CNTL_DATA);
     sys_delay_us(5000);
     return v;

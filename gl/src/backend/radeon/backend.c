@@ -1054,14 +1054,22 @@ static void clear(GLbitfield mask)
     }
     if (rg_radeon.z_off && (((mask & GL_DEPTH_BUFFER_BIT) && dgl_gl.depth_mask) || (mask & GL_STENCIL_BUFFER_BIT))) {
         double d = dgl_gl.clear_depth < 0 ? 0 : dgl_gl.clear_depth > 1 ? 1 : dgl_gl.clear_depth;
-        uint32_t v = rg_radeon.depth_bits == 24
-                   ? (uint32_t)(d * 16777215.0 + 0.5) | ((unsigned)dgl_gl.clear_stencil & 255u) << 24
-                   : (uint32_t)(d * 65535.0 + 0.5);
-        if (!((mask & GL_DEPTH_BUFFER_BIT) && dgl_gl.depth_mask))
-            warn_once(4, "a stencil clear clears the depth buffer too");
-        radeon_set_target(rg_radeon.z_off, rg_radeon.z_pitch_bytes, rg_radeon.depth_bits == 24 ? 32 : 16);
-        radeon_set_clip(c[0], c[1], c[2], c[3]);
-        radeon_fill(c[0], c[1], c[2] - c[0], c[3] - c[1], v);
+        int zw = (mask & GL_DEPTH_BUFFER_BIT) && dgl_gl.depth_mask;
+        if (radeon.flags & RADEON_TILED_Z) {
+            /* (a tiled depth buffer: by the 3D engine, depth and stencil each as asked) */
+            uint32_t z = rg_radeon.depth_bits == 24 ? (uint32_t)(d * 16777215.0 + 0.5) : (uint32_t)(d * 65535.0 + 0.5);
+            radeon_3d_depth_clear(c[0], c[1], c[2] - c[0], c[3] - c[1], z, zw,
+                                  (mask & GL_STENCIL_BUFFER_BIT) && rg_radeon.depth_bits == 24 ? dgl_gl.clear_stencil & 255 : -1);
+        } else {
+            uint32_t v = rg_radeon.depth_bits == 24
+                       ? (uint32_t)(d * 16777215.0 + 0.5) | ((unsigned)dgl_gl.clear_stencil & 255u) << 24
+                       : (uint32_t)(d * 65535.0 + 0.5);
+            if (!zw)
+                warn_once(4, "a stencil clear clears the depth buffer too");
+            radeon_set_target(rg_radeon.z_off, rg_radeon.z_pitch_bytes, rg_radeon.depth_bits == 24 ? 32 : 16);
+            radeon_set_clip(c[0], c[1], c[2], c[3]);
+            radeon_fill(c[0], c[1], c[2] - c[0], c[3] - c[1], v);
+        }
     }
     radeon_cp_flush();
 }

@@ -161,6 +161,15 @@ enum { RADEON_DT_CI8 = 2, RADEON_DT_ARGB1555 = 3, RADEON_DT_RGB565 = 4, RADEON_D
 #define     RADEON_CRTC_OFFSET_FLIP_CNTL (1u << 16) /* (CRTC_OFFSET_CNTL's: a new start at the next scan line, not frame) */
 #define     RADEON_WAIT_CRTC_PFLIP  (1u << 0)   /* (WAIT_UNTIL's: the display has taken the new start) */
 #define RADEON_GUI_SCRATCH_REG0     0x15E0
+/* The surfaces: ranges of the frame buffer the host's accesses through the aperture are translated for (X.org's
+ * radeon_reg.h, the DRM's radeon_drv.h): a tiled depth buffer seen linear by the CPU. */
+#define RADEON_SURFACE_CNTL         0x0B00
+#define     RADEON_SURF_TRANSLATION_DIS (1u << 8)
+#define RADEON_SURFACE0_LOWER_BOUND 0x0B04      /* (a byte offset, its low 10 bits 0) */
+#define RADEON_SURFACE0_UPPER_BOUND 0x0B08      /* (the last byte's offset, its low 10 bits 1) */
+#define RADEON_SURFACE0_INFO        0x0B0C      /* (the pitch in 16-byte units, the tiling mode) */
+#define     RADEON_SURF_TILE_DEPTH_32BPP (2u << 16)
+#define     RADEON_SURF_TILE_DEPTH_16BPP (3u << 16)
 #define RADEON_ISYNC_CNTL           0x1724
 #define     RADEON_ISYNC_ANY2D_IDLE3D       (1u << 0)
 #define     RADEON_ISYNC_ANY3D_IDLE2D       (1u << 1)

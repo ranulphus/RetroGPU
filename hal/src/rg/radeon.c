@@ -345,7 +345,14 @@ static int open_screen(const rg_open *o, rg_opened *out)
     st.pitch_bytes = pitch_px * bytes_of(bpp);
     st.double_buffer = o->double_buffer != 0;
     st.depth_bits = o->depth_bits ? (bpp == 32 ? 24 : 16) : 0;
-    st.z_pitch_bytes = pitch_px * (st.depth_bits == 16 ? 2 : 4);
+    /* (a chip that tiles depth, RADEON_TILED_Z: its depth buffer in whole tiles, 32 pixels wide and 16 rows high at
+     * 16 bits, 16 by 16 at 32: Mesa's radeon_mba_z16 and _z32; so its pitch a multiple of 32 pixels and its rows of
+     * 16) */
+    st.z_rows = st.height;
+    if (radeon.flags & RADEON_TILED_Z)
+        st.z_pitch_bytes = ((pitch_px + 31) & ~31) * (st.depth_bits == 16 ? 2 : 4), st.z_rows = (st.height + 15) & ~15;
+    else
+        st.z_pitch_bytes = pitch_px * (st.depth_bits == 16 ? 2 : 4);
     graphics = 1;                               /* (about to leave text mode) */
     if (radeon_set_mode(&st_mode) != 0) {
         rg_set_error("VBE mode %03x failed", st_mode.mode);
@@ -371,7 +378,7 @@ static int open_screen(const rg_open *o, rg_opened *out)
     } else
         RG_WARN("DGL-RADEON no command processor: drawing by plain register writes");
     colour = (uint32_t)st.pitch_bytes * (uint32_t)st.height;
-    zcolour = (uint32_t)st.z_pitch_bytes * (uint32_t)st.height;
+    zcolour = (uint32_t)st.z_pitch_bytes * (uint32_t)st.z_rows;
     st.front_off = win_start;
     st.back_off = st.double_buffer ? win_start + ALIGN4K(colour) : win_start;
     st.z_off = st.depth_bits ? ALIGN4K(st.back_off + colour) : 0;
@@ -395,10 +402,15 @@ static int open_screen(const rg_open *o, rg_opened *out)
         radeon_fill(0, 0, st.width, st.height, 0);
     }
     if (st.depth_bits) {
+        /* (all ones whatever the layout: the whole buffer, its padding too; then, where depth is tiled, the surface
+         * that shows it to the CPU linear: Glide's LFB reads and writes of its aux buffer) */
         s.off = st.z_off, s.pitch_bytes = st.z_pitch_bytes, s.bpp = st.depth_bits == 16 ? 16 : 32;
-        s.width = st.width, s.height = st.height;
+        s.width = st.z_pitch_bytes / (st.depth_bits == 16 ? 2 : 4), s.height = st.z_rows;
         target(&s);
-        radeon_fill(0, 0, st.width, st.height, 0xFFFFFFFFu);
+        radeon_fill(0, 0, s.width, s.height, 0xFFFFFFFFu);
+        if ((radeon.flags & RADEON_TILED_Z) &&
+            radeon_depth_surface(st.z_off, (zcolour + 1023u) & ~1023u, st.z_pitch_bytes, st.depth_bits == 16 ? 16 : 32) == 0)
+            RG_INFO("DGL-RADEON its depth buffer tiled, the CPU's view through a surface");
     }
     radeon_sync(500000);
     radeon_set_start(st.front_off);
@@ -426,6 +438,8 @@ static void close_dev(void)
     if (!graphics)
         return;
     graphics = 0;
+    if (radeon.flags & RADEON_TILED_Z)
+        radeon_depth_surface_off();
     radeon_text_mode();                         /* (the engine waited for, the command processor stopped) */
     st.active = 0;
 }
