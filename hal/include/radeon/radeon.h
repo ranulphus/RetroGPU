@@ -163,6 +163,8 @@ int  radeon_cp_init(const uint32_t *pairs, uint32_t bytes);
 int  radeon_cp_running(void);
 void radeon_cp_out(const uint32_t *d, int n);
 void radeon_cp_reg(uint32_t reg, uint32_t v);
+uint32_t *radeon_cp_reserve(int n);     /* n contiguous dwords at the write index to fill (NULL: not running) */
+void radeon_cp_advance(int n);          /* ... and given to the ring */
 void radeon_cp_flush(void);
 int  radeon_cp_idle_wait(uint32_t timeout_us);
 void radeon_cp_stop(void);

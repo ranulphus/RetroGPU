@@ -174,6 +174,30 @@ static uint32_t fbits(float f)
 /* A primitive of n vertices (a triangle list's three, or a convex polygon's 3 to 16 as one fan): the vertex format,
  * SE_VF_CNTL (the primitive, its vertices following as data, the Radeon's own vertex layout), then each vertex's
  * words in the format's order; with the command processor one 3D_DRAW_IMMD packet (the DRM's and X.org's). */
+/* A vertex's words in the format's order into d: how many. */
+static int pack(uint32_t *d, const radeon_vertex *v)
+{
+    int n = 0;
+    d[n++] = fbits(v->x), d[n++] = fbits(v->y), d[n++] = fbits(v->z);
+    if (vwhat & RADEON_VTX_RHW) d[n++] = fbits(v->rhw);
+    if (vwhat & RADEON_VTX_ARGB) d[n++] = v->argb;
+    if (vwhat & RADEON_VTX_SPEC) d[n++] = v->spec;
+    if (vwhat & RADEON_VTX_ST) d[n++] = fbits(v->s), d[n++] = fbits(v->t);
+    if (vwhat & RADEON_VTX_ST2) d[n++] = fbits(v->s2), d[n++] = fbits(v->t2);
+    if (vwhat & RADEON_VTX_ST3) d[n++] = fbits(v->s3), d[n++] = fbits(v->t3);
+    return n;
+}
+
+static int vwords(void)
+{
+    return 3 + !!(vwhat & RADEON_VTX_RHW) + !!(vwhat & RADEON_VTX_ARGB) + !!(vwhat & RADEON_VTX_SPEC) +
+           2 * (!!(vwhat & RADEON_VTX_ST) + !!(vwhat & RADEON_VTX_ST2) + !!(vwhat & RADEON_VTX_ST3));
+}
+
+/* A primitive of n vertices (a triangle list's three, or a convex polygon's 3 to 16 as one fan): with the command
+ * processor one 3D_DRAW_IMMD packet (the DRM's and X.org's: the vertex format, the control word, the vertices'
+ * words) written straight into the ring; else SE_VF_CNTL (the primitive, its vertices following as data, the
+ * Radeon's own vertex layout) and the words to SE_PORT_DATA0. */
 static void prim(uint32_t type, const radeon_vertex *const *v, int nv)
 {
     static uint32_t fmt_sent;
@@ -184,26 +208,23 @@ static void prim(uint32_t type, const radeon_vertex *const *v, int nv)
         radeon_3d_format(vwhat);
     if (radeon_3d_dirty || !mode3d || !known)
         radeon_3d_emit();
-    for (i = 0; i < nv; i++) {
-        p[n++] = fbits(v[i]->x), p[n++] = fbits(v[i]->y), p[n++] = fbits(v[i]->z);
-        if (vwhat & RADEON_VTX_RHW) p[n++] = fbits(v[i]->rhw);
-        if (vwhat & RADEON_VTX_ARGB) p[n++] = v[i]->argb;
-        if (vwhat & RADEON_VTX_SPEC) p[n++] = v[i]->spec;
-        if (vwhat & RADEON_VTX_ST) p[n++] = fbits(v[i]->s), p[n++] = fbits(v[i]->t);
-        if (vwhat & RADEON_VTX_ST2) p[n++] = fbits(v[i]->s2), p[n++] = fbits(v[i]->t2);
-        if (vwhat & RADEON_VTX_ST3) p[n++] = fbits(v[i]->s3), p[n++] = fbits(v[i]->t3);
-    }
     if (radeon_cp_running()) {
-        uint32_t h[3];
-        h[0] = RADEON_CP_PACKET3(RADEON_3D_DRAW_IMMD, n + 1);
-        h[1] = vfmt;
-        h[2] = type | RADEON_CP_VC_WALK_RING | RADEON_CP_VC_MAOS_ENABLE | RADEON_VF_RADEON_MODE |
-               (uint32_t)nv << RADEON_VF_NUM_VERTICES_SHIFT;
-        radeon_cp_out(h, 3);
-        radeon_cp_out(p, n);
+        int words = vwords() * nv;
+        uint32_t *d = radeon_cp_reserve(3 + words);
+        if (d) {
+            d[0] = RADEON_CP_PACKET3(RADEON_3D_DRAW_IMMD, words + 1);
+            d[1] = vfmt;
+            d[2] = type | RADEON_CP_VC_WALK_RING | RADEON_CP_VC_MAOS_ENABLE | RADEON_VF_RADEON_MODE |
+                   (uint32_t)nv << RADEON_VF_NUM_VERTICES_SHIFT;
+            for (i = 0, n = 3; i < nv; i++)
+                n += pack(d + n, v[i]);
+            radeon_cp_advance(n);
+        }
         fmt_known = 0;
         return;
     }
+    for (i = 0; i < nv; i++)
+        n += pack(p + n, v[i]);
     if (!fmt_known || fmt_sent != vfmt) {
         fifo(1);
         radeon_wr(RADEON_SE_VTX_FMT, vfmt);

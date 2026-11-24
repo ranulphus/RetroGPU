@@ -204,8 +204,9 @@ void radeon_cp_flush(void)
     if (!running || wptr == wptr_given)
         return;
     radeon_wr(RADEON_CP_RB_WPTR, wptr);
-    (void)radeon_rd(RADEON_CP_RB_RPTR);
     wptr_given = wptr;
+    /* (no read after it: a posted write reaches the chip by itself, and every wait reads a register first; the
+     * read the DRM's COMMIT_RING does cost ~1 us every 256 dwords, ~100 cycles a triangle on the P3) */
 }
 
 /* Room for n dwords (and the one that keeps the write index off the read index); given up only when the read index
@@ -241,6 +242,31 @@ void radeon_cp_out(const uint32_t *d, int n)
         ring[wptr] = *d++;
         wptr = (wptr + 1u) & ring_mask;
     }
+    if (((wptr - wptr_given) & ring_mask) >= COMMIT_DW)
+        radeon_cp_flush();
+}
+
+/* n contiguous dwords at the write index, for a caller to fill and then radeon_cp_advance(n): the end of the ring
+ * padded with no-ops first when they wouldn't fit before it. NULL when the command processor isn't running. */
+uint32_t *radeon_cp_reserve(int n)
+{
+    if (!running || n <= 0 || n > (int)ring_dw / 2)
+        return NULL;
+    if (ring_dw - wptr < (uint32_t)n) {
+        int pad = (int)(ring_dw - wptr);
+        room(pad);
+        while (pad-- > 0) {
+            ring[wptr] = RADEON_CP_PACKET2;
+            wptr = (wptr + 1u) & ring_mask;
+        }
+    }
+    room(n);
+    return (uint32_t *)&ring[wptr];
+}
+
+void radeon_cp_advance(int n)
+{
+    wptr = (wptr + (uint32_t)n) & ring_mask;
     if (((wptr - wptr_given) & ring_mask) >= COMMIT_DW)
         radeon_cp_flush();
 }

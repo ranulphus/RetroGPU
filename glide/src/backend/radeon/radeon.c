@@ -338,7 +338,32 @@ static int plan_units(int func, int invert, opnd local, opnd other, opnd alocal,
  * worked out at the vertices and passed through (the vertices then carry its result, not the iterated colour). */
 typedef struct { int n, cpu; uint32_t c[4], a[4]; } rplan;
 
-static rplan plan_of(int textured, int chroma, int black)
+static rplan plan_work(int textured, int chroma, int black);
+
+/* The plan for the state: the last one again while the combines and the inputs that pick it haven't changed (worked
+ * out at every triangle it was ~800 cycles of Screamer Rally's ~6,500 on the P3). */
+static const rplan *plan_of(int textured, int chroma, int black)
+{
+    /* (a slot for each of the eight textured / chroma / black cases: games alternate textured and untextured
+     * triangles under one combine, which one slot would work out again at every change) */
+    static int key[8][10], known[8];
+    static rplan last[8];
+    const mg_state *s = &mg.st;
+    int k[10], i, slot = (textured ? 4 : 0) | (chroma ? 2 : 0) | (black ? 1 : 0), same = known[slot];
+    k[0] = (int)s->cc_func, k[1] = (int)s->cc_factor, k[2] = (int)s->cc_local, k[3] = (int)s->cc_other, k[4] = s->cc_invert;
+    k[5] = (int)s->ac_func, k[6] = (int)s->ac_factor, k[7] = (int)s->ac_local, k[8] = (int)s->ac_other, k[9] = s->ac_invert;
+    for (i = 0; i < 10 && same; i++)
+        same = k[i] == key[slot][i];
+    if (!same) {
+        last[slot] = plan_work(textured, chroma, black);
+        for (i = 0; i < 10; i++)
+            key[slot][i] = k[i];
+        known[slot] = 1;
+    }
+    return &last[slot];
+}
+
+static rplan plan_work(int textured, int chroma, int black)
 {
     const mg_state *s = &mg.st;
     rplan p;
@@ -539,7 +564,7 @@ static void tri_one(const GrVertex *a, const GrVertex *b, const GrVertex *c, GrL
     }
     if (textured)
         textured = tex_bind_level(lod, &var, &hw) == 0;
-    p = plan_of(textured, chroma && textured, mult2);
+    p = *plan_of(textured, chroma && textured, mult2);
 
     /* The texture's words: the bound level alone (the Voodoo's level for this piece), its filter and wrap; the
      * same on every unit the combine uses, each reading the vertex's one pair of coordinates. */
@@ -637,7 +662,7 @@ static void tri_one(const GrVertex *a, const GrVertex *b, const GrVertex *c, GrL
             if (z < 0) z = 0;
             if (z > 65535.0) z = 65535.0;
         }
-        z = (z + 0.5) / 65535.0;
+        z = (z + 0.5) * (1.0 / 65535.0);
         v[n].z = (float)(z > 1.0 ? 1.0 : z);
         {
             float w = (s->stw_hint & GR_STWHINT_W_DIFF_TMU0) ? q->tmuvtx[0].oow : q->oow;
