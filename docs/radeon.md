@@ -374,7 +374,11 @@ The owner swapped the P3's 7000 for a Radeon 7500 LE the same day.
   through the LFB, failed. Now, where `RADEON_TILED_Z` is set:
   - the device pads the depth buffer to whole tiles (its pitch to 32 pixels, its rows to 16) and sets a surface
     over it (`SURFACE0_INFO` = the pitch in 16-byte units and the depth tiling, the bounds 1 KB aligned), so the
-    CPU's reads and writes there are translated and it sees the buffer linear; the surface goes at close;
+    CPU's reads and writes there are translated and it sees the buffer linear; the surface goes at close, and at a
+    mode set or text mode. A program GLOS ends by force runs no close: GLOS's DPROBE check on the P3 (2026-11-24,
+    GLOS 596d9c6) read surface 0 left as `info=00030050 lower=0012c000 upper=001c1fff` after TEXCUBE was killed,
+    and cleared (`info=00000000`) after GLOS's own mode set, which resets SURFACE0 first. DPROBE prints the eight
+    surfaces (`DPROBE-SURF`), reading only;
   - depth clears go by the 3D engine (`radeon_3d_depth_clear`: a quad, the colour writes off, the depth test always
     passing, the stencil replaced or kept), since the 2D engine would write the tiles as if linear.
 - **On the P3:** DOS-GL's conformance 35 of 35; Glide's 26 of 27 (t22, gamma); GLQuake 89.3 and 91.5 fps at 640x480,
