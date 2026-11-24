@@ -259,6 +259,7 @@ int radeon_set_mode(const radeon_mode *m)
     sys_rmregs r;
     if (radeon.mmio) {
         radeon_cp_stop();               /* (the BIOS's mode set with the command processor off) */
+        radeon_flip_at_line(0);
         radeon_sync(100000);
     }
     memset(&r, 0, sizeof r);
@@ -276,6 +277,7 @@ void radeon_text_mode(void)
     sys_rmregs r;
     if (radeon.mmio) {
         radeon_cp_stop();
+        radeon_flip_at_line(0);
         radeon_sync(100000);
     }
     memset(&r, 0, sizeof r);
@@ -292,6 +294,45 @@ int radeon_set_start(uint32_t byte_off)
     radeon_wr(RADEON_CRTC_OFFSET, byte_off);        /* (RADEONAdjustFrame's: bytes from DISPLAY_BASE_ADDR) */
     return 0;
 }
+
+/* When the display takes a new start (DFLIP's probe on the P3's RV100, 2026-11-24, by CRTC_OFFSET's pending bit 30):
+ * with CRTC_OFFSET_CNTL's FLIP_CNTL clear, as the BIOS leaves it, once a frame, at the end of the vertical blank
+ * (1.4 ms after it begins: a write 3, 8 or 13 ms into a frame stayed pending 15.1, 10.1 and 5.1 ms); with it set,
+ * at the next scan line (pending 6 to 31 us): a flip without the vertical sync, tearing. The DRM sets the bit for
+ * page flipping; on this chip that is the tearing kind. radeon_flip_at_line(1) sets it, (0) puts the register back.
+ *
+ * A flip in the command stream (the DRM's radeon_cp_dispatch_flip): after the 3D drawing before it, the new start;
+ * then (wait) the stream held while the start is pending (WAIT_CRTC_PFLIP), so nothing after it draws into a
+ * buffer still shown; then seq into a scratch register, which radeon_flip_seen reads. */
+static uint32_t flip_saved;
+static int flip_line;
+
+void radeon_flip_at_line(int on)
+{
+    if (!radeon.mmio || on == flip_line)
+        return;
+    if (on) {
+        flip_saved = radeon_rd(RADEON_CRTC_OFFSET_CNTL);
+        radeon_wr(RADEON_CRTC_OFFSET_CNTL, flip_saved | RADEON_CRTC_OFFSET_FLIP_CNTL);
+    } else
+        radeon_wr(RADEON_CRTC_OFFSET_CNTL, flip_saved);
+    flip_line = on;
+}
+
+int radeon_flip_queue(uint32_t byte_off, uint32_t seq, int wait)
+{
+    if (byte_off & 7u || byte_off >= radeon.vram_bytes || !radeon_cp_running())
+        return -1;
+    radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLECLEAN | RADEON_WAIT_HOST_IDLECLEAN);
+    radeon_cp_reg(RADEON_CRTC_OFFSET, byte_off);
+    if (wait)
+        radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_CRTC_PFLIP);
+    radeon_cp_reg(RADEON_GUI_SCRATCH_REG0, seq);
+    radeon_cp_flush();
+    return 0;
+}
+
+uint32_t radeon_flip_seen(void) { return radeon_rd(RADEON_GUI_SCRATCH_REG0); }
 
 static uint32_t dac_saved;
 static int dac_changed;

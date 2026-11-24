@@ -158,6 +158,9 @@ enum { RADEON_DT_CI8 = 2, RADEON_DT_ARGB1555 = 3, RADEON_DT_RGB565 = 4, RADEON_D
 #define RADEON_CP_ME_RAM_ADDR       0x07D4
 #define RADEON_CP_ME_RAM_DATAH      0x07DC
 #define RADEON_CP_ME_RAM_DATAL      0x07E0
+#define     RADEON_CRTC_OFFSET_FLIP_CNTL (1u << 16) /* (CRTC_OFFSET_CNTL's: a new start at the next scan line, not frame) */
+#define     RADEON_WAIT_CRTC_PFLIP  (1u << 0)   /* (WAIT_UNTIL's: the display has taken the new start) */
+#define RADEON_GUI_SCRATCH_REG0     0x15E0
 #define RADEON_ISYNC_CNTL           0x1724
 #define     RADEON_ISYNC_ANY2D_IDLE3D       (1u << 0)
 #define     RADEON_ISYNC_ANY3D_IDLE2D       (1u << 1)

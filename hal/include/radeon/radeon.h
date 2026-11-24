@@ -64,6 +64,14 @@ extern int radeon_mode_bpp;             /* the mode's bits a pixel: 8, 15, 16 or
  * of 8 pixels), and the wait for the start of the next vertical retrace (0, or -1 on time-out). */
 int  radeon_set_start(uint32_t byte_off);
 int  radeon_set_pitch(int pitch_bytes);
+/* A new start is taken once a frame, at the end of the vertical blank (the BIOS's setting); radeon_flip_at_line(1)
+ * has it taken at the next scan line instead (no vertical sync: tearing), (0) puts that back.
+ * Flips in the command stream (the command processor running): each queued after the drawing before it; wait
+ * holds the stream until the display has taken the start; seq comes back from radeon_flip_seen once the chip has
+ * passed the flip. */
+void radeon_flip_at_line(int on);
+int  radeon_flip_queue(uint32_t byte_off, uint32_t seq, int wait);
+uint32_t radeon_flip_seen(void);
 int  radeon_vsync_wait(uint32_t timeout_us);
 /* Gamma: in 16- and 32-bit modes the DAC looks each component up in its 256-entry palette (as the Rage 128's); one
  * ramp for the three, 8-bit entries (DAC_8BIT_EN). radeon_ramp_off: the DAC as it was before the first ramp. */

@@ -206,7 +206,19 @@ destination is taken as an 8-bit surface 64 bytes wide, so a level's bytes land 
 with no engine sync and in order with the drawing around them. `DTRI ring` uploads every texture this way: all 13
 scenes pass. A mode set stops the command processor first (`radeon_set_mode`, `radeon_text_mode`).
 
-Still to do in RD3: flips in the stream, the override file, and the cycles a word (`DPIO`).
+**Flips in the stream** (`radeon_flip_queue`: the new start, `WAIT_UNTIL` = `WAIT_CRTC_PFLIP`, a sequence number
+into `GUI_SCRATCH_REG0`). `DFLIP ring` on the P3: with the wait a frame lasts 16,495 us (one 60 Hz refresh; 182
+flips in 3 s, every one seen); without it 553 us.
+
+- **When the display takes a new start was measured** (`CRTC_OFFSET`'s pending bit 30, writes 0, 3, 8 and 13 ms
+  into a frame): with `CRTC_OFFSET_CNTL`'s `FLIP_CNTL` clear, as the BIOS leaves it, once a frame at the end of
+  the vertical blank (pending 1.4, 15.1, 10.1 and 5.1 ms); with it set, at the next scan line (6 to 31 us). The
+  DRM sets the bit for page flipping; on this chip that is the tearing kind. The layer leaves it clear, and
+  `radeon_flip_at_line(1)` sets it for a swap without the vertical sync.
+- **The scratch register keeps its value** across programs and mode sets: a user of the sequence number writes 0
+  first, in the stream.
+
+Still to do in RD3: the override file and the cycles a word (`DPIO`), with the device (RD4).
 
 ## The rest of the family: the RV200 (Radeon 7500) and the first Radeon (R100)
 
