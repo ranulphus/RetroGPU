@@ -60,6 +60,14 @@ pstep() {
     while [ "$(jobs -rp | wc -l)" -ge "$jobs_max" ]; do wait -n; done
     step "$@" &
 }
+# plane FUNCTION: a shell function's steps one after another, in a lane of their own (steps that write the same files:
+# Glide's conformance runner writes out/conform/<test>/ whatever the card, so its Matrox and ViRGE suites side by side
+# deleted each other's runs: SETUP-ERRORs, hangs and a missing frame in the stack's merge tier, 2026-11-24).
+plane() {
+    if [ "$jobs_max" -le 1 ]; then "$@"; return; fi
+    while [ "$(jobs -rp | wc -l)" -ge "$jobs_max" ]; do wait -n; done
+    "$@" &
+}
 skip() { printf '  %-28s %-10s %s\n' "$1" SKIP "$2" | tee -a "$summary"; }
 pskip() { skip "$@"; }
 
@@ -134,8 +142,8 @@ if [ "$tier" = merge ]; then
     pstep rgdev-g400         loopa_pass regress-rgdev-g400 --card g400 --exe build/djgpp/RGDEV.EXE --idle 200 --timeout 900
     pstep rgdev-g200         loopa_pass regress-rgdev-g200 --card g200 --exe build/djgpp/RGDEV.EXE --idle 200 --timeout 900
     pstep hreplay-check      tools/dev make -s hreplay-check
-    pstep glide-conform-ci   tools/dev make -s conform-ci
-    pstep glide-conform-virge tools/dev make -s conform-virge
+    glide_conform() { step glide-conform-ci tools/dev make -s conform-ci; step glide-conform-virge tools/dev make -s conform-virge; }
+    plane glide_conform
     # The acceptance games' traces through Glide, three cards at once. Screamer
     # Rally's 389 frames stop at 240 (the owner's choice, 2026-11-09): loading
     # screens to frame 95, the race from 96; every call pattern of the trace has
