@@ -267,6 +267,17 @@ Two things the first runs on the P3 found:
 **Conformance on the P3** (`DGL_RADEON_VRAM=16-33`, through the ring): 33 of 35 at the first whole run, the two
 texture-update tests failing; with the fix above those pass.
 
+**GLQuake on the P3** (Pentium III, `timedemo demo1`, no vertical sync, the ring, megabytes 16-33), frames a second,
+beside the other cards that have been in the same PC:
+
+| | 640x480 | 640x480 `-mtex` | 320x200 | 320x200 `-mtex` |
+|---|---|---|---|---|
+| Radeon 7000 (RV100), first run | 80.6 | 87.8 | 103.8 | 97.9 |
+| Rage 128 Pro | 62.8 | 74.4 | 105.7 | 102.2 |
+
+At 320x200 the processor sets the pace on both; at 640x480 the Radeon is the faster chip. Nothing here has been
+tuned yet (the Rage 128's figures are after its tuning).
+
 ## RD6: Glide's back end (2026-11-24)
 
 `glide/src/backend/radeon/radeon.c`, made from the Rage 128's. What differs is the combine: the Rage 128 has one
@@ -288,6 +299,21 @@ complement, and compute A x B + C, A x B - C or a blend. So with a texture the V
 The core gained two small things for it: a back end's shortest texture row (`tex_min_w`: 16 texels here, the
 chip's 32 bytes; 8 for the others as before), and the setting `MGAGLIDE radeon_vram=A-B` (megabytes, as
 `DGL_RADEON_VRAM`).
+
+**Conformance on the P3** (`MGAGLIDE radeon_vram=16-33`, through the ring): 24 of 27 at the back end's first run on
+the card, then 26 with what follows; the one left is t22, the gamma test, which fails on every real card (the
+frame read back has no DAC ramp in it).
+
+- **t13, the combines: every cell exact,** the first card of which that is so (the others approximate cells 12 and
+  13). Cell 13 showed that the runtime's own `GR_COLORCOMBINE_CCRGB_BLEND_ITRGB_ON_TEXALPHA` had its local and
+  other colours the wrong way round against the Voodoo's frame (the constant colour belongs where the texel's
+  alpha is 0): corrected in `glide/src/tex/texstate.c`, for every card.
+- **t04, the edges: 0.08% of pixels differ** from the Voodoo's. The chip rounds vertices to sixteenths of a pixel,
+  Glide's own grid, and applies an exact top-left rule to a centre on an edge; the 64th of a pixel that brings the
+  Rage 128 and the TNT2 into line never reaches it. Classed in the manifest (`edge`), as the ViRGE's and the
+  WARP's own edge rules are.
+
+**DOS-GL's whole suite again** after the texture-register fix: 35 of 35.
 
 ## The rest of the family: the RV200 (Radeon 7500) and the first Radeon (R100)
 

@@ -46,6 +46,10 @@ static unsigned sync_timeouts;
 static unsigned long vs_waits, vs_fails, flips_queued;
 static uint32_t flip_seq;               /* the last flip queued in the command stream (radeon_flip_queue) */
 static int line_flips;                  /* (swaps without the vertical sync: a start taken at the next scan line) */
+/* (no bias: the chip rounds vertices to sixteenths of a pixel, Glide's own grid, so the Rage 128's and the TNT2's
+ * 64th of a pixel never reaches it: t04 on the P3 is 0.08% off the Voodoo's edges whatever is set here. MGAGLIDE
+ * radeon_bias=X,Y, in 256ths, stays as a test aid.) */
+static float bias_x, bias_y;
 
 static void sync_said(const char *where)
 {
@@ -60,6 +64,8 @@ static int probe(void)
     rg_info i;
     rg_set_format(mg_vsnprintf);
     rg_set_log(log_line);
+    if (mg_config.radeon_bias_set)
+        bias_x = (float)mg_config.radeon_bias[0] / 256.0f, bias_y = (float)mg_config.radeon_bias[1] / 256.0f;
     if (mg_config.radeon_vram[1] > mg_config.radeon_vram[0])    /* (MGAGLIDE radeon_vram=A-B: megabytes of the card) */
         rg_radeon_vram_mb[0] = mg_config.radeon_vram[0], rg_radeon_vram_mb[1] = mg_config.radeon_vram[1];
     if (rg_radeon_device.probe() != 0)
@@ -613,9 +619,9 @@ static void tri_one(const GrVertex *a, const GrVertex *b, const GrVertex *c, GrL
         double z;
         if (s->origin == GR_ORIGIN_LOWER_LEFT)
             sy = mg.height * 16 - sy;
-        /* (x a 64th of a pixel left: a centre exactly on an edge then falls as the Voodoo's does, the TNT2's) */
-        v[n].x = (float)sx * (1.0f / 16.0f) - 1.0f / 64.0f;
-        v[n].y = (float)sy * (1.0f / 16.0f);
+        /* (a bias so that a centre exactly on an edge falls as the Voodoo's does: bias_x, bias_y) */
+        v[n].x = (float)sx * (1.0f / 16.0f) + bias_x;
+        v[n].y = (float)sy * (1.0f / 16.0f) + bias_y;
         if (wmode)
             z = mg_wdepth_from_oow(q->oow, 16);
         else {

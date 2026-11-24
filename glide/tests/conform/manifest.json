@@ -20,6 +20,10 @@
    "virge": {
     "edge": true,
     "why": "the ViRGE/DX's set-up evaluates edges exactly (20 fractional bits), the Voodoo's in sixteenths of a pixel: coverage differs by a pixel where an edge passes within a sixteenth of a centre (0.06% of t04)"
+   },
+   "radeon": {
+    "edge": true,
+    "why": "the Radeon sets triangles up itself from vertices in sixteenths of a pixel with an exact top-left rule; the Voodoo's rule for a centre exactly on an edge differs, and no finer bias reaches the chip (it rounds to sixteenths): coverage differs by a pixel on some edges (0.08% of t04)"
    }
   }
  },

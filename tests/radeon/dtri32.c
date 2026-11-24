@@ -295,6 +295,38 @@ int main(int argc, char **argv)
                 "three textures multiplied: left %06lx (want 646419), right %06lx (want 000019)", (unsigned long)l,
                 (unsigned long)rr);
     }
+    {                                           /* the blend function's sense: A red (the vertex), B blue (the factor), C the texel's alpha */
+        static const uint32_t ta[4] = { 0xFF808080u, 0x00808080u, 0xFF808080u, 0x00808080u };  /* alpha 255 | 0 */
+        radeon_vertex r[4];
+        uint32_t off, l, rr;
+        clear(0, zfar);
+        radeon_sync(1000000);
+        off = texture(0, toff, 1, ta);
+        radeon_vram_written(off - 4);
+        radeon_3d_tex_written();
+        c->pp_cntl = (c->pp_cntl & ~(RADEON_TEX_1_ENABLE | RADEON_TEX_2_ENABLE | RADEON_TEX_BLEND_1_ENABLE | RADEON_TEX_BLEND_2_ENABLE)) |
+                     RADEON_TEX_0_ENABLE | RADEON_TEX_BLEND_0_ENABLE;
+        c->tex[0].txcblend = RADEON_COLOR_ARG_A_DIFFUSE_COLOR | 8u << 5 /* B: TFACTOR colour */ | 11u << 10 /* C: T0 alpha */ |
+                             RADEON_BLEND_CTL_BLEND | RADEON_SCALE_1X | RADEON_CLAMP_TX;
+        c->tex[0].tfactor = 0xFF0000FFu;
+        radeon_3d_format(RADEON_VTX_RHW | RADEON_VTX_ARGB | RADEON_VTX_SPEC | RADEON_VTX_ST);
+        radeon_3d_dirty = 1;
+        memset(r, 0, sizeof r);
+        for (k = 0; k < 4; k++) {
+            float u = (k == 1 || k == 2) ? 1.0f : 0.0f, w = k >= 2 ? 1.0f : 0.0f;
+            r[k].x = 100.0f + 400.0f * u, r[k].y = 100.0f + 200.0f * w, r[k].z = 0.5f, r[k].rhw = 1;
+            r[k].argb = 0xFFFF0000u, r[k].spec = 0xFF000000u;
+            r[k].s = u, r[k].t = w;
+        }
+        radeon_tri(&r[0], &r[1], &r[2]);
+        radeon_tri(&r[0], &r[2], &r[3]);
+        radeon_sync(1000000);
+        l = fb[200 * pitch_px + 200] & 0xFFFFFF, rr = fb[200 * pitch_px + 400] & 0xFFFFFF;
+        hx_log("DTRI32-BLEND A=red B=blue C=texel alpha: where alpha is 255: %06lx, where 0: %06lx (A x (1 - C) + B x C gives blue, "
+               "then red)", (unsigned long)l, (unsigned long)rr);
+        hx_test("blendfn", (l == 0x0000FF && rr == 0xFF0000) || (l == 0xFF0000 && rr == 0x0000FF),
+                "the blend is %s", l == 0x0000FF ? "A x (1 - C) + B x C" : l == 0xFF0000 ? "A x C + B x (1 - C)" : "neither");
+    }
 out:
     radeon_sync(200000);
     radeon_text_mode();
