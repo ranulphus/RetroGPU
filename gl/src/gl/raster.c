@@ -17,6 +17,12 @@ static int *cap_flag(GLenum cap)
     case GL_POLYGON_OFFSET_FILL: return &dgl_gl.offset_fill;
     case GL_STENCIL_TEST: return &dgl_gl.stencil_test;
     case GL_SHARED_TEXTURE_PALETTE_EXT: return &dgl_gl.shared_palette;
+    case GL_LIGHTING:     return &dgl_gl.lighting;
+    case GL_COLOR_MATERIAL: return &dgl_gl.color_material;
+    case GL_NORMALIZE:    return &dgl_gl.normalize;
+    case GL_RESCALE_NORMAL_EXT: return &dgl_gl.rescale_normal;
+    case GL_LIGHT0: case GL_LIGHT1: case GL_LIGHT2: case GL_LIGHT3: case GL_LIGHT4: case GL_LIGHT5: case GL_LIGHT6:
+    case GL_LIGHT7:       return &dgl_gl.light[cap - GL_LIGHT0].enabled;
     default:              return 0;
     }
 }
@@ -33,6 +39,9 @@ static unsigned cap_dirty(GLenum cap)
     case GL_DEPTH_TEST: case GL_CULL_FACE: case GL_BLEND: case GL_ALPHA_TEST: case GL_DITHER:
     case GL_POLYGON_OFFSET_FILL: case GL_STENCIL_TEST:
         return DGL_DIRTY_RASTER;
+    case GL_LIGHTING: case GL_COLOR_MATERIAL: case GL_NORMALIZE: case GL_RESCALE_NORMAL_EXT: case GL_LIGHT0:
+    case GL_LIGHT1: case GL_LIGHT2: case GL_LIGHT3: case GL_LIGHT4: case GL_LIGHT5: case GL_LIGHT6: case GL_LIGHT7:
+        return 0;                       /* (the vertices' colours only: light.c, each draw) */
     default:              return DGL_DIRTY_RASTER | DGL_DIRTY_TARGET | DGL_DIRTY_TEXTURE | DGL_DIRTY_FOG;
     }
 }
@@ -42,9 +51,9 @@ static void set_cap(GLenum cap, int on)
     int *f = cap_flag(cap);
     if (!f) {
         switch (cap) {                                       /* accepted and ignored (PRD §2.2) */
-        case GL_LIGHTING: case GL_NORMALIZE: case GL_POINT_SMOOTH: case GL_LINE_SMOOTH: case GL_POLYGON_SMOOTH:
+        case GL_POINT_SMOOTH: case GL_LINE_SMOOTH: case GL_POLYGON_SMOOTH:
         case GL_LINE_STIPPLE: case GL_POLYGON_STIPPLE: case GL_POLYGON_OFFSET_POINT: case GL_POLYGON_OFFSET_LINE:
-        case GL_COLOR_MATERIAL: case GL_TEXTURE_1D: case GL_TEXTURE_GEN_S: case GL_TEXTURE_GEN_T:
+        case GL_TEXTURE_1D: case GL_TEXTURE_GEN_S: case GL_TEXTURE_GEN_T:
         case GL_CLIP_PLANE0: case GL_CLIP_PLANE1: case GL_CLIP_PLANE2: case GL_CLIP_PLANE3:
         case GL_CLIP_PLANE4: case GL_CLIP_PLANE5:
             break;
@@ -56,6 +65,8 @@ static void set_cap(GLenum cap, int on)
     if (*f != on) {
         *f = on;
         dgl_gl.dirty |= cap_dirty(cap);
+        if (cap == GL_COLOR_MATERIAL && on)
+            dgl_color_material_apply();         /* (the current colour is the tracked parameters' from now) */
     }
 }
 
@@ -71,9 +82,10 @@ GLboolean APIENTRY glIsEnabled(GLenum cap)
     case GL_VERTEX_ARRAY:        return (GLboolean)dgl_gl.va.enabled;
     case GL_COLOR_ARRAY:         return (GLboolean)dgl_gl.ca.enabled;
     case GL_TEXTURE_COORD_ARRAY: return (GLboolean)(dgl_gl.client_unit ? dgl_gl.ta1 : dgl_gl.ta).enabled;
-    case GL_LIGHTING: case GL_NORMALIZE: case GL_POINT_SMOOTH: case GL_LINE_SMOOTH: case GL_POLYGON_SMOOTH:
+    case GL_NORMAL_ARRAY:        return (GLboolean)dgl_gl.na.enabled;
+    case GL_POINT_SMOOTH: case GL_LINE_SMOOTH: case GL_POLYGON_SMOOTH:
     case GL_LINE_STIPPLE: case GL_POLYGON_STIPPLE: case GL_POLYGON_OFFSET_POINT: case GL_POLYGON_OFFSET_LINE:
-    case GL_COLOR_MATERIAL: case GL_TEXTURE_1D: case GL_TEXTURE_GEN_S: case GL_TEXTURE_GEN_T:
+    case GL_TEXTURE_1D: case GL_TEXTURE_GEN_S: case GL_TEXTURE_GEN_T:
     case GL_CLIP_PLANE0: case GL_CLIP_PLANE1: case GL_CLIP_PLANE2: case GL_CLIP_PLANE3:
     case GL_CLIP_PLANE4: case GL_CLIP_PLANE5:
         return GL_FALSE;
@@ -306,4 +318,7 @@ void APIENTRY glStencilMask(GLuint mask) { dgl_gl.stencil_writemask = mask; }
 void APIENTRY glClearStencil(GLint s) { dgl_gl.clear_stencil = s; }
 
 /* ---- Accepted, no effect (PRD §2.2, §6.2) ------------------------------ */
-void APIENTRY glNormal3f(GLfloat nx, GLfloat ny, GLfloat nz) { (void)nx; (void)ny; (void)nz; }
+void APIENTRY glNormal3f(GLfloat nx, GLfloat ny, GLfloat nz)
+{
+    dgl_gl.cur_normal[0] = nx, dgl_gl.cur_normal[1] = ny, dgl_gl.cur_normal[2] = nz;
+}

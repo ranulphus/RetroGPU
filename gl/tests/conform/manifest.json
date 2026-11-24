@@ -76,6 +76,10 @@
     ]
    ],
    "_why": "DOT3_RGBA's quad (the left of the middle row): the 7500 didn't take the dot product into the alpha with Mesa's combine words or with the alpha's own dot3 (P3, 2026-11-24), so its alpha is the alpha combine's (said once, DGL-WARN) and the quad isn't blended. The rest of the frame is compared."
+  },
+  "soft8": {
+   "frac": 0.02,
+   "_why": "8 bits: the bump map is nearest-filtered at 2.25 pixels a texel, so texel edges (steps of up to 40 levels in the dot product) fall inside the 4x4 boxes that compare dithered frames; 0.7% of pixels differ beyond 24 (worst 39) where the 16- and 32-bit frames match Mesa to 0.02%."
   }
  }
 }

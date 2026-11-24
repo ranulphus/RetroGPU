@@ -69,6 +69,22 @@ static int query(GLenum p, double *v)
     case GL_SHARED_TEXTURE_PALETTE_EXT: v[0] = dgl_gl.shared_palette; return 1;
     case GL_VERTEX_ARRAY: v[0] = dgl_gl.va.enabled; return 1;
     case GL_COLOR_ARRAY: v[0] = dgl_gl.ca.enabled; return 1;
+    case GL_NORMAL_ARRAY: v[0] = dgl_gl.na.enabled; return 1;
+    case GL_NORMAL_ARRAY_TYPE: v[0] = dgl_gl.na.type ? dgl_gl.na.type : GL_FLOAT; return 1;
+    case GL_NORMAL_ARRAY_STRIDE: v[0] = dgl_gl.na.stride; return 1;
+    case GL_CURRENT_NORMAL: for (i = 0; i < 3; i++) v[i] = dgl_gl.cur_normal[i]; return 3;
+    /* Lighting (light.c) */
+    case GL_LIGHTING: v[0] = dgl_gl.lighting; return 1;
+    case GL_LIGHT0: case GL_LIGHT1: case GL_LIGHT2: case GL_LIGHT3: case GL_LIGHT4: case GL_LIGHT5: case GL_LIGHT6:
+    case GL_LIGHT7: v[0] = dgl_gl.light[p - GL_LIGHT0].enabled; return 1;
+    case GL_COLOR_MATERIAL: v[0] = dgl_gl.color_material; return 1;
+    case GL_COLOR_MATERIAL_FACE: v[0] = dgl_gl.color_material_face; return 1;
+    case GL_COLOR_MATERIAL_PARAMETER: v[0] = dgl_gl.color_material_mode; return 1;
+    case GL_NORMALIZE: v[0] = dgl_gl.normalize; return 1;
+    case GL_RESCALE_NORMAL_EXT: v[0] = dgl_gl.rescale_normal; return 1;
+    case GL_LIGHT_MODEL_AMBIENT: for (i = 0; i < 4; i++) v[i] = dgl_gl.light_model_ambient[i]; return 4;
+    case GL_LIGHT_MODEL_LOCAL_VIEWER: v[0] = dgl_gl.light_local_viewer; return 1;
+    case GL_LIGHT_MODEL_TWO_SIDE: v[0] = dgl_gl.light_two_side; return 1;
     case GL_TEXTURE_COORD_ARRAY: v[0] = (dgl_gl.client_unit ? dgl_gl.ta1 : dgl_gl.ta).enabled; return 1;
     case GL_POLYGON_MODE: v[0] = v[1] = dgl_gl.polygon_mode; return 2;
     /* The framebuffer DOS-GL has (16-bit RGB, no stencil, accumulation or aux buffers). */
@@ -163,6 +179,7 @@ void APIENTRY glGetPointerv(GLenum p, GLvoid **out)
     switch (p) {
     case GL_VERTEX_ARRAY_POINTER: *out = (GLvoid *)dgl_gl.va.ptr; break;
     case GL_COLOR_ARRAY_POINTER: *out = (GLvoid *)dgl_gl.ca.ptr; break;
+    case GL_NORMAL_ARRAY_POINTER: *out = (GLvoid *)dgl_gl.na.ptr; break;
     case GL_TEXTURE_COORD_ARRAY_POINTER: *out = (GLvoid *)(dgl_gl.client_unit ? dgl_gl.ta1 : dgl_gl.ta).ptr; break;
     default: *out = NULL; dgl_gl_error(GL_INVALID_ENUM);
     }
@@ -191,7 +208,7 @@ static const char *extensions(void)
                     "GL_EXT_texture_edge_clamp GL_SGIS_texture_edge_clamp "
                     "GL_EXT_paletted_texture GL_EXT_shared_texture_palette "
                     "GL_ARB_vertex_buffer_object GL_EXT_draw_range_elements "
-                    "GL_ARB_texture_compression GL_EXT_texture_compression_s3tc ");
+                    "GL_ARB_texture_compression GL_EXT_texture_compression_s3tc GL_EXT_rescale_normal ");
         if (c.texture_units >= 2)
             strcat(buf, "GL_ARB_multitexture GL_SGIS_multitexture "
                         "GL_ARB_texture_env_combine GL_EXT_texture_env_combine ");

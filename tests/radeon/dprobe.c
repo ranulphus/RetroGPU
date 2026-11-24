@@ -36,6 +36,10 @@
 #define RADEON_CONFIG_XSTRAP      0x00E4
 #define RADEON_CONFIG_BONDS       0x00E8
 #define RADEON_RBBM_SOFT_RESET    0x00F0
+#define RADEON_SURFACE_CNTL       0x0B00     /* (and SURFACEn_INFO, LOWER, UPPER at 0x0B0C, 0x0B04, 0x0B08 + 16n) */
+#define RADEON_SURFACE0_LOWER_BOUND 0x0B04
+#define RADEON_SURFACE0_UPPER_BOUND 0x0B08
+#define RADEON_SURFACE0_INFO      0x0B0C
 #define RADEON_CONFIG_MEMSIZE     0x00F8
 #define RADEON_CONFIG_APER_0_BASE 0x0100
 #define RADEON_CONFIG_APER_1_BASE 0x0104
@@ -187,6 +191,16 @@ int main(int argc, char **argv)
            (unsigned long)rd(RADEON_CONFIG_APER_0_BASE), (unsigned long)rd(RADEON_CONFIG_APER_1_BASE),
            (unsigned long)rd(RADEON_CONFIG_APER_SIZE), (unsigned long)rd(RADEON_CONFIG_REG_1_BASE),
            (unsigned long)rd(RADEON_CONFIG_REG_APER_SIZE));
+    {
+        /* The eight surfaces (tiled Z on the RV200 and R100: what a program's close, or GLOS's kill, left set). Each
+         * surface's registers are 16 bytes on from the one before. */
+        int k;
+        hx_log("DPROBE-SURF surface_cntl=%08lx", (unsigned long)rd(RADEON_SURFACE_CNTL));
+        for (k = 0; k < 8; k++)
+            hx_log("DPROBE-SURF %d info=%08lx lower=%08lx upper=%08lx", k,
+                   (unsigned long)rd(RADEON_SURFACE0_INFO + 16u * k), (unsigned long)rd(RADEON_SURFACE0_LOWER_BOUND + 16u * k),
+                   (unsigned long)rd(RADEON_SURFACE0_UPPER_BOUND + 16u * k));
+    }
     hx_log("DPROBE-REG bus_cntl=%08lx gen_int_cntl=%08lx gen_int_status=%08lx bios0=%08lx host_path=%08lx "
            "agp_base=%08lx agp_cntl=%08lx aic_cntl=%08lx", (unsigned long)rd(RADEON_BUS_CNTL),
            (unsigned long)rd(RADEON_GEN_INT_CNTL), (unsigned long)rd(RADEON_GEN_INT_STATUS),

@@ -110,6 +110,9 @@
 #ifndef GL_TEXTURE_LOD_BIAS_EXT
 #define GL_TEXTURE_LOD_BIAS_EXT 0x8501
 #endif
+#ifndef GL_RESCALE_NORMAL_EXT
+#define GL_RESCALE_NORMAL_EXT 0x803A
+#endif
 #ifndef GL_DOT3_RGB_ARB
 #define GL_DOT3_RGB_ARB 0x86AE
 #endif

@@ -5,7 +5,7 @@
  * Signed integer colours map as GL 1.1 specifies, c -> (2c + 1) / (2^n - 1);
  * unsigned ones as c / (2^n - 1). Texture coordinates keep s and t (DOS-GL
  * textures are 2D); a q other than 1 divides them, the projective form of
- * glTexCoord4. Normals are accepted and ignored (no lighting, PRD §2.2). */
+ * glTexCoord4. Normals map signed integers as colours do (lighting: light.c). */
 #include "gl_state.h"
 
 void dgl_imm_vertex(float x, float y, float z, float w);     /* vertex.c */
@@ -118,12 +118,12 @@ void APIENTRY glTexCoord4s(GLshort s, GLshort t, GLshort r, GLshort q) { (void)r
 void APIENTRY glTexCoord4sv(const GLshort *v) { tc(v[0], v[1], v[3]); }
 
 /* ---- Normals (accepted, no lighting) --------------------------------------------------- */
-void APIENTRY glNormal3b(GLbyte x, GLbyte y, GLbyte z) { (void)x; (void)y; (void)z; }
-void APIENTRY glNormal3bv(const GLbyte *v) { (void)v; }
-void APIENTRY glNormal3d(GLdouble x, GLdouble y, GLdouble z) { (void)x; (void)y; (void)z; }
-void APIENTRY glNormal3dv(const GLdouble *v) { (void)v; }
-void APIENTRY glNormal3fv(const GLfloat *v) { (void)v; }
-void APIENTRY glNormal3i(GLint x, GLint y, GLint z) { (void)x; (void)y; (void)z; }
-void APIENTRY glNormal3iv(const GLint *v) { (void)v; }
-void APIENTRY glNormal3s(GLshort x, GLshort y, GLshort z) { (void)x; (void)y; (void)z; }
-void APIENTRY glNormal3sv(const GLshort *v) { (void)v; }
+void APIENTRY glNormal3b(GLbyte x, GLbyte y, GLbyte z) { glNormal3f(SB(x), SB(y), SB(z)); }
+void APIENTRY glNormal3bv(const GLbyte *v) { glNormal3f(SB(v[0]), SB(v[1]), SB(v[2])); }
+void APIENTRY glNormal3d(GLdouble x, GLdouble y, GLdouble z) { glNormal3f((float)x, (float)y, (float)z); }
+void APIENTRY glNormal3dv(const GLdouble *v) { glNormal3f((float)v[0], (float)v[1], (float)v[2]); }
+void APIENTRY glNormal3fv(const GLfloat *v) { glNormal3f(v[0], v[1], v[2]); }
+void APIENTRY glNormal3i(GLint x, GLint y, GLint z) { glNormal3f(SI(x), SI(y), SI(z)); }
+void APIENTRY glNormal3iv(const GLint *v) { glNormal3f(SI(v[0]), SI(v[1]), SI(v[2])); }
+void APIENTRY glNormal3s(GLshort x, GLshort y, GLshort z) { glNormal3f(SS(x), SS(y), SS(z)); }
+void APIENTRY glNormal3sv(const GLshort *v) { glNormal3f(SS(v[0]), SS(v[1]), SS(v[2])); }

@@ -103,7 +103,18 @@ typedef struct {
     float s, t;
     float s1, t1;                      /* texture unit 1 (GL_ARB_multitexture) */
     float eye_d;
+    float br, bg, bb, ba;              /* two-sided lighting: the back's colour (light.c; the assembly picks) */
 } dgl_cvtx;
+
+/* Lighting's state (light.c, docs/dx7.md X2). Positions and directions in eye coordinates. */
+typedef struct {
+    int enabled;
+    GLfloat ambient[4], diffuse[4], specular[4], position[4], spot_dir[3];
+    GLfloat spot_exp, spot_cutoff, att[3];     /* constant, linear, quadratic */
+} dgl_light;
+typedef struct {
+    GLfloat ambient[4], diffuse[4], specular[4], emission[4], shininess;
+} dgl_material;
 
 typedef struct {
     /* Matrices */
@@ -139,8 +150,15 @@ typedef struct {
     GLuint  stencil_mask, stencil_writemask;
     GLenum  draw_buffer, read_buffer;
     /* Current vertex attributes and arrays */
-    GLfloat cur_color[4], cur_tex[2], cur_tex1[2];
+    GLfloat cur_color[4], cur_tex[2], cur_tex1[2], cur_normal[3];
     dgl_array va, ca, ta, ta1;         /* ta1: unit 1's texture coordinates */
+    dgl_array na;                      /* normals */
+    /* Lighting (light.c) */
+    int     lighting, color_material, normalize, rescale_normal, light_two_side, light_local_viewer;
+    GLenum  color_material_face, color_material_mode;
+    GLfloat light_model_ambient[4];
+    dgl_light light[8];
+    dgl_material material[2];          /* front, back */
     /* Errors */
     GLenum      error;
     unsigned    dirty;
@@ -183,6 +201,13 @@ int dgl_buffer_query(GLenum p, double *v);                /* glGet* of the bindi
 void dgl_buffers_reset(void);
 /* vertex.c: the arrays let go of a buffer being deleted */
 void dgl_arrays_forget_buffer(const dgl_buffer *b);
+
+/* light.c */
+void dgl_light_reset(void);
+void dgl_color_material_apply(void);
+extern int dgl_nm_ok;                  /* the normal matrix is the modelview's (dgl_mvp clears it) */
+/* The state needs the general vertex path (a back end's fast path transforms without it): lighting. */
+#define DGL_VTX_EXTRA() (dgl_gl.lighting)
 
 /* matrix.c */
 void dgl_mat_identity(dgl_mat4 *r);

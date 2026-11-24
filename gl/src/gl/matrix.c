@@ -65,6 +65,7 @@ const dgl_mat4 *dgl_mvp(void)
     if (dgl_gl.dirty & DGL_DIRTY_MVP) {
         dgl_mat_mul(&dgl_gl.mvp, &dgl_gl.proj.stack[dgl_gl.proj.depth - 1], &dgl_gl.mv.stack[dgl_gl.mv.depth - 1]);
         dgl_gl.dirty &= ~DGL_DIRTY_MVP;
+        dgl_nm_ok = 0;                  /* (light.c's normal matrix: made again at the next lit vertex) */
     }
     return &dgl_gl.mvp;
 }

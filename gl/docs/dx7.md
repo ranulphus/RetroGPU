@@ -7,7 +7,7 @@ file; this file records what is built and what the cards showed.
 | Step | What | State |
 |---|---|---|
 | X1 | Picture-quality features, per card, and settings that apply them to programs that don't ask | under way |
-| X2 | GL 1.1's lighting, normals, texture-coordinate generation and clip planes on the CPU (accepted and ignored until now) | to do |
+| X2 | GL 1.1's lighting, normals, texture-coordinate generation and clip planes on the CPU (accepted and ignored until now) | lighting done; texgen, clip planes, cube maps to do |
 | X3 | Hardware transform and lighting on the Radeon 7500 (RV200) and 7200 (R100): `GL_DGL_hw_tnl`, `DGL_TNL=0/1` | to do |
 | X4 | SSE in the software transform (needs GLOS to enable it) | to do |
 
@@ -52,3 +52,15 @@ programs (GLQuake) that never ask.
   (`ct_has`, `CT-SKIP`; `SKIPPED` in `tools/conform/run.py`), as on the Matrox cards in Loop A.
 - t37 judges the card's anisotropic frame by its own contrast check (`ct_check`), since cards filter
   anisotropically each in their own way.
+
+## X2: lighting on the CPU
+
+`src/gl/light.c`: OpenGL 1.1's section 2.13 as written: eight lights (directional, positional with attenuation,
+spot), the light model (ambient, local viewer, two-sided), front and back materials, colour material, normals
+from `glNormal*` and `glNormalPointer` (bytes, shorts, ints, floats, doubles), `GL_NORMALIZE` and
+`GL_RESCALE_NORMAL_EXT` (both normalise). A lit vertex's colour is computed in `dgl_transform`; two-sided lighting
+keeps the back's colour too and the assembly picks by the triangle's facing (the sign of the homogeneous
+determinant of x, y and w, which holds for the part a clip leaves). While lighting is on, draws take the general
+vertex path: no back end's fast path transforms them (`DGL_VTX_EXTRA`). t40 matches Mesa to the pixel on the
+software renderer at 8, 16 and 32 bits. Display lists still execute state calls at compile time (FR-DL-3), so a
+`glMaterial` inside a list takes effect then, not at its call.

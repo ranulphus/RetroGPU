@@ -4,7 +4,8 @@
 #include "gl_state.h"
 
 /* An input vertex: object position (x, y, z, w), colour 0..1, texcoord. */
-typedef struct { float pos[4], col[4], tex[2], tex1[2]; } dgl_vin;   /* tex1: texture unit 1 */
+typedef struct { float pos[4], col[4], tex[2], tex1[2], nrm[3]; } dgl_vin;   /* tex1: texture unit 1 */
+void dgl_light_vertex(const dgl_vin *in, dgl_cvtx *o);      /* light.c: o's colour (and back colour) lit */
 
 /* vertex.c's cache of transformed vertices: a triangle sink gets pointers
  * into dgl_vslot when it can (no two of the triangle's vertices share a

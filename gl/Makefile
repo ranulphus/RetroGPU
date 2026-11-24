@@ -231,13 +231,13 @@ build/host/test_gl_h_abi: tests/unit/test_gl_h_abi.c include/GL/gl.h include/GL/
 # Unit tests: tests/unit/test_<name>.c + UNIT_<name> sources, host gcc.
 GL_SRCS := $(wildcard src/gl/*.c)
 UNIT_TESTS := matrix clip assembly texconv vram lists buffer
-UNIT_lists := src/gl/lists.c src/gl/vertex.c src/gl/buffer.c src/gl/matrix.c src/gl/state.c src/gl/raster.c
-UNIT_buffer := src/gl/buffer.c src/gl/vertex.c src/gl/matrix.c src/gl/state.c src/gl/raster.c src/backend/mga/combine.c
+UNIT_lists := src/gl/lists.c src/gl/vertex.c src/gl/buffer.c src/gl/matrix.c src/gl/state.c src/gl/raster.c src/gl/light.c
+UNIT_buffer := src/gl/buffer.c src/gl/vertex.c src/gl/matrix.c src/gl/state.c src/gl/raster.c src/backend/mga/combine.c src/gl/light.c
 UNIT_texconv := src/gl/texconv.c src/backend/mga/texconv.c
 UNIT_vram := src/backend/mga/vram.c
-UNIT_matrix := src/gl/matrix.c src/gl/state.c
+UNIT_matrix := src/gl/matrix.c src/gl/state.c src/gl/light.c
 UNIT_clip := src/gl/clip.c
-UNIT_assembly := src/gl/vertex.c src/gl/buffer.c src/gl/matrix.c src/gl/state.c src/gl/raster.c
+UNIT_assembly := src/gl/vertex.c src/gl/buffer.c src/gl/matrix.c src/gl/state.c src/gl/raster.c src/gl/light.c
 build/host/test_%: tests/unit/test_%.c tests/unit/unit.c tests/unit/unit.h $$(UNIT_$$*) $(wildcard src/gl/*.h)
 	@mkdir -p $(dir $@)
 	$(Q)$(HOST_CC) $(HOST_CFLAGS) -o $@ $< tests/unit/unit.c $(UNIT_$*) -lm

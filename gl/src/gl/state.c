@@ -17,6 +17,7 @@ void dgl_gl_reset(void)
 {
     memset(&dgl_gl, 0, sizeof dgl_gl);
     dgl_matrix_reset();
+    dgl_light_reset();
     dgl_gl.error = GL_NO_ERROR;
     dgl_gl.depth_func = GL_LESS;
     dgl_gl.depth_mask = 1;

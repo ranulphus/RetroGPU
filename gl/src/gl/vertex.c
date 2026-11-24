@@ -29,9 +29,9 @@ static int set_array(dgl_array *a, GLint size, GLenum type, GLsizei stride, cons
 
 void dgl_arrays_forget_buffer(const dgl_buffer *b)
 {
-    dgl_array *a[4] = { &dgl_gl.va, &dgl_gl.ca, &dgl_gl.ta, &dgl_gl.ta1 };
+    dgl_array *a[5] = { &dgl_gl.va, &dgl_gl.ca, &dgl_gl.ta, &dgl_gl.ta1, &dgl_gl.na };
     int i;
-    for (i = 0; i < 4; i++)
+    for (i = 0; i < 5; i++)
         if (a[i]->buf == b) {
             a[i]->buf = NULL;
             a[i]->ptr = NULL;
@@ -40,6 +40,7 @@ void dgl_arrays_forget_buffer(const dgl_buffer *b)
 
 static const GLenum pos_types[] = { GL_FLOAT, GL_DOUBLE, GL_SHORT, GL_INT, 0 };
 static const GLenum col_types[] = { GL_UNSIGNED_BYTE, GL_FLOAT, GL_DOUBLE, 0 };
+static const GLenum nrm_types[] = { GL_BYTE, GL_SHORT, GL_INT, GL_FLOAT, GL_DOUBLE, 0 };
 
 void APIENTRY glVertexPointer(GLint size, GLenum type, GLsizei stride, const GLvoid *p)
 { set_array(&dgl_gl.va, size, type, stride, p, 2, pos_types); }
@@ -47,6 +48,8 @@ void APIENTRY glColorPointer(GLint size, GLenum type, GLsizei stride, const GLvo
 { set_array(&dgl_gl.ca, size, type, stride, p, 3, col_types); }
 void APIENTRY glTexCoordPointer(GLint size, GLenum type, GLsizei stride, const GLvoid *p)
 { set_array(dgl_gl.client_unit ? &dgl_gl.ta1 : &dgl_gl.ta, size, type, stride, p, 1, pos_types); }
+void APIENTRY glNormalPointer(GLenum type, GLsizei stride, const GLvoid *p)
+{ set_array(&dgl_gl.na, 3, type, stride, p, 3, nrm_types); }
 
 static dgl_array *client_array(GLenum a)
 {
@@ -54,6 +57,7 @@ static dgl_array *client_array(GLenum a)
     case GL_VERTEX_ARRAY: return &dgl_gl.va;
     case GL_COLOR_ARRAY: return &dgl_gl.ca;
     case GL_TEXTURE_COORD_ARRAY: return dgl_gl.client_unit ? &dgl_gl.ta1 : &dgl_gl.ta;
+    case GL_NORMAL_ARRAY: return &dgl_gl.na;
     default: return NULL;
     }
 }
@@ -62,21 +66,21 @@ void APIENTRY glEnableClientState(GLenum a)
 {
     dgl_array *p = client_array(a);
     if (p) p->enabled = 1;
-    else if (a != GL_NORMAL_ARRAY) dgl_gl_error(GL_INVALID_ENUM);
+    else dgl_gl_error(GL_INVALID_ENUM);
 }
 
 void APIENTRY glDisableClientState(GLenum a)
 {
     dgl_array *p = client_array(a);
     if (p) p->enabled = 0;
-    else if (a != GL_NORMAL_ARRAY) dgl_gl_error(GL_INVALID_ENUM);
+    else dgl_gl_error(GL_INVALID_ENUM);
 }
 
 /* ---- Fetch ------------------------------------------------------------ */
 static int type_size(GLenum t)
 {
     switch (t) {
-    case GL_UNSIGNED_BYTE: return 1;
+    case GL_UNSIGNED_BYTE: case GL_BYTE: return 1;
     case GL_SHORT: return 2;
     case GL_DOUBLE: return 8;
     default: return 4;
@@ -103,6 +107,22 @@ static void read_comps(const dgl_array *a, GLint i, float *out, int n, int norma
         case GL_UNSIGNED_BYTE: out[k] = normalise ? DGL_UB(p[k]) : p[k]; break;
         }
     }
+}
+
+/* A normal from an array: signed integers map to [-1, 1] as (2c + 1) / (2^n - 1). */
+static void read_normal(const dgl_array *a, GLint i, float out[3])
+{
+    const unsigned char *p = (const unsigned char *)dgl_buffer_address(a->buf, a->ptr) +
+                             (size_t)i * (a->stride ? (size_t)a->stride : (size_t)(3 * type_size(a->type)));
+    int k;
+    for (k = 0; k < 3; k++)
+        switch (a->type) {
+        case GL_BYTE: out[k] = (2.0f * ((const signed char *)p)[k] + 1.0f) / 255.0f; break;
+        case GL_SHORT: out[k] = (2.0f * ((const short *)p)[k] + 1.0f) / 65535.0f; break;
+        case GL_INT: out[k] = (float)((2.0 * ((const int *)p)[k] + 1.0) / 4294967295.0); break;
+        case GL_DOUBLE: out[k] = (float)((const double *)p)[k]; break;
+        default: out[k] = ((const float *)p)[k]; break;
+        }
 }
 
 /* Transform one input vertex (object position + attributes) to clip space. */
@@ -136,6 +156,8 @@ void dgl_transform(const dgl_vin *in, dgl_cvtx *o)
     }
     /* Eye distance for fog: -z_eye (PRD §7). */
     o->eye_d = dgl_gl.fog ? -(mv[2] * p[0] + mv[6] * p[1] + mv[10] * p[2] + mv[14] * p[3]) : 0.0f;
+    if (dgl_gl.lighting)
+        dgl_light_vertex(in, o);
 }
 
 void dgl_fetch_vertex(GLint i, dgl_vin *v);
@@ -227,6 +249,10 @@ static void fetch(GLint i, dgl_vin *v)
         read_plan(&pl_t1, i, v->tex1, 2, 0);
     } else
         memcpy(v->tex1, dgl_gl.cur_tex1, sizeof v->tex1);
+    if (dgl_gl.na.enabled)
+        read_normal(&dgl_gl.na, i, v->nrm);
+    else
+        memcpy(v->nrm, dgl_gl.cur_normal, sizeof v->nrm);
 }
 
 void dgl_fetch_vertex(GLint i, dgl_vin *v)
@@ -248,6 +274,10 @@ void dgl_fetch_vertex(GLint i, dgl_vin *v)
         read_comps(&dgl_gl.ta1, i, v->tex1, 2, 0);
     } else
         memcpy(v->tex1, dgl_gl.cur_tex1, sizeof v->tex1);
+    if (dgl_gl.na.enabled)
+        read_normal(&dgl_gl.na, i, v->nrm);
+    else
+        memcpy(v->nrm, dgl_gl.cur_normal, sizeof v->nrm);
 }
 
 /* ---- Assembly --------------------------------------------------------- */
@@ -283,9 +313,34 @@ static const dgl_cvtx *get(GLint idx, const dgl_vin *imm)
  * vertex, except the first for GL_POLYGON, so it is one of a, b, c). The
  * sink gets the cache's slots unless two of the vertices share one (a
  * later get() would refill it); then copies, as it always had. */
+/* Two-sided lighting: a back-facing triangle drawn with its vertices' back colours. Facing by the sign of the
+ * homogeneous determinant of (x, y, w): the orientation of the part in front of the eye, as clipping leaves it. */
+static void tri_two_sided(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *c, const dgl_cvtx *p)
+{
+    double det = (double)a->x * ((double)b->y * c->w - (double)c->y * b->w) -
+                 (double)b->x * ((double)a->y * c->w - (double)c->y * a->w) +
+                 (double)c->x * ((double)a->y * b->w - (double)b->y * a->w);
+    dgl_cvtx v[4];
+    int i;
+    if ((det >= 0) == (dgl_gl.front_face != GL_CW)) {
+        dgl_sink.triangle(a, b, c, p);
+        return;
+    }
+    v[0] = *a, v[1] = *b, v[2] = *c, v[3] = *p;
+    for (i = 0; i < 4; i++)
+        v[i].r = v[i].br, v[i].g = v[i].bg, v[i].b = v[i].bb, v[i].a = v[i].ba;
+    dgl_sink.triangle(&v[0], &v[1], &v[2], &v[3]);
+}
+
 static void tri(GLint a, GLint b, GLint c, GLint prov, const dgl_vin *imm)
 {
 #define CLASH(x, y) ((x) != (y) && !(((x) ^ (y)) & (VCACHE - 1)))
+    if (dgl_gl.lighting && dgl_gl.light_two_side && dgl_sink.triangle) {
+        dgl_cvtx v[4];
+        v[0] = *get(a, imm); v[1] = *get(b, imm); v[2] = *get(c, imm); v[3] = *get(prov, imm);
+        tri_two_sided(&v[0], &v[1], &v[2], &v[3]);
+        return;
+    }
     if (!CLASH(a, b) && !CLASH(a, c) && !CLASH(b, c)) {
         const dgl_cvtx *va = get(a, imm), *vb = get(b, imm), *vcx = get(c, imm), *vp = get(prov, imm);
         if (dgl_sink.triangle)
@@ -357,7 +412,8 @@ static void assemble(GLenum mode, GLsizei count, const GLint *idx, GLint first, 
     else
         plan_arrays();
     cur_imm = imm;
-    if (dgl_sink.fast && dgl_sink.fast(mode, count, idx, first)) {     /* (a list's: indices into its vertices) */
+    if (dgl_sink.fast && !DGL_VTX_EXTRA() && dgl_sink.fast(mode, count, idx, first)) {     /* (a list's: indices into
+                                                                                         * its vertices) */
         cur_imm = NULL;
         if (dgl_sink.end)
             dgl_sink.end();
@@ -496,6 +552,7 @@ static void imm_vertex(float x, float y, float z, float w)
     memcpy(v->col, dgl_gl.cur_color, sizeof v->col);
     memcpy(v->tex, dgl_gl.cur_tex, sizeof v->tex);
     memcpy(v->tex1, dgl_gl.cur_tex1, sizeof v->tex1);
+    memcpy(v->nrm, dgl_gl.cur_normal, sizeof v->nrm);
 }
 
 void APIENTRY glEnd(void)
@@ -531,6 +588,8 @@ void APIENTRY glArrayElement(GLint i)
         read_comps(&dgl_gl.ta1, i, v.tex1, 2, 0);
         memcpy(dgl_gl.cur_tex1, v.tex1, sizeof v.tex1);
     }
+    if (dgl_gl.na.enabled)
+        read_normal(&dgl_gl.na, i, dgl_gl.cur_normal);
     if (dgl_gl.va.enabled) {
         read_comps(&dgl_gl.va, i, v.pos, 4, 0);
         imm_vertex(v.pos[0], v.pos[1], v.pos[2], v.pos[3]);
@@ -545,6 +604,8 @@ void APIENTRY glTexCoord2f(GLfloat s, GLfloat t) { dgl_gl.cur_tex[0] = s; dgl_gl
 void APIENTRY glColor4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a)
 {
     dgl_gl.cur_color[0] = r; dgl_gl.cur_color[1] = g; dgl_gl.cur_color[2] = b; dgl_gl.cur_color[3] = a;
+    if (dgl_gl.color_material)
+        dgl_color_material_apply();
 }
 void APIENTRY glColor3f(GLfloat r, GLfloat g, GLfloat b) { glColor4f(r, g, b, 1.0f); }
 void APIENTRY glColor4ub(GLubyte r, GLubyte g, GLubyte b, GLubyte a)
