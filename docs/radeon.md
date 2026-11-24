@@ -315,6 +315,13 @@ frame read back has no DAC ramp in it).
 
 **DOS-GL's whole suite again** after the texture-register fix: 35 of 35.
 
+**The games' replays on the P3** (GLPLAY with the recorded call traces, the frames against the emulated Voodoo's at
+40 levels and 5% of pixels, as for the Rage 128): GTA's frames 60, 150, 240 and 295 with no pixel past the
+tolerance (the worst 36 levels); Screamer Rally's 60, 150, 200 and 240 with at most 0.054% past it. Every swap a
+flip in the command stream (295 and 240 queued), no engine time-out, no approximation said.
+
+Still owed, with someone watching the P3: the games live, DFLIP's phases, the hardware cursor.
+
 ## The rest of the family: the RV200 (Radeon 7500) and the first Radeon (R100)
 
 A Radeon 7500 LE (RV200) is to follow this card. What the references say differs, gathered here so it isn't
