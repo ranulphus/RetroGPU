@@ -320,6 +320,9 @@ frame read back has no DAC ramp in it).
 tolerance (the worst 36 levels); Screamer Rally's 60, 150, 200 and 240 with at most 0.054% past it. Every swap a
 flip in the command stream (295 and 240 queued), no engine time-out, no approximation said.
 
+**The other cards after the core's changes** (the preset's correction, `tex_min_w`, the back ends' tables): Glide's
+conformance on the emulated G100, G200, G400 and G450 in Loop A, 27 of 27 on each; the host tier's 14 steps pass.
+
 Still owed, with someone watching the P3: the games live, DFLIP's phases, the hardware cursor.
 
 ## The rest of the family: the RV200 (Radeon 7500) and the first Radeon (R100)
