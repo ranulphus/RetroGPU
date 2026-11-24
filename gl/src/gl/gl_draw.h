@@ -29,6 +29,10 @@ typedef struct {
     /* A whole draw from the arrays the sink can do its own fast way
      * (emit.c's fast path): 1 when it did. */
     int  (*fast)(GLenum mode, GLsizei count, const GLint *idx, GLint first);
+    /* A whole draw through the card's own transform engine (the Radeon's, X3): 1 when it did; tried before fast
+     * and before the general path, whatever the state (the back end says no to what its engine can't do). The
+     * draw's vertices: dgl_vertex_of. */
+    int  (*tnl)(GLenum mode, GLsizei count, const GLint *idx, GLint first);
     /* Display lists (lists.c): return 1 when the call was captured. */
     int  (*record)(GLenum mode, GLsizei count, const GLint *idx, GLint first);
     int  (*record_imm)(GLenum mode, GLsizei count, const dgl_vin *v);
@@ -37,6 +41,7 @@ typedef struct {
 extern dgl_sinks dgl_sink;
 
 void dgl_transform(const dgl_vin *in, dgl_cvtx *out);
+void dgl_vertex_of(GLint i, dgl_vin *v);   /* the draw being assembled's vertex i (immediate or from the arrays) */
 /* The arrays resolved for the current draw (vertex.c, once a draw): each
  * one's first element, stride, type and size, and whether it is on. */
 typedef struct { const unsigned char *p; size_t stride; GLenum type; int size, on, uniform; } dgl_aplan;

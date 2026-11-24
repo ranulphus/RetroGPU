@@ -417,6 +417,14 @@ void dgl_tri_general(GLint a, GLint b, GLint c, GLint provoking)
  * on the P3 when the TNT2's polygons went this way). */
 static const dgl_vin *cur_imm;
 
+void dgl_vertex_of(GLint i, dgl_vin *v)
+{
+    if (cur_imm)
+        *v = cur_imm[i];
+    else
+        fetch(i, v);
+}
+
 int dgl_poly_general(const GLint *ids, int n, GLint provoking)
 {
     dgl_cvtx v[DGL_POLY_MAX], pv;
@@ -473,6 +481,12 @@ static void assemble(GLenum mode, GLsizei count, const GLint *idx, GLint first, 
         plan_arrays();
     clip_user = dgl_clip_user_begin();
     cur_imm = imm;
+    if (dgl_sink.tnl && dgl_sink.tnl(mode, count, idx, first)) {
+        cur_imm = NULL;
+        if (dgl_sink.end)
+            dgl_sink.end();
+        return;
+    }
     if (dgl_sink.fast && !DGL_VTX_EXTRA() && dgl_sink.fast(mode, count, idx, first)) {     /* (a list's: indices into
                                                                                          * its vertices) */
         cur_imm = NULL;

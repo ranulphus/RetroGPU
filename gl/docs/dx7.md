@@ -8,7 +8,7 @@ file; this file records what is built and what the cards showed.
 |---|---|---|
 | X1 | Picture-quality features, per card, and settings that apply them to programs that don't ask | under way |
 | X2 | GL 1.1's lighting, normals, texture-coordinate generation and clip planes on the CPU (accepted and ignored until now) | done |
-| X3 | Hardware transform and lighting on the Radeon 7500 (RV200) and 7200 (R100): `GL_DGL_hw_tnl`, `DGL_TNL=0/1` | to do |
+| X3 | Hardware transform and lighting on the Radeon 7500 (RV200) and 7200 (R100): `GL_DGL_hw_tnl`, `DGL_TNL=0/1` | transform on (X3a); lighting, fog, texgen to come |
 | X4 | SSE in the software transform (needs GLOS to enable it) | to do |
 
 ## X1: what each renderer offers
@@ -113,3 +113,23 @@ works, as Mesa's radeon driver does it:
 - The rate: a 64 x 64 grid of 4-pixel cells (7,938 triangles as an unindexed list, 23,814 vertices) drawn 50
   times: 7.68 million triangles a second, 23 million vertices (DOS-GL's CPU path on the P3: in the hundreds of
   thousands).
+
+## X3a: DOS-GL's draws through the engine
+
+The front end tries a back end's `tnl` sink hook before anything else for every draw (`src/gl/vertex.c`); the Radeon
+back end takes it where its engine does the state (so far: no lighting, fog, texture-coordinate generation, clip
+planes, texture matrix, cube map, polygon offset or line and point primitives; texture coordinates within 1,024, as
+the chip's floats lose a fraction beyond, conformance t14). It writes the draw's vertices in object coordinates
+(x, y, z, w, the colour, the units' s and t) into a 1 MB vertex area in video memory (made at the first such draw;
+from its start again after a sync when full), makes indices for GL's primitive (strips and fans as the chip's below
+4,092 vertices, else lists; quads and quad strips as lists with the general path's diagonal, or ending at the quad's
+last vertex when flat; a flat polygon's first vertex as the provoking one), sets the engine's state (the
+model-view-projection matrix and the viewport where they changed, outputs, shading, culling in both the setup engine
+and the engine, as Mesa's radeonCullFace and radeonFrontFace) and sends the indexed draw (`hal/src/radeon/tcl.c`). A
+window-space draw after it puts the window's words back (`tri.c`). `GL_DGL_hw_tnl` is in `GL_EXTENSIONS` while it is
+on; `DGL_TNL=0` keeps every draw on the CPU; `DGL-STAT` counts `tnl/s`; the first such draw says
+`DGL-RADEON the transform engine draws`.
+
+On the P3's 7500 (2026-11-24): the whole suite passes with it, 32 of the 42 tests drawn through the engine (the rest:
+fog, lighting, texture generation, cube maps, lines and points, a capped texture heap), against the same Mesa
+references.

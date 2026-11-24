@@ -69,6 +69,15 @@ static uint32_t be_mem_used(void)
     return bs.mem_used;
 }
 
+/* Triangles the card transformed so far (DGL-STAT's tnl/s). */
+static uint32_t be_tris_tnl(void)
+{
+    dgl_be_stats bs;
+    dgl_be->stats(&bs);
+    return bs.tris_tnl;
+}
+static uint32_t stats_tnl0;
+
 /* Triangles set up by the CPU so far (the back end's count). */
 static uint32_t be_tris(void)
 {
@@ -311,6 +320,7 @@ static void after_init(const DGLConfig *cp)
         stats_on = e ? atoi(e) : 0;
         stats_t0 = sys_time_us();
         stats_tris0 = be_tris();
+        stats_tnl0 = be_tris_tnl();
 #ifdef MGA_PROF
         stats_all0 = be_tris_all();
 #endif
@@ -547,9 +557,9 @@ static void swap_buffers(void)
             retrace_us = rs.retrace_us - retrace0_us;
             retrace0_us = rs.retrace_us;
             stats.present_us = rs.present_us - present_base_us;
-            DGL_ERR("DGL-STAT fps=%.1f tris/s=%.0f swaps=%lu tex_kb=%lu stubs=%lu drain_ms=%lu retrace_ms=%lu "
-                    "present_ms=%lu hooks=%lu lag_us=%lu/%lu", (stats.swaps - stats_swaps0) * 1e6 / dt,
-                    (be_tris() - stats_tris0) * 1e6 / dt, stats.swaps, (unsigned long)(be_mem_used() >> 10),
+            DGL_ERR("DGL-STAT fps=%.1f tris/s=%.0f tnl/s=%.0f swaps=%lu tex_kb=%lu stubs=%lu drain_ms=%lu "
+                    "retrace_ms=%lu present_ms=%lu hooks=%lu lag_us=%lu/%lu", (stats.swaps - stats_swaps0) * 1e6 / dt,
+                    (be_tris() - stats_tris0) * 1e6 / dt, (be_tris_tnl() - stats_tnl0) * 1e6 / dt, stats.swaps, (unsigned long)(be_mem_used() >> 10),
                     dgl_stub_calls, (unsigned long)(drain_us / 1000), (unsigned long)(retrace_us / 1000),
                     (unsigned long)((stats.present_us - present0_us) / 1000), stats.wait_hooks,
                     (unsigned long)(rs.lag_n != lag0_n ? (rs.lag_us - lag0_us) / (rs.lag_n - lag0_n) : 0),
@@ -576,6 +586,7 @@ static void swap_buffers(void)
             }
             stats_t0 = now;
             stats_tris0 = be_tris();
+            stats_tnl0 = be_tris_tnl();
 #ifdef MGA_PROF
             stats_all0 = be_tris_all();
 #endif

@@ -151,6 +151,35 @@ void radeon_tri(const radeon_vertex *a, const radeon_vertex *b, const radeon_ver
 void radeon_poly(const radeon_vertex *v, int n);     /* a convex polygon of 3 to 16 vertices as one triangle fan */
 void radeon_2d_begin(void);             /* (engine2d.c calls it: 2D after 3D waits for the 3D engine) */
 
+/* tcl.c: the transform engine (RADEON_HAS_TCL chips; gl/docs/dx7.md X3), through the command processor only.
+ * radeon_tcl's words are SE_TCL_OUTPUT_VTX_FMT's and the consecutive registers after it, written at radeon_tcl_emit
+ * (the draws call it) where they changed. radeon_tcl_on: radeon_3d for vertices the engine transforms (the viewport
+ * transform on, w as clip w) or, off, the window-space ones radeon_3d_init set up. The matrices: GL's column-major
+ * into a slot (MODEL_PROJ 0, MODEL 1, MODEL_IT 2, TEXMAT_0..2 3..5: radeon_tcl_defaults' selects); vectors and
+ * scalars into the engine's memories at a start and stride. A draw: an array of dwords-sized vertices at addr (in
+ * the chip's space: radeon.fb_location + a video memory offset), as vfmt (RADEON_CP_VC_FRMT_*) says, n of them; or
+ * n 16-bit indices into it (lists in pieces; a strip or fan at most RADEON_TCL_PIECE). */
+typedef struct {
+    uint32_t output_vtx_fmt, output_vtx_sel, matrix_select_0, matrix_select_1, ucp_vert_blend_ctl, texture_proc_ctl,
+             light_model_ctl, per_light_ctl[4];
+} radeon_tcl_regs;
+extern radeon_tcl_regs radeon_tcl;
+#define RADEON_TCL_PIECE 4092
+void radeon_tcl_defaults(void);
+void radeon_tcl_on(int yes);
+uint32_t radeon_tcl_window_cntl(void);  /* SE_CNTL as the window-space draws have it (the engine's start from it) */
+int  radeon_tcl_is_on(void);
+void radeon_tcl_forget(void);           /* (a new 3D state: everything written again) */
+void radeon_tcl_emit(void);
+void radeon_tcl_viewport(const float v[6]);     /* x scale, offset, y scale, offset, z scale, offset */
+void radeon_tcl_vectors(unsigned start, unsigned stride, const float *v, int n);
+void radeon_tcl_scalars(unsigned start, unsigned stride, const float *v, int n);
+void radeon_tcl_matrix(int slot, const float m[16]);
+void radeon_tcl_matrix_t(int slot, const float m[16]);  /* (as it is: an inverse's, for MODEL_IT) */
+void radeon_tcl_guard_band(void);
+void radeon_tcl_draw(uint32_t prim, uint32_t vfmt, uint32_t addr, int dwords, int n);
+void radeon_tcl_draw_indexed(uint32_t prim, uint32_t vfmt, uint32_t addr, int dwords, const uint16_t *idx, int n);
+
 /* chip.c: a surface over the depth buffer at off (1 KB aligned), bytes long (a multiple of 1 KB), pitch_bytes a row,
  * 16 or 32 bits (24-bit Z with its stencil): the CPU's reads and writes there translated to the chip's tiling, so
  * the CPU sees the buffer linear. 0, or -1 (not aligned). radeon_depth_surface_off: none (before text mode). */

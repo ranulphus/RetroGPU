@@ -248,7 +248,7 @@ int main(int argc, char **argv)
             reg(SE_VPORT_XSCALE + 4u * (uint32_t)i, vp[i]);
     }
     reg(SE_TCL_OUTPUT_VTX_FMT, TCL_VTX_Z0 | TCL_VTX_W0 | TCL_VTX_PK_DIFFUSE);
-    reg(SE_TCL_OUTPUT_VTX_SEL, TCL_COMPUTE_XYZW | 0u << 24 | 1u << 28);
+    reg(SE_TCL_OUTPUT_VTX_SEL, TCL_COMPUTE_XYZW | 0u << 16 | 1u << 20);   /* (texture outputs 0, 1 from inputs 0, 1) */
     reg(SE_TCL_MATRIX_SELECT_0, 1u << 0 | 2u << 16);
     reg(SE_TCL_MATRIX_SELECT_1, 0u << 0 | 3u << 16 | 4u << 20 | 5u << 24);
     reg(SE_TCL_UCP_VERT_BLEND_CTL, UCP_IN_CLIP_SPACE | CULL_FRONT_IS_CCW);

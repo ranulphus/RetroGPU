@@ -1094,6 +1094,229 @@ static int rb_fast(GLenum mode, GLsizei count, const GLint *idx, GLint first)
     return dgl_poly_general(ids, (int)count, ids[0]);
 }
 
+/* ---- Hardware transform (gl/docs/dx7.md, X3) -------------------------------------------------------------------
+ * On a chip with the engine (the 7500, the 7200) and the command processor running, a draw goes through the engine
+ * when its state is one it does (so far: no lighting, fog, texture-coordinate generation, clip planes, texture
+ * matrix, cube map or polygon offset; filled triangles, strips, fans, quads and polygons): the draw's vertices in
+ * object coordinates (x, y, z, w, the colour, each unit's s and t) written into a vertex area in video memory, then
+ * the engine's indexed draw over them (tcl.c). Everything else takes the CPU's path as before. DGL_TNL=0 keeps every
+ * draw on the CPU. */
+#define VB_BYTES (1u << 20)
+static int tnl_mode = -1;               /* DGL_TNL: 0 off, 1 on (where the chip has the engine) */
+static uint32_t vb_block, vb_used;      /* the vertex area (0: none yet) and how much of it this frame used */
+static float tnl_mvp[16], tnl_vp[6];
+static uint32_t tnl_tris;               /* triangles the engine transformed (DGL-STAT's tnl/s) */
+static int tnl_mvp_ok;
+static uint16_t *tnl_idx;
+static int tnl_idx_cap;
+
+int dgl_radeon_tnl_active(void)
+{
+    if (tnl_mode < 0) {
+        const char *e = getenv("DGL_TNL");
+        tnl_mode = e && *e ? *e != '0' : 1;
+    }
+    return tnl_mode && (radeon.flags & RADEON_HAS_TCL) && radeon_cp_running();
+}
+
+static int tnl_state_ok(GLenum mode)
+{
+    if (mode == GL_POINTS || mode == GL_LINES || mode == GL_LINE_STRIP || mode == GL_LINE_LOOP)
+        return 0;                       /* (lines and points: the CPU's path, as their widths and ends are drawn) */
+    if (DGL_VTX_EXTRA() || dgl_gl.fog || !dgl_gl.tex_identity || !dgl_gl.tex1_identity || dgl_gl.offset_fill ||
+        dgl_gl.polygon_mode != GL_FILL)
+        return 0;
+    return 1;
+}
+
+static uint16_t *idx_room(int n)
+{
+    if (n > tnl_idx_cap) {
+        uint16_t *p = (uint16_t *)realloc(tnl_idx, (size_t)n * sizeof *p);
+        if (!p)
+            return NULL;
+        tnl_idx = p, tnl_idx_cap = n;
+    }
+    return tnl_idx;
+}
+
+static int rb_tnl(GLenum mode, GLsizei count, const GLint *idx, GLint first)
+{
+    PROF_SCOPE(PROF_D_SETUP);
+    /* (the coordinates: GL's unit 0's s and t, then unit 1's where the chip's second unit draws or the first draws GL's
+     * unit 1, swap_st; the engine's outputs take the chip's units from them) */
+    int units = cur_tx[1] ? 2 : cur_tx[0] ? 1 : 0, pairs = units == 2 || (units && swap_st) ? 2 : units;
+    int dwords = 5 + 2 * pairs, flat = dgl_gl.shade_model == GL_FLAT;
+    GLint vmin, vmax, i;
+    int nv, ni = 0, k;
+    uint32_t prim = RADEON_PRIM_TRI_LIST, vfmt, bytes, addr, s;
+    volatile uint32_t *dst;
+    uint16_t *ix;
+    dgl_vin v;
+    if (!dgl_radeon_tnl_active() || count < 3 || !tnl_state_ok(mode))
+        return 0;
+    /* The vertices the draw uses: a range of at most 65,536 (16-bit indices). */
+    if (idx) {
+        vmin = vmax = idx[0];
+        for (i = 1; i < count; i++) {
+            if (idx[i] < vmin) vmin = idx[i];
+            if (idx[i] > vmax) vmax = idx[i];
+        }
+    } else
+        vmin = first, vmax = first + count - 1;
+    nv = vmax - vmin + 1;
+    if (nv > 65536)
+        return 0;
+    /* The indices, as the chip's primitive (provoking vertex last, a polygon's first: SE_CNTL below). */
+#define IX(k) ((uint16_t)((idx ? idx[k] : first + (k)) - vmin))
+    switch (mode) {
+    case GL_TRIANGLES:
+        if (!(ix = idx_room(count)))
+            return 0;
+        for (i = 0; i + 2 < count; i += 3)
+            ix[ni++] = IX(i), ix[ni++] = IX(i + 1), ix[ni++] = IX(i + 2);
+        break;
+    case GL_TRIANGLE_STRIP:
+    case GL_TRIANGLE_FAN:
+    case GL_POLYGON:
+        if (count <= RADEON_TCL_PIECE) {
+            if (!(ix = idx_room(count)))
+                return 0;
+            for (i = 0; i < count; i++)
+                ix[ni++] = IX(i);
+            prim = mode == GL_TRIANGLE_STRIP ? RADEON_PRIM_TRI_STRIP : RADEON_PRIM_TRI_FAN;
+        } else {                        /* (as a list, the windings and provoking vertices kept) */
+            if (!(ix = idx_room(3 * count)))
+                return 0;
+            for (i = 0; i + 2 < count; i++)
+                if (mode == GL_TRIANGLE_STRIP)
+                    ix[ni++] = IX(i + (i & 1)), ix[ni++] = IX(i + 1 - (i & 1)), ix[ni++] = IX(i + 2);
+                else if (mode == GL_POLYGON && flat)    /* (the first vertex last, the winding kept) */
+                    ix[ni++] = IX(i + 1), ix[ni++] = IX(i + 2), ix[ni++] = IX(0);
+                else
+                    ix[ni++] = IX(0), ix[ni++] = IX(i + 1), ix[ni++] = IX(i + 2);
+            if (mode == GL_POLYGON && flat)
+                flat = 2;               /* (the list's last vertex already the polygon's first) */
+        }
+        break;
+    case GL_QUADS:
+    case GL_QUAD_STRIP:
+        if (!(ix = idx_room(3 * count)))
+            return 0;
+        /* (the general path's diagonal, 0-2; flat: each triangle ending at the quad's last vertex) */
+        if (mode == GL_QUADS)
+            for (i = 0; i + 3 < count; i += 4) {
+                if (flat)
+                    ix[ni++] = IX(i), ix[ni++] = IX(i + 1), ix[ni++] = IX(i + 3),
+                    ix[ni++] = IX(i + 1), ix[ni++] = IX(i + 2), ix[ni++] = IX(i + 3);
+                else
+                    ix[ni++] = IX(i), ix[ni++] = IX(i + 1), ix[ni++] = IX(i + 2),
+                    ix[ni++] = IX(i), ix[ni++] = IX(i + 2), ix[ni++] = IX(i + 3);
+            }
+        else
+            for (i = 0; i + 3 < count; i += 2)
+                ix[ni++] = IX(i), ix[ni++] = IX(i + 1), ix[ni++] = IX(i + 3),
+                ix[ni++] = IX(i + 2), ix[ni++] = IX(i), ix[ni++] = IX(i + 3);
+        break;
+    default:
+        return 0;
+    }
+#undef IX
+    if (!ni)
+        return 1;
+    /* Room in the vertex area (made at the first draw; used again from its start after a sync once full). */
+    bytes = (uint32_t)nv * (uint32_t)dwords * 4u;
+    if (bytes > VB_BYTES)
+        return 0;
+    if (!vb_block && room(VB_BYTES + 32u, &vb_block, NULL) != 0) {
+        vb_block = 0;
+        tnl_mode = 0;
+        warn_once(8, "no video memory for the transform engine's vertices: transformed by the CPU");
+        return 0;
+    }
+    if (vb_used + bytes > VB_BYTES) {
+        radeon_sync(1000000);
+        vb_used = 0;
+    }
+    addr = ((vb_block + 31u) & ~31u) + vb_used;
+    vb_used += (bytes + 31u) & ~31u;
+    dst = (volatile uint32_t *)(radeon.fb + addr);
+    for (i = 0; i < nv; i++, dst += dwords) {
+        union { float f; uint32_t u; } c;
+        dgl_vertex_of(vmin + i, &v);
+        if (pairs && (v.tex[0] > 1024.0f || v.tex[0] < -1024.0f || v.tex[1] > 1024.0f || v.tex[1] < -1024.0f ||
+                      (pairs > 1 && (v.tex1[0] > 1024.0f || v.tex1[0] < -1024.0f || v.tex1[1] > 1024.0f ||
+                                     v.tex1[1] < -1024.0f))))
+            return 0;                   /* (coordinates past 1,024 lose their fraction in the chip's floats: the CPU's
+                                         * path takes whole periods off per triangle, conformance t14) */
+        c.f = v.pos[0], dst[0] = c.u;
+        c.f = v.pos[1], dst[1] = c.u;
+        c.f = v.pos[2], dst[2] = c.u;
+        c.f = v.pos[3], dst[3] = c.u;
+        dst[4] = ub(v.col[3]) << 24 | ub(v.col[0]) << 16 | ub(v.col[1]) << 8 | ub(v.col[2]);
+        if (pairs) {
+            c.f = v.tex[0], dst[5] = c.u;
+            c.f = v.tex[1], dst[6] = c.u;
+        }
+        if (pairs > 1) {
+            c.f = v.tex1[0], dst[7] = c.u;
+            c.f = v.tex1[1], dst[8] = c.u;
+        }
+    }
+    (void)dst[-1];                      /* (the CPU's writes out before the chip reads them) */
+    /* The engine's state: on, the matrix and viewport where they changed, the outputs, shading and culling. */
+    radeon_tcl_on(1);
+    {
+        const dgl_mat4 *m = dgl_mvp();
+        float vp[6];
+        if (!tnl_mvp_ok || memcmp(tnl_mvp, m->m, sizeof tnl_mvp)) {
+            memcpy(tnl_mvp, m->m, sizeof tnl_mvp);
+            radeon_tcl_matrix(0, tnl_mvp);
+            if (!tnl_mvp_ok)
+                radeon_tcl_guard_band();
+            tnl_mvp_ok = 1;
+        }
+        vp[0] = vx_s, vp[1] = vx_o, vp[2] = vy_s, vp[3] = vy_o, vp[4] = vz_s, vp[5] = vz_o;
+        if (memcmp(vp, tnl_vp, sizeof vp)) {
+            memcpy(tnl_vp, vp, sizeof vp);
+            radeon_tcl_viewport(vp);
+        }
+    }
+    radeon_tcl.output_vtx_fmt = RADEON_TCL_VTX_Z0 | RADEON_TCL_VTX_W0 | RADEON_TCL_VTX_PK_DIFFUSE |
+                                (units ? RADEON_TCL_VTX_ST0 : 0u) | (units > 1 ? RADEON_TCL_VTX_ST1 : 0u);
+    radeon_tcl.output_vtx_sel = RADEON_TCL_COMPUTE_XYZW | (swap_st && units == 1 ? 1u : 0u) << RADEON_TCL_TEX_0_OUTPUT_SHIFT |
+                                1u << RADEON_TCL_TEX_1_OUTPUT_SHIFT;
+    s = radeon_tcl_window_cntl() & ~(RADEON_FFACE_CULL_DIR_MASK | RADEON_BFACE_SOLID | RADEON_FFACE_SOLID | 3u << 6 |
+                           RADEON_DIFFUSE_SHADE_MASK | RADEON_ALPHA_SHADE_MASK | RADEON_SPECULAR_SHADE_MASK);
+    s |= RADEON_VPORT_XY_XFORM_ENABLE | RADEON_VPORT_Z_XFORM_ENABLE;
+    s |= flat ? RADEON_DIFFUSE_SHADE_FLAT | RADEON_ALPHA_SHADE_FLAT | RADEON_SPECULAR_SHADE_FLAT
+              : RADEON_DIFFUSE_SHADE_GOURAUD | RADEON_ALPHA_SHADE_GOURAUD | RADEON_SPECULAR_SHADE_GOURAUD;
+    s |= mode == GL_POLYGON && flat == 1 ? RADEON_FLAT_SHADE_VTX_0 : RADEON_FLAT_SHADE_VTX_LAST;
+    radeon_tcl.ucp_vert_blend_ctl = RADEON_UCP_IN_CLIP_SPACE;
+    if (dgl_gl.front_face == GL_CCW)
+        s |= RADEON_FFACE_CULL_CCW, radeon_tcl.ucp_vert_blend_ctl |= RADEON_CULL_FRONT_IS_CCW;
+    s |= RADEON_FFACE_SOLID | RADEON_BFACE_SOLID;
+    if (dgl_gl.cull_face) {
+        if (dgl_gl.cull_mode == GL_FRONT || dgl_gl.cull_mode == GL_FRONT_AND_BACK)
+            s &= ~RADEON_FFACE_SOLID, radeon_tcl.ucp_vert_blend_ctl |= RADEON_CULL_FRONT;
+        if (dgl_gl.cull_mode == GL_BACK || dgl_gl.cull_mode == GL_FRONT_AND_BACK)
+            s &= ~RADEON_BFACE_SOLID, radeon_tcl.ucp_vert_blend_ctl |= RADEON_CULL_BACK;
+    }
+    if (radeon_3d.se_cntl != s)
+        radeon_3d.se_cntl = s, radeon_3d_dirty = 1;
+    vfmt = RADEON_CP_VC_FRMT_Z | RADEON_CP_VC_FRMT_W0 | RADEON_CP_VC_FRMT_PKCOLOR |
+           (pairs ? RADEON_CP_VC_FRMT_ST0 : 0u) | (pairs > 1 ? RADEON_CP_VC_FRMT_ST1 : 0u);
+    if (!tnl_tris)
+        DGL_WARN("DGL-RADEON the transform engine draws (DGL_TNL=0: the CPU transforms instead)");   /* (said once) */
+    radeon_tcl_draw_indexed(prim, vfmt, radeon.fb_location + addr, dwords, ix, ni);
+    radeon_cp_flush();
+    tris += (uint32_t)(prim == RADEON_PRIM_TRI_LIST ? ni / 3 : ni - 2);
+    tnl_tris += (uint32_t)(prim == RADEON_PRIM_TRI_LIST ? ni / 3 : ni - 2);
+    dgl_prims.tris_in += prim == RADEON_PRIM_TRI_LIST ? (unsigned long)ni / 3 : (unsigned long)ni - 2;
+    (void)k;
+    return 1;
+}
+
 static void install(void)
 {
     valid_ok = 0;
@@ -1104,6 +1327,7 @@ static void install(void)
     dgl_sink.begin = rb_begin;
     dgl_sink.triangle = rb_triangle;
     dgl_sink.fast = rb_fast;
+    dgl_sink.tnl = rb_tnl;
     dgl_sink.polygon = rb_polygon;
     dgl_sink.line = rb_line;
     dgl_sink.point = rb_point;
@@ -1161,6 +1385,7 @@ static void caps(dgl_caps *c)
     c->max_lod_bias = 1;                        /* (+1 drawn as +127/128: unit_words) */
     c->dot3 = 1;
     c->cube = 1;
+    c->hw_tnl = dgl_radeon_tnl_active();
 }
 
 static void synced(void) { dgl_vram_sync_done(); }   /* (the blocks retired before it are free) */
@@ -1212,6 +1437,10 @@ static void tex_reset(uint32_t start, uint32_t end)
     int i, n = dgl_texture_count();
     dgl_texture *t;
     valid_ok = 0;
+    vb_block = 0, vb_used = 0, tnl_mvp_ok = 0;     /* (a new context: the vertex area and the engine's state anew) */
+    memset(tnl_vp, 0, sizeof tnl_vp);
+    radeon_tcl_forget();
+    radeon_tcl_defaults();
     cur_tx[0] = cur_tx[1] = NULL;
     for (i = 0; i < n; i++)
         if ((t = dgl_texture_nth(i)) && t->be) {
@@ -1225,6 +1454,7 @@ static void stats(dgl_be_stats *s)
 {
     memset(s, 0, sizeof *s);
     s->tris_offloaded = tris;                   /* (every triangle: the chip sets them up) */
+    s->tris_tnl = tnl_tris;
     s->mem_used = dgl_vram_used();
 }
 

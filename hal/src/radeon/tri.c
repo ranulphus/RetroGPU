@@ -215,6 +215,8 @@ static void prim(uint32_t type, const radeon_vertex *const *v, int nv)
     int n = 0, i;
     if (!vfmt)
         radeon_3d_format(vwhat);
+    if (radeon_tcl_is_on())
+        radeon_tcl_on(0);               /* (window-space vertices after the engine's: its words off) */
     if (radeon_3d_dirty || !mode3d || !known)
         radeon_3d_emit();
     if (radeon_cp_running()) {

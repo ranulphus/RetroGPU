@@ -27,6 +27,7 @@ typedef struct {
     float max_lod_bias;             /* GL_EXT_texture_lod_bias: biases within +-this; 0: none (not advertised) */
     int dot3;                       /* GL_ARB_texture_env_dot3's combines (with two units or more) */
     int cube;                       /* GL_ARB_texture_cube_map (the back end draws dgl_unit_cube's) */
+    int hw_tnl;                     /* draws go through the card's transform engine (GL_DGL_hw_tnl; DGL_TNL=0: no) */
 } dgl_caps;
 void dgl_get_caps(dgl_caps *c);     /* ext.c: the back end's caps, zeroed first and made consistent */
 
@@ -34,6 +35,7 @@ void dgl_get_caps(dgl_caps *c);     /* ext.c: the back end's caps, zeroed first 
 typedef struct {
     uint32_t tris;                  /* triangles set up by the CPU */
     uint32_t tris_offloaded;        /* ... and by the card's own setup (the WARP) */
+    uint32_t tris_tnl;              /* of those, transformed by the card too (the Radeons' engine, X3) */
     uint32_t mem_used;              /* texture memory in use (bytes) */
 } dgl_be_stats;
 

@@ -225,6 +225,8 @@ static const char *extensions(void)
             strcat(buf, "GL_ARB_texture_env_dot3 ");
         if (c.cube)
             strcat(buf, "GL_ARB_texture_cube_map GL_EXT_texture_cube_map ");
+        if (c.hw_tnl)
+            strcat(buf, "GL_DGL_hw_tnl ");
         if (c.max_anisotropy > 1.0f)
             strcat(buf, "GL_EXT_texture_filter_anisotropic ");
         if (c.max_lod_bias > 0.0f)

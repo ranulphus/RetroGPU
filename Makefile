@@ -25,7 +25,7 @@ HAL_OW_RG  := hal/src/rg/log.c hal/src/rg/tnt2.c hal/src/tnt2/tnt2.c \
               hal/src/rg/r128.c hal/src/r128/chip.c hal/src/r128/engine2d.c hal/src/r128/cursor.c hal/src/r128/cce.c \
               hal/src/r128/tri.c hal/src/r128/cce_ucode.c \
               hal/src/rg/radeon.c hal/src/radeon/chip.c hal/src/radeon/engine2d.c hal/src/radeon/cursor.c \
-              hal/src/radeon/tri.c hal/src/radeon/cp.c hal/src/radeon/cp_ucode.c
+              hal/src/radeon/tri.c hal/src/radeon/cp.c hal/src/radeon/cp_ucode.c hal/src/radeon/tcl.c
 HAL_OW     := $(HAL_COMMON) $(HAL_OW_RG) hal/port/ow_dos4g.c
 HAL_DJGPP  := $(HAL_COMMON) hal/port/djgpp.c
 HAL_HOST   := $(HAL_COMMON) hal/port/host.c
@@ -112,7 +112,7 @@ build/djgpp/libr128.a: $(R128_SRCS:%.c=build/djgpp/%.o)
 	$(DJAR) rcs $@ $^
 # The ATI Radeon (docs/radeon.md): its register layer, a library of its own as the Rage 128's.
 RADEON_SRCS := hal/src/radeon/chip.c hal/src/radeon/engine2d.c hal/src/radeon/cursor.c hal/src/radeon/tri.c \
-               hal/src/radeon/cp.c hal/src/radeon/cp_ucode.c
+               hal/src/radeon/cp.c hal/src/radeon/cp_ucode.c hal/src/radeon/tcl.c
 build/djgpp/libradeon.a: $(RADEON_SRCS:%.c=build/djgpp/%.o)
 	@rm -f $@
 	$(DJAR) rcs $@ $^

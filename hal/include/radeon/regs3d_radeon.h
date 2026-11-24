@@ -601,4 +601,45 @@
 #define RADEON_AUX_SC_CNTL                  0x1660
 #define     RADEON_ZBLOCK16                 (1u << 15)      /* (RB3D_CNTL: the DRM's radeon_drv.h) */
 
+
+/* The transform engine's (tcl.c; X.org's radeon_reg.h) */
+#define     RADEON_TCL_VTX_W0                 (1u <<  0)
+#define     RADEON_TCL_VTX_PK_DIFFUSE         (1u <<  3)
+#define     RADEON_TCL_VTX_PK_SPEC            (1u <<  6)
+#define     RADEON_TCL_VTX_ST0                (1u <<  7)
+#define     RADEON_TCL_VTX_ST1                (1u <<  8)
+#define     RADEON_TCL_VTX_Q1                 (1u <<  9)
+#define     RADEON_TCL_VTX_ST2                (1u << 10)
+#define     RADEON_TCL_VTX_Q2                 (1u << 11)
+#define     RADEON_TCL_VTX_Q0                 (1u << 14)
+#define     RADEON_TCL_VTX_Z0                 (1u << 31)
+#define     RADEON_TCL_COMPUTE_XYZW           (1u << 0)
+#define     RADEON_TCL_COMPUTE_DIFFUSE        (1u << 1)
+#define     RADEON_TCL_COMPUTE_SPECULAR       (1u << 2)
+#define     RADEON_TCL_TEX_0_OUTPUT_SHIFT     16      /* (each output's input: 0..3 a vertex's, 8..10 computed) */
+#define     RADEON_TCL_TEX_1_OUTPUT_SHIFT     20
+#define     RADEON_TCL_TEX_2_OUTPUT_SHIFT     24
+#define     RADEON_UCP_IN_CLIP_SPACE          (1u << 0)
+#define     RADEON_UCP_ENABLE_0               (1u << 2)
+#define     RADEON_TCL_FOG_LINEAR             (3u << 8)
+#define     RADEON_LIGHT_TWOSIDE              (1u << 11)
+#define     RADEON_CULL_FRONT_IS_CCW          (1u << 28)
+#define     RADEON_CULL_FRONT                 (1u << 29)
+#define     RADEON_CULL_BACK                  (1u << 30)
+/* (the vertex control's formats for arrays: CP_VC_FRMT_*) */
+#define     RADEON_CP_VC_FRMT_W0              0x00000001u
+#define     RADEON_CP_VC_FRMT_PKCOLOR         0x00000008u
+#define     RADEON_CP_VC_FRMT_ST0             0x00000080u
+#define     RADEON_CP_VC_FRMT_ST1             0x00000100u
+#define     RADEON_CP_VC_FRMT_Q1              0x00000200u
+#define     RADEON_CP_VC_FRMT_Q0              0x00004000u
+#define     RADEON_CP_VC_FRMT_N0              0x00040000u
+#define     RADEON_CP_VC_FRMT_Z               0x80000000u
+#define     RADEON_PRIM_POINT                 0x1u
+#define     RADEON_PRIM_LINE                  0x2u
+#define     RADEON_PRIM_LINE_STRIP            0x3u
+#define     RADEON_PRIM_TRI_LIST              0x4u
+#define     RADEON_PRIM_TRI_FAN               0x5u
+#define     RADEON_PRIM_TRI_STRIP             0x6u
+
 #endif
