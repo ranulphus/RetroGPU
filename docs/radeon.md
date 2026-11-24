@@ -128,6 +128,32 @@ reference, the mean error 2.2. Three to seven pixels a frame are far off: each l
 places that repeat from run to run (near 340,322 and 358,297). That is the card's memory fault, not the layer; the
 test lists them (`DTRI0-PIX`) and judges the colours by the 999th pixel in 1,000.
 
+### The scenes: DTRI (2026-11-24)
+
+`DTRI` is RTRI's scenes and reference (OpenGL's rules worked out in the test) through this path. On the P3 all 13
+pass on two seeds: random, mesh and zbuf with no pixel of coverage off; blend; and nine textured cases (nearest,
+linear, perspective, mipmapped, modulated, 8888, blended by the texel's alpha, fogged), each with 0 to 83 pixels
+off of 35,000 to 81,000. What it settled:
+
+- **Perspective needs `TXFORMAT`'s `PERSPECTIVE_ENABLE`** (bit 31). Without it a unit maps its texture affinely
+  whatever the vertices' 1/w say (37,966 of 41,566 pixels off). `radeon_3d_init` sets it on every unit.
+- **The vertex format that works:** x and y in window coordinates, z in [0, 1], the fourth coordinate 1/w
+  (`SE_COORD_FMT` = `XY_PRE_MULT_1_OVER_W0 | Z_PRE_MULT_1_OVER_W0`), s and t as OpenGL's: the chip multiplies them by
+  1/w and divides at each pixel. Mesa never uses this combination with textures (it sends unprojected coordinates
+  and lets the chip divide), so this was not known from the sources.
+- **Mipmap levels in memory:** one after another from `PP_TXOFFSET`, each starting on a 32-byte boundary, a level
+  narrower than 32 bytes with its rows padded to 32 (Mesa's `radeonSetTexImages`). Each level alone matched.
+- **Which level the chip takes** (`DMIP`: one-colour levels, footprints swept by scale and angle): the largest single
+  derivative of the four (not OpenGL's length of the longer axis), with the level changing at 1.5 times a power of
+  two. With that rule in the reference, tex-mip is 15 to 36 pixels off of about 47,000; with OpenGL's, 2,246 to
+  10,939. The Rage 128 used the same derivative and switched at 1.41.
+- **The combiner** computes A x B + C: the texel alone is C = texel; modulate is A = texel, B = the vertex's colour.
+- **Fog** is the specular colour's alpha (255: none) with `PP_FOG_COLOR`'s `FOG_VERTEX | FOG_USE_SPEC_ALPHA`.
+- **Textures were written by the CPU** with the engine idle, then `radeon_vram_written`; no texture cache needed a
+  flush between textures at the same address.
+
+Still to do in RD2: the same scenes at 8888 with a 24-bit Z and stencil; the alpha test; the second and third units.
+
 ## The rest of the family: the RV200 (Radeon 7500) and the first Radeon (R100)
 
 A Radeon 7500 LE (RV200) is to follow this card. What the references say differs, gathered here so it isn't
@@ -139,10 +165,9 @@ researched twice. Only the RV100 has been on a bench; the rest of this section i
 | Transform and lighting engine | no | yes | yes |
 | Hierarchical Z, Z compression, fast Z clear | no | yes | yes |
 | PLL erratum | 5 ms after each data access | two dummy reads after each index write | none listed |
-| Stencil | sound | sound | a fault in some operations (Mesa falls back) |
+| Stencil | no fault listed | no fault listed | a fault in some operations (Mesa falls back) |
 | CP microcode | `R100_cp_microcode` | the same | the same |
 | Texture units | 3 | 3 | 3 |
-| Display controllers | 1 on this card (bandwidth limit in X) | 2 | 1 |
 
 - **The layer already knows them:** `radeon_find` takes the eight desktop IDs, and `radeon.flags` carries
   `RADEON_HAS_TCL`, `RADEON_HAS_HIERZ`, `RADEON_PLL_DELAY`, `RADEON_PLL_DUMMYREADS` and `RADEON_BROKEN_STENCIL`.

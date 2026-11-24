@@ -67,7 +67,8 @@ void radeon_3d_init(uint32_t color_off, int pitch_bytes, int bpp, uint32_t z_off
                              RADEON_BLEND_CTL_ADD | RADEON_SCALE_1X | RADEON_CLAMP_TX;
         c->tex[i].txablend = RADEON_ALPHA_ARG_A_ZERO | RADEON_ALPHA_ARG_B_ZERO | RADEON_ALPHA_ARG_C_CURRENT_ALPHA |
                              RADEON_BLEND_CTL_ADD | RADEON_SCALE_1X | RADEON_CLAMP_TX;
-        c->tex[i].txformat = RADEON_TXFORMAT_RGB565 | (uint32_t)i << 24;        /* (ST_ROUTE_STQn) */
+        /* (ST_ROUTE_STQn; without PERSPECTIVE_ENABLE a unit maps its texture affinely whatever 1/w says: DTRI) */
+        c->tex[i].txformat = RADEON_TXFORMAT_RGB565 | (uint32_t)i << 24 | RADEON_TXFORMAT_PERSPECTIVE_ENABLE;
     }
     if (zbits)
         c->rb3d_cntl |= RADEON_Z_ENABLE;
