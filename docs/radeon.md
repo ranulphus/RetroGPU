@@ -66,6 +66,45 @@ GPL code is not used. 86Box has no Radeon: the card is the only judge.
 - **PLLs** (15 read, the chip answering after each): PPLL_REF_DIV 3c, PPLL_DIV_0-3 0007029f, 000702f3, 000301c0,
   000301f7, M_SPLL_REF_FB_DIV 014a4a0c, MCLK_CNTL 0a350012.
 
+## RD1: the register layer and the 2D engine (2026-11-24)
+
+The plan (RD1 to RD7) was approved on 2026-11-23. `hal/include/radeon/`, `hal/src/radeon/{chip,engine2d,cursor}.c`,
+made from the Rage 128's layer.
+
+- **The 2D engine's registers are the Rage 128's at the same offsets** (66 of the 66 names the two headers share
+  have equal values). What differs: the status (RBBM_STATUS: 64 FIFO entries, bit 31 active), the reset
+  (RBBM_SOFT_RESET's engine bits and HOST_PATH_CNTL's, X.org's RADEONEngineReset without its PLL accesses), the
+  caches (RB3D_DSTCACHE_CTLSTAT and the 2D engine's RB2D_DSTCACHE_CTLSTAT; DSTCACHE_CTLSTAT and WAIT_UNTIL's
+  2D-idle-and-clean in the queue before each operation changes the 2D state, as X.org's set-ups do), and the
+  pitch-and-offset word: the pitch in 64-byte units at bit 22, the offset in 1 KB units from the frame buffer's
+  place in the chip's own address space (MC_FB_LOCATION's start: 0 here). So surfaces' pitches are multiples of 64
+  bytes; what is below 1 KB of an offset goes into x.
+- **`DTWOD`** (RTWOD's twin, against `tests/hal/sw2d.c`): at 16 bits with 20 mixed operations every case byte-exact
+  first time (fills, copies, copies between surfaces, colour expansion, images). The full run fails a few cases by
+  a few pixels, and every one of those traces to the card's memory, below.
+
+### This card's memory is faulty (the P3's RV100, 2026-11-24)
+
+`DMEM` (`tests/radeon/dmem.c`): the BIOS's 640x480x16 mode and nothing else (no engine set-up, no reset; after a
+fresh `glos reboot` too), a pattern written through the frame buffer window and read back.
+
+- **Megabytes 2 to 15 and 34 to 47 of the 64 read back wrong:** 8% of the dwords in megabyte 2, rising to 24%, then
+  18% to megabyte 15; the same again from 34 to 47. Megabytes 0-1, 16-33 and 48-63: none wrong in two whole
+  passes, and none over 32 seconds. Stable from read to read: not decay.
+- **Only 8 data bits are ever wrong:** bits 18, 19, 21, 22 and 24 to 27 of every second dword (mask 0f6c0000 of the
+  even dwords; the odd ones never). One value everywhere (FFFFFFFF, 0, AAAA5555) reads back right.
+- **Those bits come from 128 KB further on:** of 60 wrong dwords sampled, all 60 hold, in those 8 bits, what was
+  written 32,768 dwords later. Two addresses 128 KB apart share the cells for those bits: an address line to the
+  memory chip behind them that doesn't reach it (or a fault inside the chip). No register setting does that to 8
+  bits of 64.
+- **The chip's own engine sees it too:** a bad megabyte copied to a clean one by the 2D engine carries the same wrong
+  dwords; clean data copied into a bad megabyte comes back wrong in the same places.
+- **And a little of it below 1 MB under repeated writes:** DTWOD's remaining failures are the same 2 to 9 pixels
+  each run (8 bits: the screen at 505-507, 274-280; 16 bits: at 410-411, 241-257), bits lost, in memory (read
+  again four ways: the same), 128 KB apart from each other.
+- **So:** a hardware fault on this card, there from power-on, nothing of the layer's. In Windows it would show
+  as wrong pixels in textures and in high-resolution or deep-colour desktops (640x480 at 16 bits lives below 1 MB).
+
 ## Next
 
-The plan (RD1 on): the owner's approval first.
+RD1's rest (DFLIP watched, the cursor with the device), then RD2: the owner's word first on this card's memory.

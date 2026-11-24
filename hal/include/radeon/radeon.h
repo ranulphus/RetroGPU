@@ -1,0 +1,88 @@
+/* radeon.h - RetroGPU's ATI Radeon (R100 family) register layer (docs/radeon.md, step RD1): finding and mapping the
+ * chip, modes through its VBE 2.0 BIOS with the linear window, the display start and pitch, the cursor, and the 2D
+ * engine by register writes. The Rage 128's layer (r128/r128.h), from which it is made: the same calls, so the
+ * device level (rg_device) puts either behind one interface. Port-neutral: only mga/sys.h's platform calls. */
+#ifndef RADEON_RADEON_H
+#define RADEON_RADEON_H
+#include <stdint.h>
+
+typedef struct {
+    int      bus, dev;
+    uint16_t device_id;
+    uint8_t  revision;
+    uint32_t fb_phys;                   /* the frame buffer's window (BAR0) */
+    uint32_t mmio_phys;                 /* the registers (BAR2, 64 KB) */
+    uint32_t vram_bytes;                /* CONFIG_MEMSIZE (64 MB on the P3's) */
+    uint32_t fb_location;               /* where the chip's engines see the frame buffer (MC_FB_LOCATION's start) */
+    volatile uint8_t *fb;               /* the linear framebuffer, vram_bytes */
+    volatile uint8_t *mmio;             /* the registers */
+} radeon_chip;
+extern radeon_chip radeon;              /* the one Radeon this layer drives */
+
+/* chip.c */
+int  radeon_find(void);                 /* 0: an ATI display device on PCI (bus 0-3); fills radeon's PCI fields */
+int  radeon_map(void);                  /* 0: registers and framebuffer mapped, the memory size read */
+void radeon_unmap(void);
+uint32_t radeon_rd(uint32_t off);
+void     radeon_wr(uint32_t off, uint32_t v);
+/* After the CPU wrote video memory the chip will read: the CPU's write-combining buffers out (a locked instruction),
+ * the last dword written (at offset last) read back, and the chip's destination cache flushed (the Rage 128 kept
+ * the host's last written lines in its cache: docs/rage128.md, bench A). */
+void     radeon_vram_written(uint32_t last);
+/* A PLL register read through the clock index, then the 5 ms the RV100 needs after every PLL access (X.org's
+ * CHIP_ERRATA_PLL_DELAY: "the chip could hang on a subsequent access"). No PLL writes in this layer. */
+uint32_t radeon_pll_rd(int index);
+
+typedef struct {
+    uint16_t mode, width, height, bpp, pitch_bytes;
+} radeon_mode;
+/* The BIOS's linear graphics modes at 8 (palettized), 15, 16 or 32 bits (15 when a 16-bit mode has 5 green bits):
+ * their count, up to max into out; one of exactly w x h x bpp: 0, or -1. */
+int  radeon_list_modes(radeon_mode *out, int max);
+int  radeon_find_mode(int w, int h, int bpp, radeon_mode *out);
+/* The mode set by the BIOS with its linear window, then the 2D engine reset and set up for it: 0, or -1. */
+int  radeon_set_mode(const radeon_mode *m);
+void radeon_text_mode(void);
+extern int radeon_mode_bpp;             /* the mode's bits a pixel: 8, 15, 16 or 32 */
+
+/* The display: the first byte shown (a multiple of 8, from the next frame), the rows' length in bytes (a multiple
+ * of 8 pixels), and the wait for the start of the next vertical retrace (0, or -1 on time-out). */
+int  radeon_set_start(uint32_t byte_off);
+int  radeon_set_pitch(int pitch_bytes);
+int  radeon_vsync_wait(uint32_t timeout_us);
+/* Gamma: in 16- and 32-bit modes the DAC looks each component up in its 256-entry palette (as the Rage 128's); one
+ * ramp for the three, 8-bit entries (DAC_8BIT_EN). radeon_ramp_off: the DAC as it was before the first ramp. */
+void radeon_set_ramp(const uint8_t ramp[256]);
+void radeon_ramp_off(void);
+
+/* engine2d.c: the 2D engine. Coordinates are pixels of the target, any value; the clip (inclusive-exclusive,
+ * within the target) trims everything drawn, in software. Colours are pixel values in the target's format. */
+int  radeon_sync(uint32_t timeout_us);  /* 0 when the engine is idle and its cache flushed, -1 on time-out */
+int  radeon_idle(void);                 /* 1: the engine is idle now */
+void radeon_engine_reset(void);         /* (X.org's RADEONEngineReset, without its PLL accesses) */
+/* The target: its first pixel at off in VRAM, pitch_bytes apart (a multiple of 64 bytes: the engine's unit), bpp 8,
+ * 15, 16 or 32. The engine places a surface in 1 KB steps: the rest of off goes into x. */
+void radeon_set_target(uint32_t off, int pitch_bytes, int bpp);
+void radeon_set_clip(int x0, int y0, int x1, int y1);
+void radeon_fill(int x, int y, int w, int h, uint32_t value);
+void radeon_copy(int sx, int sy, int dx, int dy, int w, int h);  /* within the target; the two may overlap */
+/* From another surface in VRAM of the target's depth (its pitch a multiple of 64 bytes). */
+void radeon_copy_from(uint32_t src_off, int src_pitch_bytes, int sx, int sy, int dx, int dy, int w, int h);
+/* One-bit pixels from the CPU: rows stride bytes apart, the leftmost pixel in bit 7 of a row's first byte; a set
+ * bit draws fg, a clear one bg, or leaves the pixel with RADEON_MONO_TRANSPARENT. */
+#define RADEON_MONO_TRANSPARENT 1u
+void radeon_mono(int x, int y, int w, int h, const uint8_t *bits, int stride, uint32_t fg, uint32_t bg, unsigned flags);
+/* Pixels from the CPU in the target's format, rows stride bytes apart, written through the frame buffer window
+ * with the engine idle. */
+void radeon_image(int x, int y, int w, int h, const void *px, int stride);
+
+/* cursor.c: the hardware cursor (64 x 64), as the Rage 128 layer's: the AND and XOR masks, rows of 8 bytes, the
+ * leftmost pixel in bit 7; stored at off (a multiple of 16); colours 0xRRGGBB; radeon_cursor_move takes the image's
+ * top left corner, as far as 63 pixels off the top or the left. */
+#define RADEON_CURSOR_BYTES 1024u
+int  radeon_cursor_load(uint32_t off, const uint8_t and_mask[512], const uint8_t xor_mask[512]);
+void radeon_cursor_colours(uint32_t c0, uint32_t c1);
+void radeon_cursor_show(int on);
+void radeon_cursor_move(int x, int y);
+
+#endif

@@ -107,6 +107,11 @@ R128_SRCS := hal/src/r128/chip.c hal/src/r128/engine2d.c hal/src/r128/cursor.c h
 build/djgpp/libr128.a: $(R128_SRCS:%.c=build/djgpp/%.o)
 	@rm -f $@
 	$(DJAR) rcs $@ $^
+# The ATI Radeon (docs/radeon.md): its register layer, a library of its own as the Rage 128's.
+RADEON_SRCS := hal/src/radeon/chip.c hal/src/radeon/engine2d.c hal/src/radeon/cursor.c
+build/djgpp/libradeon.a: $(RADEON_SRCS:%.c=build/djgpp/%.o)
+	@rm -f $@
+	$(DJAR) rcs $@ $^
 # The Riva TNT2 (docs/tnt2.md): its register layer, a library of its own as the ViRGE's is.
 TNT2_SRCS := hal/src/tnt2/tnt2.c
 build/djgpp/libtnt2.a: $(TNT2_SRCS:%.c=build/djgpp/%.o)
@@ -141,6 +146,10 @@ DJ_SRC_RPROBE := tests/r128/rprobe.c
 # The ATI Radeon 7000 / VE (docs/radeon.md): DPROBE (RD0: PCI and AGP, the configuration, memory, CRTC, engine and
 # command processor registers, the PLLs with the RV100's 5 ms, the BIOS's modes; reads only).
 DJ_SRC_DPROBE := tests/radeon/dprobe.c
+# DTWOD (RD1: the 2D engine against sw2d.c at 8, 16 and 32 bits) and DFLIP (when the start is taken, watched).
+DJ_SRC_DTWOD := tests/radeon/dtwod.c tests/hal/sw2d.c build/djgpp/libradeon.a
+DJ_SRC_DFLIP := tests/radeon/dflip.c build/djgpp/libradeon.a
+DJ_SRC_DMEM := tests/radeon/dmem.c build/djgpp/libradeon.a
 # RTWOD (R1: the 2D engine against sw2d.c at 8, 16 and 32 bits) and RFLIP (when the start is taken, watched).
 DJ_SRC_RTWOD := tests/r128/rtwod.c tests/hal/sw2d.c build/djgpp/libr128.a
 DJ_SRC_RFLIP := tests/r128/rflip.c build/djgpp/libr128.a
@@ -183,6 +192,10 @@ build/djgpp/NSHOW.EXE: tests/tnt2/nshow.c build/djgpp/libtnt2.a
 build/djgpp/STEAL.EXE: tests/tnt2/steal.c
 build/djgpp/RPROBE.EXE: tests/r128/rprobe.c
 build/djgpp/DPROBE.EXE: tests/radeon/dprobe.c
+build/djgpp/DTWOD.EXE: tests/radeon/dtwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libradeon.a
+build/djgpp/DTWOD.EXE: DJ_CFLAGS += -Itests/hal
+build/djgpp/DFLIP.EXE: tests/radeon/dflip.c build/djgpp/libradeon.a
+build/djgpp/DMEM.EXE: tests/radeon/dmem.c build/djgpp/libradeon.a
 build/djgpp/RTWOD.EXE: tests/r128/rtwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libr128.a
 build/djgpp/RTWOD.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/RFLIP.EXE: tests/r128/rflip.c build/djgpp/libr128.a
