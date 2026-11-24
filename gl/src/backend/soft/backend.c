@@ -256,6 +256,8 @@ static void stage_for(soft_stage *st, int unit, int on)
         return;
     st->tex = tx;
     st->coord = unit;
+    st->lod_bias = dgl_tex_lod_bias(unit);
+    st->aniso = dgl_tex_aniso(t);
     env_stage(st, dgl_tex_env(unit), t->level[0].ifc);
 }
 
@@ -498,6 +500,8 @@ static void caps(dgl_caps *c)
     c->renderer = "Software";
     c->texture_units = 2;
     c->max_texture_size = 1024;
+    c->max_anisotropy = 16;                     /* (the reference span's soft_sample) */
+    c->max_lod_bias = 15;
 }
 
 static void synced(void) { }

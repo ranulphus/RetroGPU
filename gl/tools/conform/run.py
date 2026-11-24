@@ -116,6 +116,17 @@ def run_ref(test, out):
         png.write_png(p[:-4] + ".png", w, h, rgb)
 
 
+def skipped(out):
+    """The test's CT-SKIP line, if it skipped itself (a feature the renderer doesn't advertise) and saved no frames."""
+    if glob.glob(os.path.join(out, "*.png")):
+        return None
+    for f in glob.glob(os.path.join(out, "*.log")):
+        for line in open(f, errors="replace"):
+            if "CT-SKIP" in line:
+                return line.strip()
+    return None
+
+
 def check(test, card, pc=None):
     out = os.path.join(ROOT, "out", "conform", pc or card, test)
     ref = os.path.join(ROOT, "out", "conform", "ref", test)
@@ -138,6 +149,10 @@ def check(test, card, pc=None):
         res = run_dos(test, card, out)
     report = {"test": test, "card": res.get("card", card) if pc else card, "run": res["status"], "frames": {}}
     ok = res["status"] == "PASS"
+    if ok and skipped(out):                     # (a feature this card doesn't advertise: ct_has, CT-SKIP)
+        report.update(run="SKIPPED", ok=True, why=skipped(out))
+        json.dump(report, open(os.path.join(out, "check.json"), "w"), indent=1)
+        return report
     for rp in sorted(glob.glob(os.path.join(ref, "*.png"))):
         name = os.path.basename(rp)[:-4]
         got = os.path.join(out, name + ".png")

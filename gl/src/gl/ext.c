@@ -7,16 +7,31 @@
 #include "../backend/backend.h"
 #include <string.h>
 
-/* (kept for the device and back end it was asked of: glMultiTexCoord asks it each call, GLQuake's world thousands
- * of times a frame) */
+/* The back end's caps, zeroed first and made consistent; kept for the device and back end they were asked of
+ * (glMultiTexCoord asks for the units each call, GLQuake's world thousands of times a frame). */
+void dgl_get_caps(dgl_caps *out)
+{
+    static const void *be, *dev;
+    static dgl_caps c;
+    if (be != (const void *)dgl_be || dev != (const void *)dgl_dev) {
+        memset(&c, 0, sizeof c);
+        dgl_be->caps(&c);
+        if (!(c.max_anisotropy >= 1.0f))
+            c.max_anisotropy = 1.0f;
+        if (!(c.max_lod_bias >= 0.0f))
+            c.max_lod_bias = 0.0f;
+        be = dgl_be, dev = dgl_dev;
+    }
+    *out = c;
+}
+
 int dgl_texture_units(void)
 {
     static const void *be, *dev;
     static int n;
     if (be != (const void *)dgl_be || dev != (const void *)dgl_dev) {
         dgl_caps c;
-        memset(&c, 0, sizeof c);
-        dgl_be->caps(&c);
+        dgl_get_caps(&c);
         n = c.texture_units;
         be = dgl_be, dev = dgl_dev;
     }

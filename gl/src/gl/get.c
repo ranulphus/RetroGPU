@@ -16,7 +16,7 @@ static int query(GLenum p, double *v)
     case GL_MATRIX_MODE: v[0] = dgl_gl.matrix_mode; return 1;
     case GL_VIEWPORT: for (i = 0; i < 4; i++) v[i] = dgl_gl.viewport[i]; return 4;
     case GL_SCISSOR_BOX: for (i = 0; i < 4; i++) v[i] = dgl_gl.scissor[i]; return 4;
-    case GL_MAX_TEXTURE_SIZE: { dgl_caps c; dgl_be->caps(&c); v[0] = c.max_texture_size; return 1; }
+    case GL_MAX_TEXTURE_SIZE: { dgl_caps c; dgl_get_caps(&c); v[0] = c.max_texture_size; return 1; }
     case GL_MAX_MODELVIEW_STACK_DEPTH: v[0] = DGL_MV_DEPTH; return 1;
     case GL_MAX_PROJECTION_STACK_DEPTH: v[0] = DGL_PROJ_DEPTH; return 1;
     case GL_MAX_TEXTURE_STACK_DEPTH: v[0] = DGL_TEX_DEPTH; return 1;
@@ -114,7 +114,8 @@ static int query(GLenum p, double *v)
     case GL_MAX_CLIP_PLANES: v[0] = 6; return 1;
     case GL_MAX_ATTRIB_STACK_DEPTH: case GL_MAX_CLIENT_ATTRIB_STACK_DEPTH: v[0] = 16; return 1;
     case GL_MAX_TEXTURE_UNITS_ARB: { extern int dgl_texture_units(void); v[0] = dgl_texture_units(); return 1; }
-    case GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT: v[0] = 1; return 1;
+    case GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT: { dgl_caps c; dgl_get_caps(&c); v[0] = c.max_anisotropy; return 1; }
+    case GL_MAX_TEXTURE_LOD_BIAS_EXT: { dgl_caps c; dgl_get_caps(&c); v[0] = c.max_lod_bias; return 1; }
     default: return dgl_buffer_query(p, v);     /* buffer bindings, element limits (buffer.c) */
     }
     for (i = 0; i < 16; i++)
@@ -170,22 +171,30 @@ void APIENTRY glGetBooleanv(GLenum p, GLboolean *out)
         out[i] = v[i] != 0.0;
 }
 
-/* Every name ends in a space, as programs that search for "NAME " expect.
- * Buffer objects and draw_range_elements everywhere (buffer.c); multitexture
- * and the combiner's subset of texture_env_combine where there are two
- * texture units (combine.c). */
+/* Every name ends in a space, as programs that search for "NAME " expect. Buffer objects and draw_range_elements
+ * everywhere (buffer.c); multitexture and texture_env_combine where there are two texture units (the combiners);
+ * the rest as the card's caps say (dgl_get_caps). Built again when the back end or device changes. */
 static const char *extensions(void)
 {
-    return dgl_texture_units() == 2 ? "GL_EXT_bgra "
-                              "GL_EXT_texture_edge_clamp GL_SGIS_texture_edge_clamp "
-                              "GL_EXT_paletted_texture GL_EXT_shared_texture_palette "
-                              "GL_ARB_vertex_buffer_object GL_EXT_draw_range_elements "
-                              "GL_ARB_multitexture GL_SGIS_multitexture "
-                              "GL_ARB_texture_env_combine GL_EXT_texture_env_combine "
-                            : "GL_EXT_bgra "
-                              "GL_EXT_texture_edge_clamp GL_SGIS_texture_edge_clamp "
-                              "GL_EXT_paletted_texture GL_EXT_shared_texture_palette "
-                              "GL_ARB_vertex_buffer_object GL_EXT_draw_range_elements ";
+    static char buf[1024];
+    static const void *be, *dev;
+    if (be != (const void *)dgl_be || dev != (const void *)dgl_dev || !buf[0]) {
+        dgl_caps c;
+        dgl_get_caps(&c);
+        strcpy(buf, "GL_EXT_bgra "
+                    "GL_EXT_texture_edge_clamp GL_SGIS_texture_edge_clamp "
+                    "GL_EXT_paletted_texture GL_EXT_shared_texture_palette "
+                    "GL_ARB_vertex_buffer_object GL_EXT_draw_range_elements ");
+        if (c.texture_units >= 2)
+            strcat(buf, "GL_ARB_multitexture GL_SGIS_multitexture "
+                        "GL_ARB_texture_env_combine GL_EXT_texture_env_combine ");
+        if (c.max_anisotropy > 1.0f)
+            strcat(buf, "GL_EXT_texture_filter_anisotropic ");
+        if (c.max_lod_bias > 0.0f)
+            strcat(buf, "GL_EXT_texture_lod_bias ");
+        be = dgl_be, dev = dgl_dev;
+    }
+    return buf;
 }
 
 const GLubyte *APIENTRY glGetString(GLenum name)
@@ -195,7 +204,7 @@ const GLubyte *APIENTRY glGetString(GLenum name)
     case GL_VENDOR: return (const GLubyte *)"DOS-GL";
     case GL_RENDERER:
         dgl_caps c;
-        dgl_be->caps(&c);
+        dgl_get_caps(&c);
         snprintf(renderer, sizeof renderer, "DOS-GL on %s", c.renderer);
         return (const GLubyte *)renderer;
     case GL_VERSION: return (const GLubyte *)"1.1 DOS-GL 0.3";

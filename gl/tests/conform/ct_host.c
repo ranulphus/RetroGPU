@@ -36,6 +36,16 @@ void ct_log(const char *fmt, ...)
     putchar('\n');
 }
 
+void ct_check(const char *name, int ok, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    printf("check %s %s ", name, ok ? "ok" : "not ok (the reference: not judged)");
+    vprintf(fmt, ap);
+    putchar('\n');
+    va_end(ap);
+}
+
 int main(void)
 {
     /* RGBA8 with a 16-bit depth buffer, as DOS-GL's context. */

@@ -15,14 +15,18 @@
 #include "../gl/gl_state.h"
 #include "../gl/gl_tex.h"
 
-/* What glGet and the extensions report. */
+/* What glGet and the extensions report. The caller zeroes the struct before caps (dgl_get_caps does), so a back
+ * end leaves alone what its card can't do. */
 typedef struct {
     const char *renderer;           /* GL_RENDERER's chip ("DOS-GL on ...") */
     int texture_units;              /* 1, or 2 */
     int max_texture_size;
     int sub_narrow;                 /* glTexSubImage2D tells tex_sub only the texels that changed (0: the rectangle
-                                     * given); the caller zeroes the struct before caps */
+                                     * given) */
+    float max_anisotropy;           /* GL_EXT_texture_filter_anisotropic's limit; 0 or 1: none (not advertised) */
+    float max_lod_bias;             /* GL_EXT_texture_lod_bias: biases within +-this; 0: none (not advertised) */
 } dgl_caps;
+void dgl_get_caps(dgl_caps *c);     /* ext.c: the back end's caps, zeroed first and made consistent */
 
 /* The back end's counters (DGL_STATS, DGL_FRAMES). */
 typedef struct {

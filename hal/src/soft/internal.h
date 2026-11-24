@@ -13,7 +13,7 @@ typedef struct {
     int border8[4];                     /* GL_CLAMP's border colour, 0..255 */
 } soft_pick;
 
-void soft_pick_lod(const soft_texture *tx, double dsdx, double dsdy, double dtdx, double dtdy, soft_pick *p);
+void soft_pick_lod(const soft_texture *tx, double bias, double dsdx, double dsdy, double dtdx, double dtdy, soft_pick *p);
 
 /* The texel at (U, V), level-0 texels in 16.16 (texel centres at halves),
  * as p picked; RGBA 0..255. GL_REPEAT (power-of-two sizes), GL_CLAMP_TO_EDGE,

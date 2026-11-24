@@ -594,6 +594,32 @@ static rtex *unit_words(dgl_texture *t, int hw, int gl_unit)
     default: min = RADEON_MIN_FILTER_NEAREST; break;
     }
     n = mip ? x->levels : 1;
+    {
+        /* Anisotropic filtering: the chip's own minifying filters (Mesa's radeonSetTexFilter: they keep the
+         * mipmap choice, not the bilinear one) and its ratio, the next one up (2, 4, 8, 16). */
+        GLfloat a = dgl_tex_aniso(t);
+        if (a > 1.0f) {
+            int linear = t->min_filter == GL_LINEAR || t->min_filter == GL_LINEAR_MIPMAP_NEAREST ||
+                         t->min_filter == GL_LINEAR_MIPMAP_LINEAR;
+            if (!mip)
+                min = linear ? RADEON_MIN_FILTER_ANISO_LINEAR : RADEON_MIN_FILTER_ANISO_NEAREST;
+            else if (t->min_filter == GL_NEAREST_MIPMAP_LINEAR || t->min_filter == GL_LINEAR_MIPMAP_LINEAR)
+                min = RADEON_MIN_FILTER_ANISO_NEAREST_MIP_LINEAR;
+            else
+                min = RADEON_MIN_FILTER_ANISO_NEAREST_MIP_NEAREST;
+            min |= a <= 2.0f ? RADEON_MAX_ANISO_2_TO_1 : a <= 4.0f ? RADEON_MAX_ANISO_4_TO_1
+                 : a <= 8.0f ? RADEON_MAX_ANISO_8_TO_1 : RADEON_MAX_ANISO_16_TO_1;
+        }
+    }
+    {
+        /* The level-of-detail bias: signed 8 bits, -128 for -1.0 and 127 for +4.0 (Mesa's radeonTexEnv: two
+         * scales, a 128th of a level below 0 and a 32nd above; measured on the P3 by DMIP bias=). GL's biases
+         * below -1 are drawn at -1. */
+        GLfloat b = dgl_tex_lod_bias(gl_unit);
+        int f = b > 0 ? (int)(b * (127.0f / 4.0f) + 0.5f) : (int)(b * 128.0f - 0.5f);
+        f = f > 127 ? 127 : f < -128 ? -128 : f;
+        min |= (uint32_t)(uint8_t)f << RADEON_LOD_BIAS_SHIFT;
+    }
     radeon_3d.tex[hw].txfilter = mag | min | (uint32_t)(n - 1) << RADEON_MAX_MIP_LEVEL_SHIFT |
         (t->wrap_s == GL_REPEAT ? RADEON_CLAMP_S_WRAP : RADEON_CLAMP_S_CLAMP_LAST) |   /* (GL_CLAMP as clamp to the edge) */
         (t->wrap_t == GL_REPEAT ? RADEON_CLAMP_T_WRAP : RADEON_CLAMP_T_CLAMP_LAST);
@@ -1081,6 +1107,8 @@ static void caps(dgl_caps *c)
     c->texture_units = 2;
     c->sub_narrow = 1;                          /* (tex_sub sends whole rows of the rectangle's) */
     c->max_texture_size = 2048;
+    c->max_anisotropy = 16;
+    c->max_lod_bias = 4;                        /* (-1 the chip's lowest: unit_words) */
 }
 
 static void synced(void) { dgl_vram_sync_done(); }   /* (the blocks retired before it are free) */

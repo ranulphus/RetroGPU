@@ -44,6 +44,16 @@ void ct_log(const char *fmt, ...)
     va_end(ap);
 }
 
+void ct_check(const char *name, int ok, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    printf("HX-TEST %s %s ", name, ok ? "PASS" : "FAIL");
+    vprintf(fmt, ap);
+    printf("\n");
+    va_end(ap);
+}
+
 int main(void)
 {
     DGLConfig c = { 0 };

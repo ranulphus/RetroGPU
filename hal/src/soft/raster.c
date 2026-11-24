@@ -364,7 +364,7 @@ static void span(int j, int xl, int xr, const attrs *A)
                     double s0, t0;
                     sv[k] = s0r[k] + A->s[k].dx * i, tv[k] = t0r[k] + A->t[k].dx * i;
                     s0 = sv[k] / q, t0 = tv[k] / q;
-                    soft_sample(S.stage[k].tex, s0, t0, (A->s[k].dx - s0 * A->q.dx) / q, (A->s[k].dy - s0 * A->q.dy) / q,
+                    soft_sample(S.stage[k].tex, S.stage[k].lod_bias, S.stage[k].aniso, s0, t0, (A->s[k].dx - s0 * A->q.dx) / q, (A->s[k].dy - s0 * A->q.dy) / q,
                                 (A->t[k].dx - t0 * A->q.dx) / q, (A->t[k].dy - t0 * A->q.dy) / q, tex);
                     soft_combine_apply(&S.stage[k], tex, prim, c, c);
                 }
@@ -581,7 +581,7 @@ static void pt_at(const rowtex *R, int x, texpt *p)
 
 /* The piece holding column x; *near: the near end's point when the last
  * piece computed it (its far end), else computed. */
-static void piece_at(const soft_texture *tx, const rowtex *R, int x, texpiece *P, texpt *far)
+static void piece_at(const soft_texture *tx, double bias, const rowtex *R, int x, texpiece *P, texpt *far)
 {
     int w = tx->level[0].w, h = tx->level[0].h, x0 = x & ~15;
     texpt p0;
@@ -594,10 +594,10 @@ static void piece_at(const soft_texture *tx, const rowtex *R, int x, texpiece *P
     P->per_pixel = !(p0.q > 0 && far->q > 0 && far->q < 8 * p0.q && p0.q < 8 * far->q);
     if (!P->per_pixel) {
         if (tx->min_filter != tx->mag_filter || tx->levels > 1)
-            soft_pick_lod(tx, (R->sdx - p0.s * R->qdx) * p0.iq, (R->sdy - p0.s * R->qdy) * p0.iq,
+            soft_pick_lod(tx, bias, (R->sdx - p0.s * R->qdx) * p0.iq, (R->sdy - p0.s * R->qdy) * p0.iq,
                           (R->tdx - p0.t * R->qdx) * p0.iq, (R->tdy - p0.t * R->qdy) * p0.iq, &P->pick);
         else
-            soft_pick_lod(tx, 0, 0, 0, 0, &P->pick);   /* (one level, one filter: nothing to choose) */
+            soft_pick_lod(tx, 0, 0, 0, 0, 0, &P->pick);   /* (one level, one filter: nothing to choose) */
         P->U0 = texfix(p0.s * w, tx->wrap_s), P->V0 = texfix(p0.t * h, tx->wrap_t);
         P->dU = stepfix((far->s - p0.s) * w / 16), P->dV = stepfix((far->t - p0.t) * h / 16);
     }
@@ -626,7 +626,7 @@ static void stage_row(int k, const attrs *A, int j, stagecur *C)
         C->U0 = (int32_t)(uint32_t)(uint64_t)(A->fu[k].v + ox * A->fu[k].dx + oy * A->fu[k].dy);
         C->V0 = (int32_t)(uint32_t)(uint64_t)(A->fv[k].v + ox * A->fv[k].dx + oy * A->fv[k].dy);
         C->dU = A->fu[k].dx, C->dV = A->fv[k].dx;
-        soft_pick_lod(tx, A->s[k].dx / q, A->s[k].dy / q, A->t[k].dx / q, A->t[k].dy / q, &C->pick);
+        soft_pick_lod(tx, S.stage[k].lod_bias, A->s[k].dx / q, A->s[k].dy / q, A->t[k].dx / q, A->t[k].dy / q, &C->pick);
     } else {
         C->R.sb = A->s[k].a0 + A->s[k].dx * fx0 + A->s[k].dy * fy, C->R.sdx = A->s[k].dx, C->R.sdy = A->s[k].dy;
         C->R.tb = A->t[k].a0 + A->t[k].dx * fx0 + A->t[k].dy * fy, C->R.tdx = A->t[k].dx, C->R.tdy = A->t[k].dy;
@@ -647,7 +647,7 @@ static const soft_pick *chunk_start(int k, stagecur *C, int x, int32_t *U, int32
         *U = step_at(C->U0, x, C->dU), *V = step_at(C->V0, x, C->dV), *dU = C->dU, *dV = C->dV;
         return &C->pick;
     }
-    piece_at(S.stage[k].tex, &C->R, x, &C->P, &C->far);
+    piece_at(S.stage[k].tex, S.stage[k].lod_bias, &C->R, x, &C->P, &C->far);
     if (C->P.per_pixel) {
         *pp = 1, *U = *V = *dU = *dV = 0;
         return &C->P.pick;
@@ -665,7 +665,7 @@ static const soft_pick *pp_at(int k, stagecur *C, int x, int32_t *U, int32_t *V)
     if (q == 0)
         q = 1e-30;
     s0 = sv / q, t0 = tv / q;
-    soft_pick_lod(tx, (C->R.sdx - s0 * C->R.qdx) / q, (C->R.sdy - s0 * C->R.qdy) / q, (C->R.tdx - t0 * C->R.qdx) / q,
+    soft_pick_lod(tx, S.stage[k].lod_bias, (C->R.sdx - s0 * C->R.qdx) / q, (C->R.sdy - s0 * C->R.qdy) / q, (C->R.tdx - t0 * C->R.qdx) / q,
                   (C->R.tdy - t0 * C->R.qdy) / q, &C->P.pick);
     *U = texfix(s0 * tx->level[0].w, tx->wrap_s), *V = texfix(t0 * tx->level[0].h, tx->wrap_t);
     return &C->P.pick;
@@ -1128,8 +1128,8 @@ static void select_span(void)
         if (S.stage[k].tex) {
             const soft_texture *tx = S.stage[k].tex;
             int c, w = tx->level[0].w, h = tx->level[0].h;
-            if (w > 1024 || h > 1024 || (w & (w - 1)) || (h & (h - 1)) || tx->levels < 1)
-                return;
+            if (w > 1024 || h > 1024 || (w & (w - 1)) || (h & (h - 1)) || tx->levels < 1 || S.stage[k].aniso > 1)
+                return;                         /* (anisotropic filtering: the reference span's soft_sample) */
             for (c = 0; c < 4; c++)
                 const8[k][c] = to8(S.stage[k].constant[c] * 255.0);
             tex = 1;

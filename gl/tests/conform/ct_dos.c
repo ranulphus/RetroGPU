@@ -34,6 +34,16 @@ void ct_log(const char *fmt, ...)
     hx_log("HX-STAT %s", buf);
 }
 
+void ct_check(const char *name, int ok, const char *fmt, ...)
+{
+    char buf[200];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+    hx_test(name, ok, "%s", buf);
+}
+
 int main(int argc, char **argv)
 {
     GLenum e;

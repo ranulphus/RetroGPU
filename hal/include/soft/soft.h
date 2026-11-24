@@ -85,6 +85,9 @@ typedef struct {
 typedef struct {
     const soft_texture *tex;        /* NULL: the stage is off */
     int coord;                      /* which of the vertex's coordinates (0 or 1) */
+    float lod_bias;                 /* added to the level of detail (GL_EXT_texture_lod_bias) */
+    float aniso;                    /* the most samples along a footprint's long axis (EXT_texture_filter_anisotropic);
+                                     * 0 or 1: none. Above 1 the stage is drawn by the reference span */
     soft_combine rgb, alpha;
     float constant[4];
 } soft_stage;
@@ -137,8 +140,8 @@ void soft_point(const soft_vertex *v, float size);
  * detail from the coordinates' derivatives on the screen; RGBA 0..1. And a
  * stage's combine of its texel, the constant, the primary colour and the
  * previous stage's (RGBA 0..1 each). */
-void soft_sample(const soft_texture *tx, double s, double t, double dsdx, double dsdy, double dtdx, double dtdy,
-                 float out[4]);
+void soft_sample(const soft_texture *tx, double bias, double aniso, double s, double t, double dsdx, double dsdy,
+                 double dtdx, double dtdy, float out[4]);
 void soft_combine_apply(const soft_stage *st, const float tex[4], const float prim[4], const float prev[4],
                         float out[4]);
 

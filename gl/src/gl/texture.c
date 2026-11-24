@@ -47,6 +47,55 @@ static void env_defaults(dgl_texenv *e)
     e->rgb_scale = e->alpha_scale = 1.0f;
 }
 
+/* Picture quality for programs that don't ask (docs/quality.md): DGL_TRILINEAR=1 draws every mipmapping texture
+ * GL_LINEAR_MIPMAP_LINEAR, DGL_ANISO=N filters every texture at least N:1 where the card can, DGL_LODBIAS=x adds x
+ * to every unit's level-of-detail bias (negative: sharper). Read once. */
+static struct { int read, trilinear; GLfloat aniso, lod_bias; } q;
+
+static void quality_read(void)
+{
+    const char *e;
+    q.read = 1;
+    e = getenv("DGL_TRILINEAR");
+    q.trilinear = e && *e && *e != '0';
+    e = getenv("DGL_ANISO");
+    q.aniso = e && *e ? (GLfloat)atof(e) : 1.0f;
+    if (!(q.aniso >= 1.0f))
+        q.aniso = 1.0f;
+    e = getenv("DGL_LODBIAS");
+    q.lod_bias = e && *e ? (GLfloat)atof(e) : 0.0f;
+}
+
+static GLenum drawn_min_filter(GLenum f)
+{
+    if (!q.read)
+        quality_read();
+    return q.trilinear && f >= GL_NEAREST_MIPMAP_NEAREST && f <= GL_LINEAR_MIPMAP_LINEAR ? GL_LINEAR_MIPMAP_LINEAR : f;
+}
+
+GLfloat dgl_tex_aniso(const dgl_texture *t)
+{
+    dgl_caps c;
+    GLfloat a = t->max_aniso;
+    if (!q.read)
+        quality_read();
+    dgl_get_caps(&c);
+    if (a < q.aniso)
+        a = q.aniso;
+    return c.max_anisotropy > 1.0f ? (a < c.max_anisotropy ? a : c.max_anisotropy) : 1.0f;
+}
+
+GLfloat dgl_tex_lod_bias(int unit)
+{
+    dgl_caps c;
+    GLfloat b;
+    if (!q.read)
+        quality_read();
+    dgl_get_caps(&c);
+    b = env_u[unit].lod_bias + q.lod_bias;
+    return b > c.max_lod_bias ? c.max_lod_bias : b < -c.max_lod_bias ? -c.max_lod_bias : b;
+}
+
 /* Everything drawn: the device's sync, which runs context.c's hook (the
  * epoch moves on, retired blocks come back) when it completes. */
 int dgl_sync(void)
@@ -86,7 +135,9 @@ static dgl_texture *get(GLuint name, int create)
         if (!t)
             return NULL;
         t->name = name;
-        t->min_filter = GL_NEAREST_MIPMAP_LINEAR;         /* GL defaults */
+        t->gl_min_filter = GL_NEAREST_MIPMAP_LINEAR;      /* GL defaults */
+        t->min_filter = drawn_min_filter(t->gl_min_filter);
+        t->max_aniso = 1.0f;
         t->mag_filter = GL_LINEAR;
         t->wrap_s = t->wrap_t = GL_REPEAT;
         t->max_level = 1000;
@@ -206,9 +257,10 @@ GLboolean APIENTRY glIsTexture(GLuint name)
 }
 
 /* ---- Parameters and environment ---------------------------------------- */
-static void param(GLenum target, GLenum pname, GLint v)
+static void param(GLenum target, GLenum pname, GLfloat f)
 {
     dgl_texture *t;
+    GLint v = (GLint)f;
     if (target != GL_TEXTURE_2D) { dgl_gl_error(GL_INVALID_ENUM); return; }
     t = get(bound, 1);
     if (!t) { dgl_gl_error(GL_OUT_OF_MEMORY); return; }
@@ -218,7 +270,8 @@ static void param(GLenum target, GLenum pname, GLint v)
             dgl_gl_error(GL_INVALID_ENUM);
             return;
         }
-        t->min_filter = (GLenum)v;
+        t->gl_min_filter = (GLenum)v;
+        t->min_filter = drawn_min_filter(t->gl_min_filter);
         t->dirty = 1;                   /* the mip window may change */
         break;
     case GL_TEXTURE_MAG_FILTER:
@@ -235,7 +288,11 @@ static void param(GLenum target, GLenum pname, GLint v)
         t->max_level = v;
         t->dirty = 1;
         break;
-    case GL_TEXTURE_PRIORITY: case GL_TEXTURE_MAX_ANISOTROPY_EXT:
+    case GL_TEXTURE_MAX_ANISOTROPY_EXT:
+        if (!(f >= 1.0f)) { dgl_gl_error(GL_INVALID_VALUE); return; }
+        t->max_aniso = f;               /* (above the card's limit: drawn at the limit, as the extension says) */
+        break;
+    case GL_TEXTURE_PRIORITY:
         return;                         /* accepted, no effect */
     default:
         dgl_gl_error(GL_INVALID_ENUM);
@@ -244,8 +301,8 @@ static void param(GLenum target, GLenum pname, GLint v)
     dgl_gl.dirty |= DGL_DIRTY_TEXTURE;
 }
 
-void APIENTRY glTexParameteri(GLenum target, GLenum pname, GLint v) { param(target, pname, v); }
-void APIENTRY glTexParameterf(GLenum target, GLenum pname, GLfloat v) { param(target, pname, (GLint)v); }
+void APIENTRY glTexParameteri(GLenum target, GLenum pname, GLint v) { param(target, pname, (GLfloat)v); }
+void APIENTRY glTexParameterf(GLenum target, GLenum pname, GLfloat v) { param(target, pname, v); }
 
 void APIENTRY glTexParameterfv(GLenum target, GLenum pname, const GLfloat *v)
 {
@@ -253,7 +310,7 @@ void APIENTRY glTexParameterfv(GLenum target, GLenum pname, const GLfloat *v)
         if (target != GL_TEXTURE_2D) dgl_gl_error(GL_INVALID_ENUM);
         return;
     }
-    param(target, pname, (GLint)v[0]);
+    param(target, pname, v[0]);
 }
 
 void APIENTRY glTexParameteriv(GLenum target, GLenum pname, const GLint *v)
@@ -262,7 +319,7 @@ void APIENTRY glTexParameteriv(GLenum target, GLenum pname, const GLint *v)
         if (target != GL_TEXTURE_2D) dgl_gl_error(GL_INVALID_ENUM);
         return;
     }
-    param(target, pname, v[0]);
+    param(target, pname, (GLfloat)v[0]);
 }
 
 static int get_param(GLenum target, GLenum pname, GLfloat *v)
@@ -270,7 +327,8 @@ static int get_param(GLenum target, GLenum pname, GLfloat *v)
     dgl_texture *t = get(bound, 1);
     if (target != GL_TEXTURE_2D || !t) { dgl_gl_error(GL_INVALID_ENUM); return 0; }
     switch (pname) {
-    case GL_TEXTURE_MIN_FILTER: v[0] = (GLfloat)t->min_filter; return 1;
+    case GL_TEXTURE_MIN_FILTER: v[0] = (GLfloat)t->gl_min_filter; return 1;
+    case GL_TEXTURE_MAX_ANISOTROPY_EXT: v[0] = t->max_aniso; return 1;
     case GL_TEXTURE_MAG_FILTER: v[0] = (GLfloat)t->mag_filter; return 1;
     case GL_TEXTURE_WRAP_S: v[0] = (GLfloat)t->wrap_s; return 1;
     case GL_TEXTURE_WRAP_T: v[0] = (GLfloat)t->wrap_t; return 1;
@@ -351,6 +409,14 @@ static void env(GLenum target, GLenum pname, const GLfloat *v)
     dgl_texenv *e = &cur_env;
     GLenum x = (GLenum)(GLint)v[0];
     int i;
+    if (target == GL_TEXTURE_FILTER_CONTROL_EXT) {     /* GL_EXT_texture_lod_bias (any value: clamped when drawn) */
+        dgl_caps c;
+        dgl_get_caps(&c);
+        if (pname != GL_TEXTURE_LOD_BIAS_EXT || c.max_lod_bias <= 0) { dgl_gl_error(GL_INVALID_ENUM); return; }
+        e->lod_bias = v[0];
+        dgl_gl.dirty |= DGL_DIRTY_TEXTURE;
+        return;
+    }
     if (target != GL_TEXTURE_ENV) { dgl_gl_error(GL_INVALID_ENUM); return; }
     switch (pname) {
     case GL_TEXTURE_ENV_MODE:
@@ -451,9 +517,22 @@ void APIENTRY glTexEnviv(GLenum target, GLenum pname, const GLint *v)
     env(target, pname, f);
 }
 
+/* glGetTexEnv of GL_TEXTURE_FILTER_CONTROL_EXT: 1 when it was that target (the value or the error given). */
+static int filter_control(GLenum target, GLenum pname, GLfloat *v)
+{
+    if (target != GL_TEXTURE_FILTER_CONTROL_EXT)
+        return 0;
+    if (pname == GL_TEXTURE_LOD_BIAS_EXT)
+        *v = cur_env.lod_bias;
+    else
+        dgl_gl_error(GL_INVALID_ENUM);
+    return 1;
+}
+
 void APIENTRY glGetTexEnvfv(GLenum target, GLenum pname, GLfloat *v)
 {
     int i;
+    if (filter_control(target, pname, v)) return;
     if (target != GL_TEXTURE_ENV) { dgl_gl_error(GL_INVALID_ENUM); return; }
     if (pname == GL_TEXTURE_ENV_COLOR) for (i = 0; i < 4; i++) v[i] = cur_env.color[i];
     else if (!env_value(&cur_env, pname, v)) dgl_gl_error(GL_INVALID_ENUM);
@@ -463,6 +542,7 @@ void APIENTRY glGetTexEnviv(GLenum target, GLenum pname, GLint *v)
 {
     int i;
     GLfloat f;
+    if (filter_control(target, pname, &f)) { if (pname == GL_TEXTURE_LOD_BIAS_EXT) v[0] = (GLint)f; return; }
     if (target != GL_TEXTURE_ENV) { dgl_gl_error(GL_INVALID_ENUM); return; }
     if (pname == GL_TEXTURE_ENV_COLOR) for (i = 0; i < 4; i++) v[i] = (GLint)(cur_env.color[i] * 2147483647.0);
     else if (env_value(&cur_env, pname, &f)) v[0] = (GLint)f;
@@ -547,7 +627,7 @@ void APIENTRY glTexImage2D(GLenum target, GLint level, GLint internalformat, GLs
     FT_START();
     PROF_SCOPE(PROF_D_TEX);
     DGL_GPU_QUIET();                            /* (the texels into the shadow copy: the CPU's work) */
-    dgl_be->caps(&caps);
+    dgl_get_caps(&caps);
     max = caps.max_texture_size;
     if (!check_upload(target, level, format, type))
         return;
@@ -615,8 +695,7 @@ void APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint x, GLint y, GLsi
         static size_t tmp_n;
         dgl_caps caps;
         size_t n = (size_t)w * (size_t)h;
-        memset(&caps, 0, sizeof caps);
-        dgl_be->caps(&caps);
+        dgl_get_caps(&caps);
         if (caps.sub_narrow && !L->idx && n > tmp_n && n <= 262144) {
             uint32_t *p = (uint32_t *)realloc(tmp, n * 4);
             if (p)

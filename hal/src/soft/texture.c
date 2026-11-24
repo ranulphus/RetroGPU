@@ -72,8 +72,8 @@ static void sample_level(const soft_texture *tx, int lv, int linear, double s, d
     }
 }
 
-void soft_sample(const soft_texture *tx, double s, double t, double dsdx, double dsdy, double dtdx, double dtdy,
-                 float out[4])
+static void sample_one(const soft_texture *tx, double bias, double s, double t, double dsdx, double dsdy, double dtdx,
+                       double dtdy, float out[4])
 {
     double lambda = -1e30, c = 0;
     int min = tx->min_filter, last = tx->levels - 1, k;
@@ -83,7 +83,7 @@ void soft_sample(const soft_texture *tx, double s, double t, double dsdx, double
         rho = ux > uy ? ux : uy;
         if (vx > rho) rho = vx;
         if (vy > rho) rho = vy;
-        lambda = rho > 0 ? log(rho) / log(2.0) : -1e30;
+        lambda = rho > 0 ? log(rho) / log(2.0) + bias : -1e30;
         if (tx->mag_filter == SOFT_LINEAR && (min == SOFT_NEAREST_MIPMAP_NEAREST || min == SOFT_NEAREST_MIPMAP_LINEAR))
             c = 0.5;
     }
@@ -121,6 +121,42 @@ void soft_sample(const soft_texture *tx, double s, double t, double dsdx, double
     }
 }
 
+/* Anisotropic filtering: the footprint's long axis (in texels) split into as many samples as it is longer than the
+ * short one, up to aniso, each with the level of detail of its own part (the long axis shortened that many times),
+ * averaged. What a card's anisotropic filter does differs in detail (its sample count and spacing); this is the
+ * reference shape. */
+void soft_sample(const soft_texture *tx, double bias, double aniso, double s, double t, double dsdx, double dsdy,
+                 double dtdx, double dtdy, float out[4])
+{
+    if (aniso > 1 && (tx->min_filter != tx->mag_filter || tx->levels > 1)) {
+        double w = tx->level[0].w, h = tx->level[0].h;
+        double lx = sqrt(dsdx * w * dsdx * w + dtdx * h * dtdx * h), ly = sqrt(dsdy * w * dsdy * w + dtdy * h * dtdy * h);
+        int along_x = lx >= ly;
+        double major = along_x ? lx : ly, minor = along_x ? ly : lx;
+        int n = minor > 0 ? (int)ceil(major / minor - 1e-9) : (int)aniso, i, k;
+        if (n > (int)aniso)
+            n = (int)aniso;
+        if (n > 1) {
+            double ds = along_x ? dsdx : dsdy, dt = along_x ? dtdx : dtdy, sc = 1.0 / n;
+            float one[4];
+            out[0] = out[1] = out[2] = out[3] = 0;
+            for (i = 0; i < n; i++) {
+                double o = (i + 0.5) * sc - 0.5;
+                if (along_x)
+                    sample_one(tx, bias, s + o * ds, t + o * dt, dsdx * sc, dsdy, dtdx * sc, dtdy, one);
+                else
+                    sample_one(tx, bias, s + o * ds, t + o * dt, dsdx, dsdy * sc, dtdx, dtdy * sc, one);
+                for (k = 0; k < 4; k++)
+                    out[k] += one[k];
+            }
+            for (k = 0; k < 4; k++)
+                out[k] = (float)(out[k] * sc);
+            return;
+        }
+    }
+    sample_one(tx, bias, s, t, dsdx, dsdy, dtdx, dtdy, out);
+}
+
 /* ---- Integer sampling (B2.8's fast spans) -------------------------------- */
 
 /* Bilinear filtering in two stages, along u and then v, each rounded to 8
@@ -153,7 +189,7 @@ static double fast_log2(double v)
     return e + log2_tab[(x.u >> 44) & 255];
 }
 
-void soft_pick_lod(const soft_texture *tx, double dsdx, double dsdy, double dtdx, double dtdy, soft_pick *p)
+void soft_pick_lod(const soft_texture *tx, double bias, double dsdx, double dsdy, double dtdx, double dtdy, soft_pick *p)
 {
     double lambda = -1e30, c = 0;
     int min = tx->min_filter, last = tx->levels - 1, k;
@@ -164,7 +200,7 @@ void soft_pick_lod(const soft_texture *tx, double dsdx, double dsdy, double dtdx
         rho = ux > uy ? ux : uy;
         if (vx > rho) rho = vx;
         if (vy > rho) rho = vy;
-        lambda = rho > 0 ? fast_log2(rho) : -1e30;
+        lambda = rho > 0 ? fast_log2(rho) + bias : -1e30;
         if (tx->mag_filter == SOFT_LINEAR && (min == SOFT_NEAREST_MIPMAP_NEAREST || min == SOFT_NEAREST_MIPMAP_LINEAR))
             c = 0.5;
     }
