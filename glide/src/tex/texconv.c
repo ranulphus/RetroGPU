@@ -2,6 +2,7 @@
  * expansion rules (bit replication), which 86Box's Voodoo model also uses. */
 #include "tex/texconv.h"
 #include "tex/texfmt.h"
+#include <string.h>
 
 static uint32_t argb(int a, int r, int g, int b)
 {
@@ -77,15 +78,16 @@ int tex_classify(const uint32_t *px, int n)
     return binary == 2 ? HW_TW15 : HW_TW16;
 }
 
+#define ENC15(c) ((uint16_t)((((c) >> 31) << 15) | (((c) >> 9) & 0x7C00) | (((c) >> 6) & 0x03E0) | (((c) >> 3) & 0x1F)))
+#define ENC12(c) ((uint16_t)((((c) >> 16) & 0xF000) | (((c) >> 12) & 0x0F00) | (((c) >> 8) & 0x00F0) | (((c) >> 4) & 0x0F)))
+#define ENC16(c) ((uint16_t)((((c) >> 8) & 0xF800) | (((c) >> 5) & 0x07E0) | (((c) >> 3) & 0x1F)))
+
 static uint16_t enc(int hwfmt, uint32_t c)
 {
     switch (hwfmt) {
-    case HW_TW15:
-        return (uint16_t)(((c >> 31) << 15) | ((c >> 9) & 0x7C00) | ((c >> 6) & 0x03E0) | ((c >> 3) & 0x1F));
-    case HW_TW12:
-        return (uint16_t)(((c >> 16) & 0xF000) | ((c >> 12) & 0x0F00) | ((c >> 8) & 0x00F0) | ((c >> 4) & 0x0F));
-    default:
-        return (uint16_t)(((c >> 8) & 0xF800) | ((c >> 5) & 0x07E0) | ((c >> 3) & 0x1F));
+    case HW_TW15: return ENC15(c);
+    case HW_TW12: return ENC12(c);
+    default: return ENC16(c);
     }
 }
 
@@ -158,24 +160,41 @@ int tex_convert_level(GrTextureFormat_t fmt, const void *src, int w, int h,
                       uint16_t *dst, int dst_pitch, int hw_w, int hw_h, int clamp_s, int clamp_t,
                       const tex_tables *t, int force_hwfmt, uint32_t *scratch, const tex_variant *var)
 {
-    int x, y, hwfmt, native = -1;
+    int x, y, n, hwfmt, native = -1;
     const uint8_t *s8 = (const uint8_t *)src;
     const uint16_t *s16 = (const uint16_t *)src;
     /* Formats the Matrox holds natively are copied bit-exactly. */
     if (fmt == GR_TEXFMT_RGB_565) native = HW_TW16;
     else if (fmt == GR_TEXFMT_ARGB_1555) native = HW_TW15;
     else if (fmt == GR_TEXFMT_ARGB_4444) native = HW_TW12;
-    if (native >= 0 && (force_hwfmt < 0 || force_hwfmt == native) && !(var && var->kind)) {
+    if (native >= 0 && (force_hwfmt == -1 || force_hwfmt == native || (force_hwfmt == TEX_NO565 && native != HW_TW16)) &&
+        !(var && var->kind)) {
         for (y = 0; y < hw_h; y++) {
             const uint16_t *row = s16 + src_index(y, h, clamp_t) * w;
-            for (x = 0; x < hw_w; x++)
-                dst[y * dst_pitch + x] = row[src_index(x, w, clamp_s)];
+            uint16_t *d = dst + y * dst_pitch;
+            if (hw_w == w)
+                memcpy(d, row, (size_t)w * 2);
+            else
+                for (x = 0; x < hw_w; x++)
+                    d[x] = row[src_index(x, w, clamp_s)];
         }
         return native;
     }
-    for (y = 0; y < h; y++)
-        for (x = 0; x < w; x++)
-            scratch[y * w + x] = tex_decode(fmt, tex_bpp(fmt) == 2 ? s16[y * w + x] : s8[y * w + x], t);
+    /* Decoded to ARGB: 8-bit texels through a table of their 256 values when the level is larger than the table
+     * (Screamer Rally's palettised levels: a call and a switch a texel was ~6 million cycles a 256x256 level). */
+    n = w * h;
+    if (tex_bpp(fmt) == 1 && n > 256) {
+        uint32_t lut[256];
+        for (x = 0; x < 256; x++)
+            lut[x] = tex_decode(fmt, (uint32_t)x, t);
+        for (x = 0; x < n; x++)
+            scratch[x] = lut[s8[x]];
+    } else if (tex_bpp(fmt) == 1)
+        for (x = 0; x < n; x++)
+            scratch[x] = tex_decode(fmt, s8[x], t);
+    else
+        for (x = 0; x < n; x++)
+            scratch[x] = tex_decode(fmt, s16[x], t);
     if (var && var->kind) {
         /* Keyed variant: 1-bit alpha, transparent where the key matches or
          * the alpha test fails; drawn with the hardware alpha key. */
@@ -190,12 +209,26 @@ int tex_convert_level(GrTextureFormat_t fmt, const void *src, int w, int h,
         }
         bleed_keyed(scratch, w, h, clamp_s, clamp_t);
         hwfmt = HW_TW15;
-    } else
+    } else {
         hwfmt = force_hwfmt >= 0 ? force_hwfmt : tex_classify(scratch, w * h);
+        if (force_hwfmt == TEX_NO565 && hwfmt == HW_TW16)
+            hwfmt = HW_TW15;                            /* (opaque: every alpha bit set) */
+    }
     for (y = 0; y < hw_h; y++) {
         const uint32_t *row = scratch + src_index(y, h, clamp_t) * w;
-        for (x = 0; x < hw_w; x++)
-            dst[y * dst_pitch + x] = enc(hwfmt, row[src_index(x, w, clamp_s)]);
+        uint16_t *d = dst + y * dst_pitch;
+        if (hw_w != w)
+            for (x = 0; x < hw_w; x++)
+                d[x] = enc(hwfmt, row[src_index(x, w, clamp_s)]);
+        else if (hwfmt == HW_TW15)
+            for (x = 0; x < w; x++)
+                d[x] = ENC15(row[x]);
+        else if (hwfmt == HW_TW12)
+            for (x = 0; x < w; x++)
+                d[x] = ENC12(row[x]);
+        else
+            for (x = 0; x < w; x++)
+                d[x] = ENC16(row[x]);
     }
     return hwfmt;
 }

@@ -12,6 +12,7 @@
  * vertical blank when vsync is on. No GLOS window yet (B3's software path
  * shows a window's pixels for cards other than Matrox ones). */
 #include "rg/device.h"
+#include "rg/virge_dev.h"
 #include "virge/virge.h"
 #include "mga/sys.h"
 #include <stdlib.h>
@@ -168,6 +169,15 @@ static int swap(int vsync)
 }
 
 static int present_front(void) { return 0; }   /* (no scaled modes) */
+
+int rg_virge_layout(uint32_t *front, uint32_t *back, uint32_t *z, int *z_pitch, int *pitch_bytes, int *bpp)
+{
+    if (!st.active)
+        return -1;
+    *front = st.front_off, *back = st.double_buffer ? st.back_off : 0, *z = st.z_off;
+    *z_pitch = st.depth_bits ? st.z_pitch : 0, *pitch_bytes = st.pitch_bytes, *bpp = st.bpp;
+    return 0;
+}
 
 /* ---- 2D and the cursor (the ViRGE layer's) ------------------------------- */
 

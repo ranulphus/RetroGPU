@@ -121,8 +121,11 @@ GR_ENTRY(void, guColorCombineFunction, (GrColorCombineFnc_t fnc))
         CC(SCALE_OTHER_ADD_LOCAL, LOCAL_ALPHA, ITERATED, TEXTURE, FXFALSE); break;
     case GR_COLORCOMBINE_TEXTURE_ADD_ITRGB: CC(SCALE_OTHER_ADD_LOCAL, ONE, ITERATED, TEXTURE, FXFALSE); break;
     case GR_COLORCOMBINE_TEXTURE_SUB_ITRGB: CC(SCALE_OTHER_MINUS_LOCAL, ONE, ITERATED, TEXTURE, FXFALSE); break;
+    /* (the constant colour where the texel's alpha is 0, the iterated one where it is 1: the Voodoo's frame of t13's
+     * cell 13. The local and the other were the other way round here until a card drew the blend itself: the
+     * Radeon, 2026-11-24; the others approximate this cell.) */
     case GR_COLORCOMBINE_CCRGB_BLEND_ITRGB_ON_TEXALPHA:
-        CC(SCALE_OTHER_MINUS_LOCAL_ADD_LOCAL, TEXTURE_ALPHA, ITERATED, CONSTANT, FXFALSE); break;
+        CC(SCALE_OTHER_MINUS_LOCAL_ADD_LOCAL, TEXTURE_ALPHA, CONSTANT, ITERATED, FXFALSE); break;
     /* Measured from the retail runtime (t13): A = texel x alpha + iterated,
      * B = texel x iterated + alpha. */
     case GR_COLORCOMBINE_DIFF_SPEC_A: CC(SCALE_OTHER_ADD_LOCAL, LOCAL_ALPHA, ITERATED, TEXTURE, FXFALSE); break;

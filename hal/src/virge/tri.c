@@ -26,7 +26,37 @@
 #include "virge/virge.h"
 #include "virge/regs_virge.h"
 #include "mga/sys.h"
+#if defined(__WATCOMC__)
+/* The Glide runtime's Open Watcom build links no maths library: floor through fp.h's exact one (ceil its mirror),
+ * ldexp as a multiply by an exact power of two (the same result), and the natural log by a series (mg_ln's, good
+ * to about 1e-7: only the mipmap level D uses it, and Glide draws one level a triangle). DJGPP's build keeps libm,
+ * so DOS-GL's triangles are the same as before. */
+#include "mga/fp.h"
+static double pow2(int n)
+{
+    return n >= 0 ? (double)(1UL << (n & 31)) * (n >= 32 ? 4294967296.0 : 1.0)
+                  : 1.0 / ((double)(1UL << ((-n) & 31)) * (-n >= 32 ? 4294967296.0 : 1.0));
+}
+static double ln_series(double v)
+{
+    double z, z2;
+    int e = 0;
+    if (v <= 0)
+        return -1e300;
+    while (v >= 2.0) { v *= 0.5; e++; }
+    while (v < 1.0) { v *= 2.0; e--; }
+    z = (v - 1.0) / (v + 1.0);
+    z2 = z * z;
+    return 2.0 * z * (1.0 + z2 * (1.0 / 3 + z2 * (1.0 / 5 + z2 * (1.0 / 7 + z2 * (1.0 / 9 + z2 / 11))))) +
+           e * 0.6931471805599453;
+}
+#define floor(v)    mga_floor(v)
+#define ceil(v)     (-mga_floor(-(v)))
+#define ldexp(v, n) ((v) * pow2(n))
+#define log(v)      ln_series(v)
+#else
 #include <math.h>
+#endif
 
 #define WR(off, v) (*(volatile uint32_t *)(virge.mmio + (off)) = (uint32_t)(v))
 #define RD(off)    (*(volatile uint32_t *)(virge.mmio + (off)))
@@ -138,7 +168,7 @@ void virge_tri_tune(int uw_shift, int zdx_frac)
 
 void virge_tri(const virge_vertex *a, const virge_vertex *b, const virge_vertex *c)
 {
-    const virge_vertex *v[3] = { a, b, c }, *t;
+    const virge_vertex *v[3], *t;
     double x0, y0, x1, y1, x2, y2, area, yc0, x02, dx02, dx01 = 0, dx12 = 0, x01 = 0, x12 = 0;
     double val[3][NATTR];           /* each attribute at each vertex */
     double grad[NATTR][3];          /* d/dx, d/dy, the value at side 02 on the first line */
@@ -146,6 +176,7 @@ void virge_tri(const virge_vertex *a, const virge_vertex *b, const virge_vertex 
     int j0, jm, j2, n01, n12, left, k, i, L = 0, uvbits = 0, wbits = 30, nattr = A_U;
     uint32_t cmd;
 
+    v[0] = a, v[1] = b, v[2] = c;
     /* From the bottom (largest y) up. */
     if (v[0]->y < v[1]->y) t = v[0], v[0] = v[1], v[1] = t;
     if (v[1]->y < v[2]->y) t = v[1], v[1] = v[2], v[2] = t;

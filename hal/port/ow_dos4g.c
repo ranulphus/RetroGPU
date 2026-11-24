@@ -379,7 +379,9 @@ int glos_far(void *entry, uint32_t fn, uint32_t b, uint32_t c, uint32_t d);    /
     "and eax, edx" \
     parm [esi] [eax] [ebx] [ecx] [edx] value [eax] modify [ebx ecx edx esi edi];
 
-int sys_cache_wc(uint32_t lin, uint32_t bytes)
+uint32_t sys_linear(const volatile void *p) { return (uint32_t)p; }   /* (DOS/4GW: flat, linear) */
+int sys_cache_wc(uint32_t lin, uint32_t bytes) { return sys_cache_type(lin, bytes, 1); }
+int sys_cache_type(uint32_t lin, uint32_t bytes, unsigned type)
 {
     static const char name[] = "GLOS";
     union REGS r;
@@ -395,6 +397,19 @@ int sys_cache_wc(uint32_t lin, uint32_t bytes)
             glos_entry.off = r.x.edi;
             glos_entry.sel = sr.es;
             glos_found = 1;
+        } else {
+            /* DOS/4GW answers 0A00h itself (its own name) and passes no other on: GLOS's entry then from DPMI's
+             * other vendor call, INT 2Fh AX=168Ah in protected mode (AL 0: ES:EDI the same entry). */
+            memset(&r, 0, sizeof r);
+            segread(&sr);
+            r.w.ax = 0x168A;
+            r.x.esi = (uint32_t)name;
+            int386x(0x2F, &r, &r, &sr);
+            if (r.h.al == 0) {
+                glos_entry.off = r.x.edi;
+                glos_entry.sel = sr.es;
+                glos_found = 1;
+            }
         }
     }
     if (glos_found < 0) {
@@ -403,7 +418,7 @@ int sys_cache_wc(uint32_t lin, uint32_t bytes)
     }
     {
         static struct { uint32_t size, address, bytes, type; } q;
-        q.size = sizeof q, q.address = lin, q.bytes = bytes, q.type = 1;       /* GLOS_CACHE_WC */
+        q.size = sizeof q, q.address = lin, q.bytes = bytes, q.type = type;    /* GLOS_CACHE_ */
         sys_cache_wc_err = glos_far(&glos_entry, 0x0002020Aul, (uint32_t)&q, 0, 0);    /* GLOS_DRAW_CACHE */
     }
     return sys_cache_wc_err ? -1 : 0;

@@ -194,6 +194,57 @@ SSH (`tools/bench/run.py --pc bench-486`), their lines read from GLOS's log.
   the patched model fails the same four cases as the card did, by nearly the same counts (`tex-persp` 41,478
   pixels off in both, from the same first pixel; `tex-8888` 42,547 against 42,546).
 
+## V5 so far (Glide on the ViRGE/DX: the plan of 2026-11-20)
+
+- **The owner's choices (2026-11-20):**
+  - a 15-bit screen at the BIOS's pitch, with every LFB lock through the core's converting shadow;
+  - blends the chip can't do drawn as a 50% blend;
+  - the live games on bench C as well as the replays.
+- **W1, the layer in the Open Watcom build:**
+  - `tri.c` builds with Open Watcom. Under `__WATCOMC__` only, `floor` and `ceil` go through `fp.h`'s exact
+    `mga_floor`, `ldexp` is an exact power-of-two multiply, and the log is a series. DJGPP keeps libm, so
+    DOS-GL's triangles are unchanged (VTRI passes as before).
+  - `HAL_OW_RG` gains `rg/virge.c` and the layer.
+  - `rg_virge_layout` (`rg/virge_dev.h`) gives the buffers' places.
+  - **`VFLIP`** (`tests/virge/vflip.c`), for someone watching bench C: two buffers flipped each frame, the hidden
+    one cleared to black for 8 ms. Steady colour means the start is taken from the next frame; black flashes
+    mean a frame late. Phase 1 is blue, in the device's order (retrace, then start); phase 2 green, start first.
+    It runs in Loop A; bench C, watched, decides the device's order.
+- **W2, the core:**
+  - `mg.screen555`: the LFB's pixel helpers convert 565 to and from 555, and every lock is shadowed.
+  - The back-end table gains `tex_square` (square slots padded as the texture repeats) and `tex_no565`
+    (opaque levels as 1555).
+  - `backend/share.{c,h}`: the TNT2's level model and split, copied (the TNT2 keeps its own until it is back
+    on a bench).
+- **W3, the back end** (`glide/src/backend/virge/virge.c`):
+  - **The window:** the 15-bit mode, double buffered, Z16; clears by the 2D engine with an engine sync around
+    them; swaps by the display start, written first.
+  - **Clipping and edges:** triangles clipped to the clip window in software (the engine's coordinates are
+    unsigned); x a 64th of a pixel left.
+  - **Levels and filters:** the Voodoo's level per piece. One filter a triangle, the Voodoo's minification
+    choice at the piece's centre.
+  - **Combines and blends:**
+    - the combines on DECAL, MODULATE and REFLECTION, with the vertices' colours from the core's combine
+      units;
+    - untextured non-affine combines cut finer;
+    - SRC_ALPHA blending by the texel's or the vertex's alpha, the other blends 50%;
+    - keyed variants for the chroma key and the texel's alpha test;
+    - MULT2 fog as a black triangle under the engine's fog.
+  - **Clamping:** the engine always wraps. A clamped triangle is cut in texture space along the edges (half a
+    texel inside with bilinear) and the outer pieces are drawn at the centre of the bound level's edge texel;
+    the level stays the Voodoo's.
+- **W4, the tests:**
+  - **Glide conformance in Loop A:** 27 of 27 on the Pentium II board and on the 486, with the manifest's
+    `virge` class:
+    - t04 edges within a sixteenth of a pixel;
+    - t07 W-buffering in Z16, not gating;
+    - t13's approximate cells: adds with alpha, subtraction, texel-alpha lerps, the specular forms, products of
+      the texel's and the vertex's alpha;
+    - t22 gamma, not gating.
+  - **The replays in Loop A:** GTA (frames 60-295) at most 0.012% out, Screamer Rally (60-240) at most 0.23%.
+  - **Owed:** bench C (VFLIP watched, conformance, the replays, the live games); the Matrox REGCRC check of
+    W2 (running).
+
 ## The owner's answers (2026-11-12)
 
 1. **Colour depth is the user's choice, not the card's:** GLOS gets a Display control panel and a `GLOS.CFG`

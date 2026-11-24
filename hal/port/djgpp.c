@@ -220,7 +220,9 @@ void sys_terminate(int code) { exit(code); }
    call (2.0's GLOS_FN(DRAW, 10)), EBX its structure: its size, the address, the bytes, the type (1: write-
    combining); the carry flag says it failed, with GLOS's error in EAX. */
 int sys_cache_wc_err;
-int sys_cache_wc(uint32_t lin, uint32_t bytes)
+uint32_t sys_linear(const volatile void *p) { return (uint32_t)(uintptr_t)p + (uint32_t)__djgpp_base_address; }
+int sys_cache_wc(uint32_t lin, uint32_t bytes) { return sys_cache_type(lin, bytes, 1); }
+int sys_cache_type(uint32_t lin, uint32_t bytes, unsigned type)
 {
     static struct { unsigned long off; unsigned short sel; } __attribute__((packed)) entry;
     static int found;                   /* 1 GLOS, -1 none */
@@ -240,7 +242,7 @@ int sys_cache_wc(uint32_t lin, uint32_t bytes)
         sys_cache_wc_err = -1;
         return -1;
     }
-    q.size = sizeof q, q.address = lin, q.bytes = bytes, q.type = 1;       /* GLOS_CACHE_WC */
+    q.size = sizeof q, q.address = lin, q.bytes = bytes, q.type = type;    /* GLOS_CACHE_ */
     __asm__ __volatile__("lcall *%[e]\n\tsetc %[f]"
                          : "+a"(a), "+b"(b), "+c"(c), "+d"(d), [f] "=m"(failed)
                          : [e] "m"(entry)

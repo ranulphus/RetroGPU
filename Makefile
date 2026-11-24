@@ -17,9 +17,15 @@ export WATCOM DJGPP_PREFIX MGA_CACHE OW_URL OW_SHA256 DJGPP_URL DJGPP_SHA256 CWS
 
 # ---- HAL -----------------------------------------------------------------
 HAL_COMMON := hal/src/debug/serial.c hal/src/debug/regtrace.c hal/src/pci.c hal/src/chip.c hal/src/clocks.c hal/src/vbe.c hal/src/fifo.c hal/src/engine.c hal/src/dac.c hal/src/texhw.c hal/src/present.c hal/src/setup/trap.c hal/src/vram.c hal/src/blit.c hal/src/cursor.c hal/src/warp.c
-# Other vendors' cards in Glide's Open Watcom build (the device log, the Riva TNT2's device and layer: the TNT2's
-# Glide back end, glide/src/backend/tnt2); rg/device.c's list and the Matrox, ViRGE and memory devices stay DJGPP's.
-HAL_OW_RG  := hal/src/rg/log.c hal/src/rg/tnt2.c hal/src/tnt2/tnt2.c
+# Other vendors' cards in Glide's Open Watcom build (the device log; the Riva TNT2's and the ViRGE/DX's devices and
+# layers: Glide's back ends in glide/src/backend/tnt2 and virge); rg/device.c's list and the Matrox and memory devices
+# stay DJGPP's.
+HAL_OW_RG  := hal/src/rg/log.c hal/src/rg/tnt2.c hal/src/tnt2/tnt2.c \
+              hal/src/rg/virge.c hal/src/virge/chip.c hal/src/virge/engine2d.c hal/src/virge/cursor.c hal/src/virge/tri.c \
+              hal/src/rg/r128.c hal/src/r128/chip.c hal/src/r128/engine2d.c hal/src/r128/cursor.c hal/src/r128/cce.c \
+              hal/src/r128/tri.c hal/src/r128/cce_ucode.c \
+              hal/src/rg/radeon.c hal/src/radeon/chip.c hal/src/radeon/engine2d.c hal/src/radeon/cursor.c \
+              hal/src/radeon/tri.c hal/src/radeon/cp.c hal/src/radeon/cp_ucode.c
 HAL_OW     := $(HAL_COMMON) $(HAL_OW_RG) hal/port/ow_dos4g.c
 HAL_DJGPP  := $(HAL_COMMON) hal/port/djgpp.c
 HAL_HOST   := $(HAL_COMMON) hal/port/host.c
@@ -98,6 +104,18 @@ VIRGE_SRCS := hal/src/virge/chip.c hal/src/virge/engine2d.c hal/src/virge/cursor
 build/djgpp/libvirge.a: $(VIRGE_SRCS:%.c=build/djgpp/%.o)
 	@rm -f $@
 	$(DJAR) rcs $@ $^
+# The ATI Rage 128 (docs/rage128.md): its register layer, a library of its own as the ViRGE's and the TNT2's are.
+R128_SRCS := hal/src/r128/chip.c hal/src/r128/engine2d.c hal/src/r128/cursor.c hal/src/r128/cce.c hal/src/r128/tri.c \
+             hal/src/r128/cce_ucode.c
+build/djgpp/libr128.a: $(R128_SRCS:%.c=build/djgpp/%.o)
+	@rm -f $@
+	$(DJAR) rcs $@ $^
+# The ATI Radeon (docs/radeon.md): its register layer, a library of its own as the Rage 128's.
+RADEON_SRCS := hal/src/radeon/chip.c hal/src/radeon/engine2d.c hal/src/radeon/cursor.c hal/src/radeon/tri.c \
+               hal/src/radeon/cp.c hal/src/radeon/cp_ucode.c
+build/djgpp/libradeon.a: $(RADEON_SRCS:%.c=build/djgpp/%.o)
+	@rm -f $@
+	$(DJAR) rcs $@ $^
 # The Riva TNT2 (docs/tnt2.md): its register layer, a library of its own as the ViRGE's is.
 TNT2_SRCS := hal/src/tnt2/tnt2.c
 build/djgpp/libtnt2.a: $(TNT2_SRCS:%.c=build/djgpp/%.o)
@@ -107,12 +125,13 @@ build/djgpp/libtnt2.a: $(TNT2_SRCS:%.c=build/djgpp/%.o)
 # Matrox one on the HAL, the ViRGE/DX's on its layer and the memory one (gl/docs/b2.md); RGDEV drives them through
 # the table alone.
 RG_SRCS := hal/src/rg/device.c hal/src/rg/log.c hal/src/rg/glos.c hal/src/rg/mga.c hal/src/rg/mga_glos.c hal/src/rg/virge.c hal/src/rg/mem.c \
-            hal/src/rg/vbe_soft.c hal/src/rg/tnt2.c
+            hal/src/rg/vbe_soft.c hal/src/rg/tnt2.c hal/src/rg/r128.c hal/src/rg/radeon.c
 $(RG_SRCS:%.c=build/djgpp/%.o): DJ_CFLAGS += -I$(GLOS)/include
 build/djgpp/librg.a: $(RG_SRCS:%.c=build/djgpp/%.o)
 	@rm -f $@
 	$(DJAR) rcs $@ $^
-DJ_SRC_RGDEV := tests/rg/rgdev.c tests/hal/sw2d.c build/djgpp/librg.a build/djgpp/libvirge.a build/djgpp/libtnt2.a
+DJ_SRC_RGDEV := tests/rg/rgdev.c tests/hal/sw2d.c build/djgpp/librg.a build/djgpp/libvirge.a build/djgpp/libtnt2.a \
+                build/djgpp/libr128.a build/djgpp/libradeon.a
 DJ_SRC_VPROBE := tests/virge/vprobe.c
 # The Riva TNT2 (docs/tnt2.md): NPROBE (T0: PCI, the chip's ID, memory and clock registers, the BIOS's modes; reads only).
 DJ_SRC_NPROBE := tests/tnt2/nprobe.c
@@ -125,8 +144,42 @@ DJ_SRC_NTRI := tests/tnt2/ntri.c build/djgpp/libtnt2.a
 DJ_SRC_NTRI32 := tests/tnt2/ntri32.c build/djgpp/libtnt2.a
 DJ_SRC_NSHOW := tests/tnt2/nshow.c build/djgpp/libtnt2.a
 DJ_SRC_STEAL := tests/tnt2/steal.c
+# The ATI Rage 128 Pro (docs/rage128.md): RPROBE (R0: PCI and AGP, the configuration, memory, CRTC and engine
+# registers, the PLLs, the video BIOS's PLL table, the BIOS's modes; reads only, but for the clock index, put back).
+DJ_SRC_RPROBE := tests/r128/rprobe.c
+# The ATI Radeon 7000 / VE (docs/radeon.md): DPROBE (RD0: PCI and AGP, the configuration, memory, CRTC, engine and
+# command processor registers, the PLLs with the RV100's 5 ms, the BIOS's modes; reads only).
+DJ_SRC_DPROBE := tests/radeon/dprobe.c
+# DTWOD (RD1: the 2D engine against sw2d.c at 8, 16 and 32 bits) and DFLIP (when the start is taken, watched).
+DJ_SRC_DTWOD := tests/radeon/dtwod.c tests/hal/sw2d.c build/djgpp/libradeon.a
+DJ_SRC_DFLIP := tests/radeon/dflip.c build/djgpp/libradeon.a
+DJ_SRC_DMEM := tests/radeon/dmem.c build/djgpp/libradeon.a
+DJ_SRC_DCOPY := tests/radeon/dcopy.c build/djgpp/libradeon.a
+# DTRI0 (RD2: three Gouraud triangles by plain register writes: coverage, colours, depth).
+DJ_SRC_DTRI0 := tests/radeon/dtri0.c build/djgpp/libradeon.a
+# DTRI (RD2: RTRI's scenes against OpenGL's rules: Gouraud, Z, blending, textures, fog).
+DJ_SRC_DTRI := tests/radeon/dtri.c build/djgpp/libradeon.a
+# DMIP (which mipmap level the chip takes, by footprint).
+DJ_SRC_DMIP := tests/radeon/dmip.c build/djgpp/libradeon.a
+# DTRI32 (8888 with Z24S8: coverage, Z, blending, the stencil, the alpha test, three texture units).
+DJ_SRC_DTRI32 := tests/radeon/dtri32.c build/djgpp/libradeon.a
+# DWC (the CPU's writes to the frame buffer timed: for GLOS's write-combining setting).
+DJ_SRC_DWC := tests/radeon/dwc.c build/djgpp/libradeon.a
+# RTWOD (R1: the 2D engine against sw2d.c at 8, 16 and 32 bits) and RFLIP (when the start is taken, watched).
+DJ_SRC_RTWOD := tests/r128/rtwod.c tests/hal/sw2d.c build/djgpp/libr128.a
+DJ_SRC_RFLIP := tests/r128/rflip.c build/djgpp/libr128.a
+# RTRI0 (R2's bring-up: the CCE, the 3D context, Gouraud triangles with Z, against a reference).
+DJ_SRC_RTRI0 := tests/r128/rtri0.c build/djgpp/libr128.a
+# RTRI (R2's exit: NTRI's scenes against OpenGL's rules through the CCE).
+DJ_SRC_RTRI := tests/r128/rtri.c build/djgpp/libr128.a
+DJ_SRC_RMIP := tests/r128/rmip.c build/djgpp/libr128.a
+DJ_SRC_RTRI32 := tests/r128/rtri32.c build/djgpp/libr128.a
+DJ_SRC_RRINGP := tests/r128/rringp.c build/djgpp/libr128.a
+DJ_SRC_RPIO := tests/r128/rpio.c build/djgpp/libr128.a
 DJ_SRC_VTWOD := tests/virge/vtwod.c tests/hal/sw2d.c build/djgpp/libvirge.a
 DJ_SRC_VTRI := tests/virge/vtri.c build/djgpp/libvirge.a
+# VFLIP (V5's W1: when the chip takes a display start, for someone watching: steady colour or black flashes).
+DJ_SRC_VFLIP := tests/virge/vflip.c build/djgpp/libvirge.a
 build/djgpp/HOOKS.EXE: tests/hal/hooks.c
 build/djgpp/SCALE.EXE: tests/hal/scale.c
 build/djgpp/HELLO.EXE: tests/shim/hello.c
@@ -153,10 +206,33 @@ build/djgpp/NTRI.EXE: tests/tnt2/ntri.c build/djgpp/libtnt2.a
 build/djgpp/NTRI32.EXE: tests/tnt2/ntri32.c build/djgpp/libtnt2.a
 build/djgpp/NSHOW.EXE: tests/tnt2/nshow.c build/djgpp/libtnt2.a
 build/djgpp/STEAL.EXE: tests/tnt2/steal.c
+build/djgpp/RPROBE.EXE: tests/r128/rprobe.c
+build/djgpp/DPROBE.EXE: tests/radeon/dprobe.c
+build/djgpp/DTWOD.EXE: tests/radeon/dtwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libradeon.a
+build/djgpp/DTWOD.EXE: DJ_CFLAGS += -Itests/hal
+build/djgpp/DFLIP.EXE: tests/radeon/dflip.c build/djgpp/libradeon.a
+build/djgpp/DMEM.EXE: tests/radeon/dmem.c build/djgpp/libradeon.a
+build/djgpp/DCOPY.EXE: tests/radeon/dcopy.c build/djgpp/libradeon.a
+build/djgpp/DTRI0.EXE: tests/radeon/dtri0.c build/djgpp/libradeon.a
+build/djgpp/DTRI.EXE: tests/radeon/dtri.c build/djgpp/libradeon.a
+build/djgpp/DMIP.EXE: tests/radeon/dmip.c build/djgpp/libradeon.a
+build/djgpp/DTRI32.EXE: tests/radeon/dtri32.c build/djgpp/libradeon.a
+build/djgpp/DWC.EXE: tests/radeon/dwc.c build/djgpp/libradeon.a
+build/djgpp/RTWOD.EXE: tests/r128/rtwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libr128.a
+build/djgpp/RTWOD.EXE: DJ_CFLAGS += -Itests/hal
+build/djgpp/RFLIP.EXE: tests/r128/rflip.c build/djgpp/libr128.a
+build/djgpp/RTRI0.EXE: tests/r128/rtri0.c build/djgpp/libr128.a
+build/djgpp/RTRI.EXE: tests/r128/rtri.c build/djgpp/libr128.a
+build/djgpp/RMIP.EXE: tests/r128/rmip.c build/djgpp/libr128.a
+build/djgpp/RTRI32.EXE: tests/r128/rtri32.c build/djgpp/libr128.a
+build/djgpp/RRINGP.EXE: tests/r128/rringp.c build/djgpp/libr128.a
+build/djgpp/RPIO.EXE: tests/r128/rpio.c build/djgpp/libr128.a
 build/djgpp/VTWOD.EXE: tests/virge/vtwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libvirge.a
 build/djgpp/VTWOD.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/VTRI.EXE: tests/virge/vtri.c build/djgpp/libvirge.a
-build/djgpp/RGDEV.EXE: tests/rg/rgdev.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/librg.a build/djgpp/libvirge.a build/djgpp/libtnt2.a
+build/djgpp/VFLIP.EXE: tests/virge/vflip.c build/djgpp/libvirge.a
+build/djgpp/RGDEV.EXE: tests/rg/rgdev.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/librg.a build/djgpp/libvirge.a build/djgpp/libtnt2.a \
+                       build/djgpp/libr128.a build/djgpp/libradeon.a
 build/djgpp/RGDEV.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/STACKPG.EXE: tests/shim/stackpg.c
 build/djgpp/MOUSETST.EXE: tests/shim/mousetst.c

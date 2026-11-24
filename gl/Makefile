@@ -56,12 +56,16 @@ HAL_SRCS := $(addprefix $(MGAHAL)/hal/,src/debug/serial.c src/pci.c src/chip.c s
               src/rg/device.c src/rg/log.c src/rg/glos.c src/rg/mga.c src/rg/mga_glos.c \
               src/virge/chip.c src/virge/engine2d.c src/virge/cursor.c src/virge/tri.c src/rg/virge.c \
               src/tnt2/tnt2.c src/rg/tnt2.c \
+              src/r128/chip.c src/r128/engine2d.c src/r128/cursor.c src/r128/cce.c src/r128/tri.c \
+              src/r128/cce_ucode.c src/rg/r128.c \
+              src/radeon/chip.c src/radeon/engine2d.c src/radeon/cursor.c src/radeon/tri.c src/radeon/cp.c \
+              src/radeon/cp_ucode.c src/rg/radeon.c \
               src/rg/mem.c src/rg/vbe_soft.c src/soft/raster.c src/soft/texture.c port/djgpp.c)
 hal_objs = $(patsubst $(MGAHAL)/%.c,build/$(1)/mgahal/%.o,$(2))
 # Per-test build flags of the conformance tests: those that ask for stencil bits (t33; ct.h's CT_STENCIL).
 ct_flags = $(if $(filter t33,$(1)),-DCT_STENCIL=8)
 DGL_SRCS := $(wildcard src/dgl/*.c) $(wildcard src/gl/*.c) $(wildcard src/backend/mga/*.c) $(wildcard src/backend/soft/*.c) \
-            $(wildcard src/backend/tnt2/*.c)
+            $(wildcard src/backend/tnt2/*.c) $(wildcard src/backend/r128/*.c) $(wildcard src/backend/radeon/*.c)
 LIB := build/lib/libGL.a
 
 .PHONY: all lib examples sdl sdl-host sdl-examples loopa-sdl tests-host loopa conform conform-dos conform-host soft-conform soft-tilecheck soft-meshbench classicube loopa-classicube quake loopa-quake halflife loopa-halflife doom loopa-doom setup-djgpp setup-ow dostools 86box clean help

@@ -12,13 +12,43 @@
   "edge": false,
   "tol": 24,
   "frac": 0.0005,
-  "warp": {"edge": true},
-  "why_warp": "the WARP (G200, G400 family) sets triangles up with its own edge rule, not exactly the Voodoo's: coverage differs on edges (warp=0 keeps the exact rule)"
+  "warp": {
+   "edge": true
+  },
+  "why_warp": "the WARP (G200, G400 family) sets triangles up with its own edge rule, not exactly the Voodoo's: coverage differs on edges (warp=0 keeps the exact rule)",
+  "class": {
+   "virge": {
+    "edge": true,
+    "why": "the ViRGE/DX's set-up evaluates edges exactly (20 fractional bits), the Voodoo's in sixteenths of a pixel: coverage differs by a pixel where an edge passes within a sixteenth of a centre (0.06% of t04)"
+   },
+   "radeon": {
+    "edge": true,
+    "why": "the Radeon sets triangles up itself from vertices in sixteenths of a pixel with an exact top-left rule; the Voodoo's rule for a centre exactly on an edge differs, and no finer bias reaches the chip (it rounds to sixteenths): coverage differs by a pixel on some edges (0.08% of t04)"
+   }
+  }
  },
  "t05": {},
  "t06": {},
  "t07": {
-  "frac": 0.02
+  "frac": 0.02,
+  "class": {
+   "virge": {
+    "gate": false,
+    "why": "W-buffering in a 16-bit Z (a linear 1/w, as the Matrox cards keep it in 32 bits): coarse far away"
+   },
+   "tnt2": {
+    "gate": false,
+    "why": "W-buffering in Z16 (a linear 1/w); the chip's float Z was worse (docs/tnt2.md)"
+   },
+   "r128": {
+    "gate": false,
+    "why": "W-buffering in Z16 (a linear 1/w, as the TNT2's): Glide's aux buffer is 16-bit"
+   },
+   "radeon": {
+    "gate": false,
+    "why": "W-buffering in Z16 (a linear 1/w, as the TNT2's): Glide's aux buffer is 16-bit"
+   }
+  }
  },
  "t08": {
   "edge": false,
@@ -53,7 +83,13 @@
  "t16": {},
  "t22": {
   "edge": false,
-  "frac": 0.01
+  "frac": 0.01,
+  "class": {
+   "virge": {
+    "gate": false,
+    "why": "gamma not applied: the ViRGE/DX's DAC in 15-bit (86Box's model has no ramp there; bench C to settle)"
+   }
+  }
  },
  "t17": {},
  "t18": {
@@ -120,6 +156,22 @@
       "g200": [
        12,
        13
+      ],
+      "virge": [
+       8,
+       10,
+       12,
+       13,
+       14,
+       15
+      ],
+      "tnt2": [
+       12,
+       13
+      ],
+      "r128": [
+       12,
+       13
       ]
      },
      "names": [
@@ -163,7 +215,13 @@
      "dy": 117,
      "cols": 6,
      "n": 8,
-     "approx": [],
+     "approx": {
+      "virge": [
+       3,
+       4,
+       5
+      ]
+     },
      "names": [
       "alpha source CC_ALPHA",
       "alpha source ITERATED_ALPHA",
@@ -177,7 +235,8 @@
     }
    }
   },
-  "why": "cells in 'approx' need an add, a subtract or a texture-alpha factor: the G100 has none of them, the G200 adds via specular but cannot subtract or blend by texel alpha; docs/combine-coverage.md"
+  "why": "cells in 'approx' need an add, a subtract or a texture-alpha factor: the G100 has none of them, the G200 adds via specular but cannot subtract or blend by texel alpha; docs/combine-coverage.md",
+  "why_virge": "the ViRGE/DX's texture environments are DECAL, MODULATE and the sum, blending by the texel's or the vertex's alpha, not their product: adds with alpha, subtraction, texel-alpha lerps, the specular forms and alpha products are approximated"
  },
  "t23": {
   "nocompare": true,

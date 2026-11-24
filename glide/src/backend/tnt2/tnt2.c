@@ -776,5 +776,5 @@ static void tex_write(uint32_t org, const uint16_t *texels, int hw_w, int hw_h)
 
 const mg_backend mg_tnt2_backend = {
     "tnt2", probe, win_open, win_close, fault, exit_restore, sync, busy, in_vblank, vcount, set_ramp, validate,
-    clear, swap, present_front, tnt2_be_tri, tex_write, 128
+    clear, swap, present_front, tnt2_be_tri, tex_write, 128, 0, 0, 0, 0
 };

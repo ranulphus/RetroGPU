@@ -8,7 +8,7 @@
  * program on the Matrox device and the ViRGE/DX's is the check that the
  * table fits both cards.
  *
- *   RGDEV [dev=NAME] [bpp=N] [n=OPS]
+ *   RGDEV [dev=NAME] [bpp=N] [n=OPS] [pitch=PX]   (pitch: the rows' length asked for, as Glide's 1024)
  *
  * HX-TEST lines: choose, modes, open, clear, draw, swap, cursor, close. */
 #include "hx.h"
@@ -125,11 +125,12 @@ int main(int argc, char **argv)
     rg_opened op;
     rg_surface back;
     char why[128] = "";
-    int bpp = 16, n, i, bad;
+    int bpp = 16, n, i, bad, pitch = 0;
     for (i = 1; i < argc; i++)
         if (!strncmp(argv[i], "dev=", 4)) want = argv[i] + 4;
         else if (!strncmp(argv[i], "bpp=", 4)) bpp = atoi(argv[i] + 4);
         else if (!strncmp(argv[i], "n=", 2)) nops = atoi(argv[i] + 2);
+        else if (!strncmp(argv[i], "pitch=", 6)) pitch = atoi(argv[i] + 6);
     hx_init(1, argv, "rgdev");                      /* (its own arguments only) */
     rg_set_log(log_line);
     d = rg_choose(want);
@@ -145,6 +146,7 @@ int main(int argc, char **argv)
 
     memset(&o, 0, sizeof o);
     o.width = W, o.height = H, o.color_bits = bpp, o.depth_bits = 16, o.double_buffer = 1, o.vsync = 1;
+    o.pitch_px = pitch;
     if (d->open(&o, &op) != 0) {
         hx_test("open", 0, "%s", rg_error());
         d->close();
