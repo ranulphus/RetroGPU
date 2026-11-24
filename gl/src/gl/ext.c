@@ -81,8 +81,26 @@ static void coords4(GLenum target, float s, float t, float r, float q)
     c[0] = s;
     c[1] = t;
     dgl_gl.cur_texr[u] = r;
+    dgl_gl.texr_used = 1;               /* (a third coordinate given: vertices carry r from now on) */
 }
-#define coords(u, s, t, q) coords4(u, s, t, 0, q)
+
+/* One and two components: r is 0 (only stored once vertices carry r: GLQuake calls this for every vertex). */
+static void coords(GLenum target, float s, float t, float q)
+{
+    int u = unit_of(target);
+    float *c;
+    if (u < 0)
+        return;
+    c = u ? dgl_gl.cur_tex1 : dgl_gl.cur_tex;
+    if (q != 0 && q != 1) {
+        s /= q;
+        t /= q;
+    }
+    c[0] = s;
+    c[1] = t;
+    if (dgl_gl.texr_used)
+        dgl_gl.cur_texr[u] = 0;
+}
 
 /* glMultiTexCoord{1,2,3,4}{d,f,i,s}[v]ARB, written out so dglGetProcAddress's
  * generated table finds them. */

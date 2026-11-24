@@ -102,6 +102,15 @@ static int record_imm(GLenum mode, GLsizei count, const dgl_vin *v)
         return 1;
     }
     memcpy(p->v, v, (size_t)count * sizeof *v);
+    if (!dgl_gl.nrm_used || !dgl_gl.texr_used) {         /* (immediate mode leaves them unwritten till used) */
+        GLsizei i;
+        for (i = 0; i < count; i++) {
+            if (!dgl_gl.nrm_used)
+                memcpy(p->v[i].nrm, dgl_gl.cur_normal, sizeof p->v[i].nrm);
+            if (!dgl_gl.texr_used)
+                p->v[i].texr[0] = p->v[i].texr[1] = 0;
+        }
+    }
     p->mode = mode;
     p->count = count;
     return compile_mode == GL_COMPILE;

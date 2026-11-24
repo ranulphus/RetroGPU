@@ -84,8 +84,17 @@ static void tc4(float s, float t, float r, float q)
     }
     glTexCoord2f(s, t);
     dgl_gl.cur_texr[0] = r;
+    dgl_gl.texr_used = 1;               /* (a third coordinate given: vertices carry r from now on) */
 }
-#define tc(s, t, q) tc4(s, t, 0, q)
+
+static void tc(float s, float t, float q)
+{
+    if (q != 1.0f && q != 0.0f) {
+        s /= q;
+        t /= q;
+    }
+    glTexCoord2f(s, t);
+}
 
 void APIENTRY glTexCoord1d(GLdouble s) { tc((float)s, 0, 1); }
 void APIENTRY glTexCoord1dv(const GLdouble *v) { tc((float)v[0], 0, 1); }

@@ -147,8 +147,11 @@ void dgl_light_vertex(const dgl_vin *in, dgl_cvtx *o)
     if (pe[3] != 0 && pe[3] != 1)
         for (k = 0; k < 3; k++)
             pe[k] /= pe[3];
-    for (k = 0; k < 3; k++)
-        n[k] = nm[k][0] * in->nrm[0] + nm[k][1] * in->nrm[1] + nm[k][2] * in->nrm[2];
+    {
+        const float *nin = dgl_gl.nrm_used ? in->nrm : dgl_gl.cur_normal;   /* (none given yet: GL's default) */
+        for (k = 0; k < 3; k++)
+            n[k] = nm[k][0] * nin[0] + nm[k][1] * nin[1] + nm[k][2] * nin[2];
+    }
     if (dgl_gl.normalize || dgl_gl.rescale_normal) {
         len = sqrtf(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
         if (len > 0)

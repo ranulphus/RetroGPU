@@ -36,6 +36,7 @@
 radeon_tcl_regs radeon_tcl;
 static radeon_tcl_regs sent;
 static int known, on, have_window;
+int radeon_tcl_live;                    /* (on, for tri.c's test without a call) */
 static uint32_t window_coord_fmt, window_cntl;
 
 static uint32_t fbits(float f)
@@ -75,7 +76,7 @@ void radeon_tcl_on(int yes)
         radeon_3d.se_coord_fmt = window_coord_fmt;
         radeon_3d.se_cntl = window_cntl;
     }
-    on = yes;
+    on = radeon_tcl_live = yes;
     radeon_3d_dirty = 1;
 }
 
@@ -87,7 +88,7 @@ void radeon_tcl_forget(void)
 {
     known = 0;
     have_window = 0;
-    on = 0;
+    on = radeon_tcl_live = 0;
 }
 
 void radeon_tcl_emit(void)

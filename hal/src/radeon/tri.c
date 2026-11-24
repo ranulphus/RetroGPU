@@ -132,6 +132,8 @@ void radeon_3d_emit(void)
     W1(RADEON_RB3D_ROPCNTL, rb3d_ropcntl);
     for (i = 0; i < 3; i++) {
         const uint32_t *now = (const uint32_t *)&c->tex[i], *was = (const uint32_t *)&sent.tex[i];
+        if (known && !tex_stale && !memcmp(now, was, sizeof c->tex[i]))
+            continue;                   /* (a unit unchanged: one compare, not thirteen) */
         for (k = 0; k < 13; k++)
             if (!known || tex_stale || now[k] != was[k])
                 out(tx[i][k], now[k]);
@@ -187,6 +189,12 @@ static int pack(uint32_t *d, const radeon_vertex *v)
     if (vwhat & RADEON_VTX_RHW) d[n++] = fbits(v->rhw);
     if (vwhat & RADEON_VTX_ARGB) d[n++] = v->argb;
     if (vwhat & RADEON_VTX_SPEC) d[n++] = v->spec;
+    if (!(vwhat & (RADEON_VTX_Q | RADEON_VTX_Q2 | RADEON_VTX_Q3))) {   /* (no cube map: the words before X2d's) */
+        if (vwhat & RADEON_VTX_ST) d[n++] = fbits(v->s), d[n++] = fbits(v->t);
+        if (vwhat & RADEON_VTX_ST2) d[n++] = fbits(v->s2), d[n++] = fbits(v->t2);
+        if (vwhat & RADEON_VTX_ST3) d[n++] = fbits(v->s3), d[n++] = fbits(v->t3);
+        return n;
+    }
     if (vwhat & RADEON_VTX_ST) d[n++] = fbits(v->s), d[n++] = fbits(v->t);
     if (vwhat & RADEON_VTX_Q) d[n++] = fbits(v->q);
     if (vwhat & RADEON_VTX_ST2) d[n++] = fbits(v->s2), d[n++] = fbits(v->t2);
@@ -215,7 +223,7 @@ static void prim(uint32_t type, const radeon_vertex *const *v, int nv)
     int n = 0, i;
     if (!vfmt)
         radeon_3d_format(vwhat);
-    if (radeon_tcl_is_on())
+    if (radeon_tcl_live)
         radeon_tcl_on(0);               /* (window-space vertices after the engine's: its words off) */
     if (radeon_3d_dirty || !mode3d || !known)
         radeon_3d_emit();

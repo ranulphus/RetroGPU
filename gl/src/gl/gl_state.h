@@ -159,6 +159,8 @@ typedef struct {
     /* Current vertex attributes and arrays */
     GLfloat cur_color[4], cur_tex[2], cur_tex1[2], cur_normal[3];
     GLfloat cur_texr[2];               /* r of each unit (cube maps: over q, as s and t are) */
+    int     nrm_used, texr_used;        /* a normal or an r other than the default was given (glNormal, glTexCoord3,
+                                         * arrays): till then vertices carry neither (the hot paths skip them) */
     dgl_array va, ca, ta, ta1;         /* ta1: unit 1's texture coordinates */
     dgl_array na;                      /* normals */
     /* Lighting (light.c) */

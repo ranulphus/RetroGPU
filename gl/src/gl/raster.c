@@ -85,6 +85,8 @@ static void set_cap(GLenum cap, int on)
         dgl_gl.dirty |= cap_dirty(cap);
         if (cap == GL_COLOR_MATERIAL && on)
             dgl_color_material_apply();         /* (the current colour is the tracked parameters' from now) */
+        if (cap == GL_TEXTURE_CUBE_MAP_ARB && on)
+            dgl_gl.texr_used = 1;               /* (vertices carry r from now on) */
     }
 }
 
@@ -340,4 +342,5 @@ void APIENTRY glClearStencil(GLint s) { dgl_gl.clear_stencil = s; }
 void APIENTRY glNormal3f(GLfloat nx, GLfloat ny, GLfloat nz)
 {
     dgl_gl.cur_normal[0] = nx, dgl_gl.cur_normal[1] = ny, dgl_gl.cur_normal[2] = nz;
+    dgl_gl.nrm_used = 1;
 }

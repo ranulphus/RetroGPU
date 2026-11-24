@@ -622,7 +622,7 @@ static rtex *unit_words(dgl_texture *t, int hw, int gl_unit)
     {
         /* Anisotropic filtering: the chip's own minifying filters (Mesa's radeonSetTexFilter: they keep the
          * mipmap choice, not the bilinear one) and its ratio, the next one up (2, 4, 8, 16). */
-        GLfloat a = dgl_tex_aniso(t);
+        GLfloat a = dgl_tex_aniso_on(t) ? dgl_tex_aniso(t) : 1.0f;
         if (a > 1.0f) {
             int linear = t->min_filter == GL_LINEAR || t->min_filter == GL_LINEAR_MIPMAP_NEAREST ||
                          t->min_filter == GL_LINEAR_MIPMAP_LINEAR;
@@ -640,10 +640,12 @@ static rtex *unit_words(dgl_texture *t, int hw, int gl_unit)
         /* The level-of-detail bias: signed 8 bits, a 128th of a level each, -1 to +127/128 (measured on the P3's
          * 7500 by t36 and raw values: 64 gave +0.51, 96 +0.78, 127 +0.99; Mesa's radeonTexEnv takes the positive
          * half as a 32nd, which draws a quarter of the bias asked for). */
-        GLfloat b = dgl_tex_lod_bias(gl_unit);
-        int f = (int)(b * 128.0f + (b >= 0 ? 0.5f : -0.5f));
-        f = f > 127 ? 127 : f < -128 ? -128 : f;
-        min |= (uint32_t)(uint8_t)f << RADEON_LOD_BIAS_SHIFT;
+        if (dgl_tex_lod_bias_on(gl_unit)) {
+            GLfloat b = dgl_tex_lod_bias(gl_unit);
+            int f = (int)(b * 128.0f + (b >= 0 ? 0.5f : -0.5f));
+            f = f > 127 ? 127 : f < -128 ? -128 : f;
+            min |= (uint32_t)(uint8_t)f << RADEON_LOD_BIAS_SHIFT;
+        }
     }
     radeon_3d.tex[hw].txfilter = mag | min | (uint32_t)(n - 1) << RADEON_MAX_MIP_LEVEL_SHIFT |
         (t->wrap_s == GL_REPEAT ? RADEON_CLAMP_S_WRAP : RADEON_CLAMP_S_CLAMP_LAST) |   /* (GL_CLAMP as clamp to the edge) */
@@ -834,10 +836,12 @@ static void project(const dgl_cvtx *c, radeon_vertex *v, const dgl_cvtx *colour)
     v->argb = colour_of(colour);
     v->spec = (fogging ? ub(fog_factor(c->eye_d)) : 255u) << 24;
     if (swap_st)
-        v->s = c->s1, v->t = c->t1, v->q = c->tr1;
+        v->s = c->s1, v->t = c->t1;
     else
-        v->s = c->s, v->t = c->t, v->q = c->tr;
-    v->s2 = c->s1, v->t2 = c->t1, v->q2 = c->tr1;
+        v->s = c->s, v->t = c->t;
+    v->s2 = c->s1, v->t2 = c->t1;
+    if (cube_unit[0] | cube_unit[1])            /* (a cube map's r, in q's place) */
+        v->q = swap_st ? c->tr1 : c->tr, v->q2 = c->tr1;
 }
 
 static double offset_for(const radeon_vertex *p0, const radeon_vertex *p1, const radeon_vertex *p2)
@@ -1140,7 +1144,16 @@ static uint16_t *idx_room(int n)
     return tnl_idx;
 }
 
+static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first);
+
 static int rb_tnl(GLenum mode, GLsizei count, const GLint *idx, GLint first)
+{
+    if (!tnl_mode || !(radeon.flags & RADEON_HAS_TCL))
+        return 0;                       /* (said first: GLQuake draws thousands a second this way) */
+    return rb_tnl_draw(mode, count, idx, first);
+}
+
+static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first)
 {
     PROF_SCOPE(PROF_D_SETUP);
     /* (the coordinates: GL's unit 0's s and t, then unit 1's where the chip's second unit draws or the first draws GL's

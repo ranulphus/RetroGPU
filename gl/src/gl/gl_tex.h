@@ -49,6 +49,7 @@ typedef struct dgl_texture {
                                        one GL_LINEAR_MIPMAP_LINEAR (gl_min_filter is what the program set) */
     GLenum   gl_min_filter;
     GLfloat  max_aniso;             /* GL_TEXTURE_MAX_ANISOTROPY_EXT as set (1: none); dgl_tex_aniso: as drawn */
+    int      aniso_on;              /* max_aniso above 1 (tested without the FPU in the drawing paths) */
     int      max_level;
     int      dirty;                 /* its levels changed since the back end's copy was made */
     dgl_palette *own;               /* its GL_TEXTURE_2D colour table, if loaded */
@@ -87,11 +88,16 @@ typedef struct {
     GLenum  src_rgb[3], src_alpha[3], op_rgb[3], op_alpha[3];
     GLfloat rgb_scale, alpha_scale;
     GLfloat lod_bias;               /* GL_EXT_texture_lod_bias (GL_TEXTURE_FILTER_CONTROL_EXT); dgl_tex_lod_bias: as drawn */
+    int     bias_on;                /* lod_bias not 0 */
 } dgl_texenv;
 /* What a back end draws with, the program's values with DGL_ANISO and DGL_LODBIAS applied, within the card's limits
  * (texture.c): an anisotropy of 1 or more, and a unit's level-of-detail bias. */
 GLfloat dgl_tex_aniso(const dgl_texture *t);
 GLfloat dgl_tex_lod_bias(int unit);
+/* Whether either is other than none (integers only: a back end validating on every bind asks these first; GLQuake on
+ * the P3's 7500 lost 6-14% to the float work when it didn't). */
+int dgl_tex_aniso_on(const dgl_texture *t);
+int dgl_tex_lod_bias_on(int unit);
 const dgl_texenv *dgl_tex_env(int unit);
 int dgl_texture_units(void);                    /* ext.c: 2 with the G400's combiner, else 1 */
 GLenum dgl_tex_env_mode(int unit);

@@ -169,6 +169,7 @@ void radeon_tcl_defaults(void);
 void radeon_tcl_on(int yes);
 uint32_t radeon_tcl_window_cntl(void);  /* SE_CNTL as the window-space draws have it (the engine's start from it) */
 int  radeon_tcl_is_on(void);
+extern int radeon_tcl_live;             /* (the same, for a test without a call) */
 void radeon_tcl_forget(void);           /* (a new 3D state: everything written again) */
 void radeon_tcl_emit(void);
 void radeon_tcl_viewport(const float v[6]);     /* x scale, offset, y scale, offset, z scale, offset */

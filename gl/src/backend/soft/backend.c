@@ -296,8 +296,8 @@ static void stage_for(soft_stage *st, int unit, int on)
         return;
     st->tex = tx;
     st->coord = unit;
-    st->lod_bias = dgl_tex_lod_bias(unit);
-    st->aniso = dgl_tex_aniso(t);
+    st->lod_bias = dgl_tex_lod_bias_on(unit) ? dgl_tex_lod_bias(unit) : 0.0f;
+    st->aniso = dgl_tex_aniso_on(t) ? dgl_tex_aniso(t) : 1.0f;
     env_stage(st, dgl_tex_env(unit), t->level[0].ifc);
 }
 

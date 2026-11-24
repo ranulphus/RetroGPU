@@ -53,7 +53,7 @@ static void env_defaults(dgl_texenv *e)
 /* Picture quality for programs that don't ask (docs/dx7.md, X1): DGL_TRILINEAR=1 draws every mipmapping texture
  * GL_LINEAR_MIPMAP_LINEAR, DGL_ANISO=N filters every texture at least N:1 where the card can, DGL_LODBIAS=x adds x
  * to every unit's level-of-detail bias (negative: sharper). Read once. */
-static struct { int read, trilinear; GLfloat aniso, lod_bias; } q;
+static struct { int read, trilinear, aniso_on, bias_on; GLfloat aniso, lod_bias; } q;
 
 static void quality_read(void)
 {
@@ -67,6 +67,22 @@ static void quality_read(void)
         q.aniso = 1.0f;
     e = getenv("DGL_LODBIAS");
     q.lod_bias = e && *e ? (GLfloat)atof(e) : 0.0f;
+    q.aniso_on = q.aniso > 1.0f;
+    q.bias_on = q.lod_bias != 0.0f;
+}
+
+int dgl_tex_aniso_on(const dgl_texture *t)
+{
+    if (!q.read)
+        quality_read();
+    return t->aniso_on | q.aniso_on;
+}
+
+int dgl_tex_lod_bias_on(int unit)
+{
+    if (!q.read)
+        quality_read();
+    return env_u[unit].bias_on | q.bias_on;
 }
 
 static GLenum drawn_min_filter(GLenum f)
@@ -414,6 +430,7 @@ static void param(GLenum target, GLenum pname, GLfloat f)
     case GL_TEXTURE_MAX_ANISOTROPY_EXT:
         if (!(f >= 1.0f)) { dgl_gl_error(GL_INVALID_VALUE); return; }
         t->max_aniso = f;               /* (above the card's limit: drawn at the limit, as the extension says) */
+        t->aniso_on = f > 1.0f;
         break;
     case GL_TEXTURE_PRIORITY:
         return;                         /* accepted, no effect */
@@ -550,6 +567,7 @@ static void env(GLenum target, GLenum pname, const GLfloat *v)
         dgl_get_caps(&c);
         if (pname != GL_TEXTURE_LOD_BIAS_EXT || c.max_lod_bias <= 0) { dgl_gl_error(GL_INVALID_ENUM); return; }
         e->lod_bias = v[0];
+        e->bias_on = v[0] != 0.0f;
         dgl_gl.dirty |= DGL_DIRTY_TEXTURE;
         return;
     }
