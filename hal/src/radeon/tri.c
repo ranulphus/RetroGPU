@@ -131,10 +131,11 @@ void radeon_3d_emit(void)
     W1(RADEON_RB3D_STENCILREFMASK, rb3d_stencilrefmask);
     W1(RADEON_RB3D_ROPCNTL, rb3d_ropcntl);
     for (i = 0; i < 3; i++) {
+        /* (the cube map's six words only where one is or was: DJGPP's memcmp over all thirteen cost GLQuake more
+         * than the words themselves, P3 2026-11-24) */
         const uint32_t *now = (const uint32_t *)&c->tex[i], *was = (const uint32_t *)&sent.tex[i];
-        if (known && !tex_stale && !memcmp(now, was, sizeof c->tex[i]))
-            continue;                   /* (a unit unchanged: one compare, not thirteen) */
-        for (k = 0; k < 13; k++)
+        int last = !known || now[7] || was[7] ? 13 : 7;
+        for (k = 0; k < last; k++)
             if (!known || tex_stale || now[k] != was[k])
                 out(tx[i][k], now[k]);
     }

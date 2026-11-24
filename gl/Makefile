@@ -266,6 +266,9 @@ build/rig/conform/%: build/rig/libGL.a tests/conform/ct_rig.c tests/conform/ct.h
 build/rig/softmesh: build/rig/libGL.a tests/rig/softmesh.c tests/conform/ct_rig.c tests/conform/ct.h
 	$(Q)$(HOST_CC) $(RIG_CFLAGS) -static -DCT_NAME='"softmesh"' -Itests/conform -o $@ tests/rig/softmesh.c \
 	  tests/conform/ct_rig.c build/rig/libGL.a -lm
+build/rig/glqlike: build/rig/libGL.a tests/rig/glqlike.c tests/conform/ct_rig.c tests/conform/ct.h
+	$(Q)$(HOST_CC) $(RIG_CFLAGS) -static -DCT_NAME='"glqlike"' -Itests/conform -o $@ tests/rig/glqlike.c \
+	  tests/conform/ct_rig.c build/rig/libGL.a -lm
 # The software renderer's per-triangle cost (docs/b2.md B2.9): FRAMES=, PROF=1 (then tools/soft/attr.py).
 soft-meshbench:
 	MGA_EXTRA_DIR=$(GLOS) $(MGAHAL)/tools/dev sh -c '$(MAKE) -s rig-build build/rig/softmesh && \
