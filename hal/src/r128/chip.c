@@ -33,13 +33,22 @@ void r128_pll_wr(int index, uint32_t v)
     r128_wr(R128_CLOCK_CNTL_DATA, v);
 }
 
+/* A Rage 128's PCI device ID (X.org's r128 driver's list: the Rage 128 RE-RL and SE-SN, the Pro PA-PX, the Pro
+ * Ultra TF-TU, the Mobility M3 and M4). Any other ATI display card is not this layer's: a Radeon was taken for one
+ * and its command processor started as a CCE (DOS-GL's conformance on the P3's Radeon hung at its first test). */
+static int is_r128(uint16_t id)
+{
+    return (id >= 0x5041 && id <= 0x5058) || (id >= 0x5245 && id <= 0x524C) || (id >= 0x5345 && id <= 0x534E) ||
+           (id >= 0x5446 && id <= 0x5455) || id == 0x4C45 || id == 0x4C46 || id == 0x4D46 || id == 0x4D4C;
+}
+
 int r128_find(void)
 {
     int bus, dev;
     for (bus = 0; bus < 4; bus++)               /* (an AGP card sits behind the AGP bridge: bus 1) */
         for (dev = 0; dev < 32; dev++) {
             uint32_t id = pci_read32(bus, dev, 0), cls = pci_read32(bus, dev, 0x08) >> 16;
-            if ((id & 0xFFFF) == R128_PCI_VENDOR && cls == 0x0300) {
+            if ((id & 0xFFFF) == R128_PCI_VENDOR && cls == 0x0300 && is_r128((uint16_t)(id >> 16))) {
                 memset(&r128, 0, sizeof r128);
                 r128.bus = bus;
                 r128.dev = dev;

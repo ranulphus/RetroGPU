@@ -118,3 +118,5 @@ void sys_terminate(int code) { exit(code); }
 void sys_unhook_exit(void) { }
 int sys_cache_wc_err = -1;
 int sys_cache_wc(uint32_t lin, uint32_t bytes) { (void)lin; (void)bytes; return -1; }
+int sys_cache_type(uint32_t lin, uint32_t bytes, unsigned type) { (void)lin; (void)bytes; (void)type; return -1; }
+uint32_t sys_linear(const volatile void *p) { return (uint32_t)(uintptr_t)p; }

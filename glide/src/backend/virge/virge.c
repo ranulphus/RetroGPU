@@ -679,5 +679,5 @@ static void tex_write(uint32_t org, const uint16_t *texels, int hw_w, int hw_h)
 
 const mg_backend mg_virge_backend = {
     "virge", probe, win_open, win_close, fault, exit_restore, sync, busy, in_vblank, vcount, set_ramp, validate,
-    clear, swap, present_front, virge_be_tri, tex_write, 8, 1, 1
+    clear, swap, present_front, virge_be_tri, tex_write, 8, 1, 1, 0
 };
