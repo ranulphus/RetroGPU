@@ -43,6 +43,7 @@ static uint32_t heap_lo, heap_hi, white_off;
 /* Blocks (a record's levels) start at the back end's alignment: the Matrox's HW_ALIGN, the TNT2's 128 bytes
  * (its base level's); the levels within a block stay HW_ALIGN apart (the TNT2's rule for levels too). */
 static uint32_t block_align(void) { return mg_be && mg_be->tex_align ? mg_be->tex_align : HW_ALIGN; }
+static int min_w(void) { return mg_be && mg_be->tex_min_w ? mg_be->tex_min_w : 8; }     /* (a slot's shortest row) */
 
 void tex_heap_init(uint32_t start, uint32_t end)
 {
@@ -417,7 +418,7 @@ static int ensure_block(int ri)
     for (l = r->large; l <= GR_LOD_1; l++) {
         int w, h;
         tex_dims(l, r->aspect, &w, &h);
-        if (w < 8) w = 8;
+        if (w < min_w()) w = min_w();
         if (h < 8) h = 8;
         if (mg_be->tex_square && w != h)
             w = h = w > h ? w : h;      /* (square slots: the ViRGE's textures) */
@@ -443,7 +444,7 @@ static int ensure_block(int ri)
     for (l = r->large; l <= GR_LOD_1; l++) {
         int w, h;
         tex_dims(l, r->aspect, &w, &h);
-        if (w < 8) w = 8;
+        if (w < min_w()) w = min_w();
         if (h < 8) h = 8;
         if (mg_be->tex_square && w != h)
             w = h = w > h ? w : h;
@@ -500,7 +501,7 @@ int tex_bind_level(GrLOD_t lod, const tex_variant *var, tex_level_hw *hw)
         r->hw_pal_gen = tmu0.pal_gen;
     if ((palettised && r->hw_pal_gen != tmu0.pal_gen) ||
         (nccfmt && r->hw_ncc_gen != tmu0.ncc_gen) ||
-        ((w < 8 || h < 8 || (mg_be->tex_square && w != h)) && r->hw_clamp != clamp_key) || r->hw_var != vkey) {
+        ((w < min_w() || h < 8 || (mg_be->tex_square && w != h)) && r->hw_clamp != clamp_key) || r->hw_var != vkey) {
         memset(r->hw_valid, 0, sizeof r->hw_valid);
         if (palettised) {
             if (!r->hw_pal)

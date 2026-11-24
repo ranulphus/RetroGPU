@@ -39,6 +39,10 @@
    "r128": {
     "gate": false,
     "why": "W-buffering in Z16 (a linear 1/w, as the TNT2's): Glide's aux buffer is 16-bit"
+   },
+   "radeon": {
+    "gate": false,
+    "why": "W-buffering in Z16 (a linear 1/w, as the TNT2's): Glide's aux buffer is 16-bit"
    }
   }
  },

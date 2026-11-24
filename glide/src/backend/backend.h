@@ -50,6 +50,8 @@ typedef struct mg_backend {
     int tex_no565;                      /* 1: no 565 texels (opaque levels as 1555 with the alpha bit set) */
     int tex_ordered;                    /* 1: tex_write is ordered with the queued drawing (it syncs itself when it
                                          * can't be): no engine sync before it */
+    int tex_min_w;                      /* a level's shortest row in video memory, in texels (0: 8); the Radeon's
+                                         * rows are 32 bytes at least: 16 */
 } mg_backend;
 
 extern const mg_backend *mg_be;         /* the back end of the card found (sst.c) */
@@ -59,5 +61,6 @@ extern const mg_backend mg_mga_backend; /* the Matrox cards (backend/mga) */
 extern const mg_backend mg_tnt2_backend; /* the Riva TNT and TNT2 (backend/tnt2) */
 extern const mg_backend mg_virge_backend; /* the S3 ViRGE/DX and /GX (backend/virge) */
 extern const mg_backend mg_r128_backend; /* the ATI Rage 128 (backend/r128) */
+extern const mg_backend mg_radeon_backend; /* the ATI Radeon, R100 family (backend/radeon) */
 
 #endif

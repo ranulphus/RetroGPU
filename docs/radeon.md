@@ -239,6 +239,56 @@ list), made from the Rage 128's device.
 at 1,024 pixels, through the ring. (RGDEV's reference is 16-bit: its `bpp=32` is not a test of a 32-bit device;
 `DTWOD 32` covers the 2D engine there, and passes but for the card's one or two lost bytes a case.)
 
+## RD5: DOS-GL's back end (2026-11-24)
+
+`gl/src/backend/radeon/backend.c`, made from the Rage 128's, on the Radeon device and layer.
+
+- **The texture environments** are on the chip's combiner after Mesa's `radeonUpdateTextureEnv`: every
+  `GL_COMBINE_ARB` function (replace, modulate, add, add signed, subtract, interpolate) with any of its sources and
+  operands and a scale of 1, 2 or 4 has its own form, and the classic environments are their combine equivalents
+  by the texture's family. Nothing is approximated there (the Rage 128's combiner had one function a unit).
+- **Two texture units** of GL's on the chip's first two (the chip has a third). GL's second alone is drawn by the
+  chip's first with the second's coordinates.
+- **Textures** go through the command stream (`radeon_upload`) into the heap, each level after the last with rows
+  padded to 32 bytes; `glTexSubImage2D` on a single-level texture sends the rectangle's rows again in place. To
+  2,048 texels a side.
+- **Trilinear filtering** is the chip's own (`LINEAR_MIP_LINEAR`).
+
+Two things the first runs on the P3 found:
+
+- **The Rage 128's probe took any ATI display card**, and its device is before the Radeon's in the list: DOS-GL
+  drove the Radeon as a Rage 128 and the first test hung. `r128_find` now takes the Rage 128's IDs only.
+- **The chip keeps texels it has read until a unit's texture registers are written again**, as the G400 does: a
+  16 x 16 lightmap's rectangles updated in place never showed (t18, t32), because the layer writes a register only
+  when its value changes. `radeon_3d_tex_written` (called by `radeon_upload` and after the CPU's writes) has the
+  units' registers written again at the next primitive. `radeon_upload` also flushes the pixel cache after its
+  blit, as the DRM does.
+
+**Conformance on the P3** (`DGL_RADEON_VRAM=16-33`, through the ring): 33 of 35 at the first whole run, the two
+texture-update tests failing; with the fix above those pass.
+
+## RD6: Glide's back end (2026-11-24)
+
+`glide/src/backend/radeon/radeon.c`, made from the Rage 128's. What differs is the combine: the Rage 128 has one
+function a unit over the vertex colour and the texel, so its back end works most of a combine out at the vertices.
+The Radeon's units take the texel, the vertex's colour and alpha, a factor colour and the unit before, each or its
+complement, and compute A x B + C, A x B - C or a blend. So with a texture the Voodoo's combines run on the chip:
+
+- Glide's iterated colour and alpha are the vertex's; its constant colour is the units' factor colour
+  (`PP_TFACTOR`); its texel is the first unit's.
+- One unit: zero, local, local alpha, `f x other`, `f x other + local`, `f x other + local alpha`,
+  `f x other + (1 - f) x local` (the blend), `(1 - f) x local`.
+- Two units: `f x (other - local)` (the difference first, never below 0 either way), `local alpha - f x local`,
+  and `f x (other - local) + local alpha` (approximated where other is less than local: said once).
+- A unit more for an inverted result, and one for chroma key's alpha (the keyed texels' alpha 0 multiplied in when
+  the alpha combine doesn't take the texel's).
+- Every unit a combine uses has the texture enabled, all reading the vertex's one pair of coordinates.
+- Without a texture the combine is worked out at the vertices, as on the other cards.
+
+The core gained two small things for it: a back end's shortest texture row (`tex_min_w`: 16 texels here, the
+chip's 32 bytes; 8 for the others as before), and the setting `MGAGLIDE radeon_vram=A-B` (megabytes, as
+`DGL_RADEON_VRAM`).
+
 ## The rest of the family: the RV200 (Radeon 7500) and the first Radeon (R100)
 
 A Radeon 7500 LE (RV200) is to follow this card. What the references say differs, gathered here so it isn't

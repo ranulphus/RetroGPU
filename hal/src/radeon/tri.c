@@ -14,6 +14,7 @@ int radeon_3d_dirty = 1;
 static radeon_ctx3d sent;               /* the words the chip has (while known) */
 static int known;                       /* (0: every register is written at the next emit) */
 static int mode3d;                      /* the last drawing was 3D (the engines take turns) */
+static int tex_stale;                   /* texels were written: the units' registers go out again at the next emit */
 static uint32_t vfmt;
 static int vwhat = RADEON_VTX_RHW | RADEON_VTX_ARGB;
 
@@ -130,14 +131,25 @@ void radeon_3d_emit(void)
     for (i = 0; i < 3; i++) {
         const uint32_t *now = (const uint32_t *)&c->tex[i], *was = (const uint32_t *)&sent.tex[i];
         for (k = 0; k < 7; k++)
-            if (!known || now[k] != was[k])
+            if (!known || tex_stale || now[k] != was[k])
                 out(tx[i][k], now[k]);
     }
     if (!known)
         out(RADEON_AUX_SC_CNTL, 0);
     sent = *c;
     known = 1;
+    tex_stale = 0;
     radeon_3d_dirty = 0;
+}
+
+/* Texels were written where a unit's texture is (by the stream or the CPU): the units' registers are written again
+ * before the next primitive, though their values are the same. The chip keeps texels it has read until then:
+ * DOS-GL's conformance t18 and t32 on the P3, a 16 x 16 lightmap's rectangles updated in place never showed (the
+ * G400 does the same: gl/src/gl/texture.c). */
+void radeon_3d_tex_written(void)
+{
+    tex_stale = 1;
+    radeon_3d_dirty = 1;
 }
 
 void radeon_3d_format(int what)
@@ -159,21 +171,20 @@ static uint32_t fbits(float f)
     return v.u;
 }
 
-/* One triangle: the vertex format, SE_VF_CNTL (a triangle list of three, its vertices following as data, the
- * Radeon's own vertex layout), then each vertex's words in the format's order. */
-void radeon_tri(const radeon_vertex *a, const radeon_vertex *b, const radeon_vertex *c)
+/* A primitive of n vertices (a triangle list's three, or a convex polygon's 3 to 16 as one fan): the vertex format,
+ * SE_VF_CNTL (the primitive, its vertices following as data, the Radeon's own vertex layout), then each vertex's
+ * words in the format's order; with the command processor one 3D_DRAW_IMMD packet (the DRM's and X.org's). */
+static void prim(uint32_t type, const radeon_vertex *const *v, int nv)
 {
     static uint32_t fmt_sent;
     static int fmt_known;
-    const radeon_vertex *v[3];
-    uint32_t p[3 * 12];
+    uint32_t p[16 * 12];
     int n = 0, i;
     if (!vfmt)
         radeon_3d_format(vwhat);
     if (radeon_3d_dirty || !mode3d || !known)
         radeon_3d_emit();
-    v[0] = a, v[1] = b, v[2] = c;
-    for (i = 0; i < 3; i++) {
+    for (i = 0; i < nv; i++) {
         p[n++] = fbits(v[i]->x), p[n++] = fbits(v[i]->y), p[n++] = fbits(v[i]->z);
         if (vwhat & RADEON_VTX_RHW) p[n++] = fbits(v[i]->rhw);
         if (vwhat & RADEON_VTX_ARGB) p[n++] = v[i]->argb;
@@ -183,12 +194,11 @@ void radeon_tri(const radeon_vertex *a, const radeon_vertex *b, const radeon_ver
         if (vwhat & RADEON_VTX_ST3) p[n++] = fbits(v[i]->s3), p[n++] = fbits(v[i]->t3);
     }
     if (radeon_cp_running()) {
-        /* (3D_DRAW_IMMD: the vertex format, the control word, the vertices; the DRM's and X.org's) */
         uint32_t h[3];
         h[0] = RADEON_CP_PACKET3(RADEON_3D_DRAW_IMMD, n + 1);
         h[1] = vfmt;
-        h[2] = RADEON_VF_PRIM_TYPE_TRIANGLE_LIST | RADEON_CP_VC_WALK_RING | RADEON_CP_VC_MAOS_ENABLE | RADEON_VF_RADEON_MODE |
-               3u << RADEON_VF_NUM_VERTICES_SHIFT;
+        h[2] = type | RADEON_CP_VC_WALK_RING | RADEON_CP_VC_MAOS_ENABLE | RADEON_VF_RADEON_MODE |
+               (uint32_t)nv << RADEON_VF_NUM_VERTICES_SHIFT;
         radeon_cp_out(h, 3);
         radeon_cp_out(p, n);
         fmt_known = 0;
@@ -199,11 +209,32 @@ void radeon_tri(const radeon_vertex *a, const radeon_vertex *b, const radeon_ver
         radeon_wr(RADEON_SE_VTX_FMT, vfmt);
         fmt_sent = vfmt, fmt_known = 1;
     }
-    fifo(1 + n);
-    radeon_wr(RADEON_SE_VF_CNTL, RADEON_VF_PRIM_TYPE_TRIANGLE_LIST | RADEON_VF_PRIM_WALK_DATA | RADEON_VF_RADEON_MODE |
-                                 3u << RADEON_VF_NUM_VERTICES_SHIFT);
-    for (i = 0; i < n; i++)
+    fifo(1);
+    radeon_wr(RADEON_SE_VF_CNTL, type | RADEON_VF_PRIM_WALK_DATA | RADEON_VF_RADEON_MODE |
+                                 (uint32_t)nv << RADEON_VF_NUM_VERTICES_SHIFT);
+    for (i = 0; i < n; i++) {
+        if ((i & 31) == 0)
+            fifo(n - i < 32 ? n - i : 32);
         radeon_wr(RADEON_SE_PORT_DATA0, p[i]);
+    }
+}
+
+void radeon_tri(const radeon_vertex *a, const radeon_vertex *b, const radeon_vertex *c)
+{
+    const radeon_vertex *v[3];
+    v[0] = a, v[1] = b, v[2] = c;
+    prim(RADEON_VF_PRIM_TYPE_TRIANGLE_LIST, v, 3);
+}
+
+void radeon_poly(const radeon_vertex *v, int n)
+{
+    const radeon_vertex *p[16];
+    int i;
+    if (n < 3 || n > 16)
+        return;
+    for (i = 0; i < n; i++)
+        p[i] = &v[i];
+    prim(n == 3 ? RADEON_VF_PRIM_TYPE_TRIANGLE_LIST : RADEON_VF_PRIM_TYPE_TRIANGLE_FAN, p, n);
 }
 
 /* 2D drawing after 3D: the queue held until the 3D engine is idle and its cache clean (RADEON_SWITCH_TO_2D). */

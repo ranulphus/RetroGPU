@@ -37,6 +37,7 @@ typedef struct {
     int  dma_ring_kb;          /* with warp: the DMA rings' size in KB at most (128; 0: the HAL's, 256) */
     int  dma_list_div;         /* with warp: the list's share of the rings, 1/N (2; 0: the HAL's, 8) */
     int  dma_kick_kb;          /* with warp: KB of vertices between kicks (0: the HAL's, 6) */
+    int  radeon_vram[2];       /* a Radeon: megabytes A to B of its memory in use (radeon_vram=A-B; 0-0: all) */
 } mg_config_t;
 
 extern mg_config_t mg_config;

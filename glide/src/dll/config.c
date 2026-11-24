@@ -51,6 +51,12 @@ static void set_opt(const char *key, const char *val)
     else if (!strcmp(key, "dma_ring")) mg_config.dma_ring_kb = to_int(val);
     else if (!strcmp(key, "dma_list")) mg_config.dma_list_div = to_int(val);
     else if (!strcmp(key, "dma_kick")) mg_config.dma_kick_kb = to_int(val);
+    else if (!strcmp(key, "radeon_vram")) {
+        const char *xp = val;
+        mg_config.radeon_vram[0] = to_int(val);
+        while (*xp && *xp != '-') xp++;
+        mg_config.radeon_vram[1] = *xp ? to_int(xp + 1) : 0;
+    }
     else if (!strcmp(key, "res")) {
         const char *xp = val;
         mg_config.res_w = to_int(val);

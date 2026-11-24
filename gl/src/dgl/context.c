@@ -150,6 +150,8 @@ static const dgl_backend *backend_for(const rg_device *d)
         return &dgl_tnt2_backend;
     if (d == dgl_r128_backend.dev)              /* (the ATI Rage 128's: RetroGPU's docs/rage128.md, R4) */
         return &dgl_r128_backend;
+    if (d == dgl_radeon_backend.dev)            /* (the ATI Radeon's, R100 family: RetroGPU's docs/radeon.md, RD5) */
+        return &dgl_radeon_backend;
     return NULL;
 }
 

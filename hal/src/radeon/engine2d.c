@@ -333,7 +333,12 @@ int radeon_upload(uint32_t off, const uint32_t *data, uint32_t bytes)
     }
     if (bytes)
         upload_rows(off, 0, 32, 1, data);
-    fifo_wait(1);
-    eng_wr(RADEON_WAIT_UNTIL, RADEON_WAIT_2D_IDLECLEAN | RADEON_WAIT_HOST_IDLECLEAN);
+    /* The pixel cache flushed after the blit, then the engine waited for (the DRM's radeon_cp_dispatch_texture:
+     * "this ensures the texture data is written out to memory before rendering continues"): without the flush a
+     * small update stayed in the cache and the triangles after it sampled the old texels (DOS-GL's conformance t18
+     * and t32 on the P3: a 16 x 16 lightmap's rectangles never showed; larger uploads push themselves out). */
+    radeon_cp_reg(RADEON_RB3D_DSTCACHE_CTLSTAT, RADEON_RB3D_DC_FLUSH);
+    radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_2D_IDLECLEAN | RADEON_WAIT_HOST_IDLECLEAN);
+    radeon_3d_tex_written();
     return 0;
 }
