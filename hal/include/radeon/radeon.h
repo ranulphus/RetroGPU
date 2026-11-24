@@ -109,7 +109,7 @@ extern int radeon_3d_dirty;             /* (set by a caller that changed radeon_
 typedef struct {
     float x, y, z, rhw;                 /* window coordinates (pixel centres at halves), z 0..1, 1/w */
     uint32_t argb, spec;                /* (the specular's top byte: the fog factor) */
-    float s, t, s2, t2;
+    float s, t, s2, t2, s3, t3;         /* (the three units' coordinates) */
 } radeon_vertex;
 /* The state for a colour buffer at color_off (pitch_bytes a row, 16 or 32 bits) and a depth buffer at z_off (16
  * bits, or 24 with stencil; z_off 0 and zbits 0: none): Mesa's defaults, vertices in window coordinates. */
@@ -117,12 +117,13 @@ void radeon_3d_init(uint32_t color_off, int pitch_bytes, int bpp, uint32_t z_off
                     int width, int height);
 void radeon_3d_emit(void);
 /* What a vertex carries after x, y, z: RADEON_VF_* below, in this order: rhw, the colour, the specular and fog,
- * s and t, s2 and t2. */
+ * s and t, s2 and t2, s3 and t3. */
 #define RADEON_VTX_RHW   1
 #define RADEON_VTX_ARGB  2
 #define RADEON_VTX_SPEC  4
 #define RADEON_VTX_ST    8
 #define RADEON_VTX_ST2   16
+#define RADEON_VTX_ST3   32
 void radeon_3d_format(int what);
 void radeon_tri(const radeon_vertex *a, const radeon_vertex *b, const radeon_vertex *c);
 void radeon_2d_begin(void);             /* (engine2d.c calls it: 2D after 3D waits for the 3D engine) */

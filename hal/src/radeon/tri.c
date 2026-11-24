@@ -141,6 +141,7 @@ void radeon_3d_format(int what)
     if (what & RADEON_VTX_SPEC) vfmt |= RADEON_SE_VTX_FMT_PKSPEC;
     if (what & RADEON_VTX_ST) vfmt |= RADEON_SE_VTX_FMT_ST0;
     if (what & RADEON_VTX_ST2) vfmt |= RADEON_SE_VTX_FMT_ST1;
+    if (what & RADEON_VTX_ST3) vfmt |= RADEON_SE_VTX_FMT_ST2;
 }
 
 static uint32_t fbits(float f)
@@ -157,7 +158,7 @@ void radeon_tri(const radeon_vertex *a, const radeon_vertex *b, const radeon_ver
     static uint32_t fmt_sent;
     static int fmt_known;
     const radeon_vertex *v[3];
-    uint32_t p[3 * 10];
+    uint32_t p[3 * 12];
     int n = 0, i;
     if (!vfmt)
         radeon_3d_format(vwhat);
@@ -171,6 +172,7 @@ void radeon_tri(const radeon_vertex *a, const radeon_vertex *b, const radeon_ver
         if (vwhat & RADEON_VTX_SPEC) p[n++] = v[i]->spec;
         if (vwhat & RADEON_VTX_ST) p[n++] = fbits(v[i]->s), p[n++] = fbits(v[i]->t);
         if (vwhat & RADEON_VTX_ST2) p[n++] = fbits(v[i]->s2), p[n++] = fbits(v[i]->t2);
+        if (vwhat & RADEON_VTX_ST3) p[n++] = fbits(v[i]->s3), p[n++] = fbits(v[i]->t3);
     }
     if (!fmt_known || fmt_sent != vfmt) {
         fifo(1);

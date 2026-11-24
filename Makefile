@@ -157,6 +157,8 @@ DJ_SRC_DTRI0 := tests/radeon/dtri0.c build/djgpp/libradeon.a
 DJ_SRC_DTRI := tests/radeon/dtri.c build/djgpp/libradeon.a
 # DMIP (which mipmap level the chip takes, by footprint).
 DJ_SRC_DMIP := tests/radeon/dmip.c build/djgpp/libradeon.a
+# DTRI32 (8888 with Z24S8: coverage, Z, blending, the stencil, the alpha test, three texture units).
+DJ_SRC_DTRI32 := tests/radeon/dtri32.c build/djgpp/libradeon.a
 # RTWOD (R1: the 2D engine against sw2d.c at 8, 16 and 32 bits) and RFLIP (when the start is taken, watched).
 DJ_SRC_RTWOD := tests/r128/rtwod.c tests/hal/sw2d.c build/djgpp/libr128.a
 DJ_SRC_RFLIP := tests/r128/rflip.c build/djgpp/libr128.a
@@ -207,6 +209,7 @@ build/djgpp/DCOPY.EXE: tests/radeon/dcopy.c build/djgpp/libradeon.a
 build/djgpp/DTRI0.EXE: tests/radeon/dtri0.c build/djgpp/libradeon.a
 build/djgpp/DTRI.EXE: tests/radeon/dtri.c build/djgpp/libradeon.a
 build/djgpp/DMIP.EXE: tests/radeon/dmip.c build/djgpp/libradeon.a
+build/djgpp/DTRI32.EXE: tests/radeon/dtri32.c build/djgpp/libradeon.a
 build/djgpp/RTWOD.EXE: tests/r128/rtwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libr128.a
 build/djgpp/RTWOD.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/RFLIP.EXE: tests/r128/rflip.c build/djgpp/libr128.a

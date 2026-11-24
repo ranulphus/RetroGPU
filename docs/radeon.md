@@ -152,7 +152,22 @@ off of 35,000 to 81,000. What it settled:
 - **Textures were written by the CPU** with the engine idle, then `radeon_vram_written`; no texture cache needed a
   flush between textures at the same address.
 
-Still to do in RD2: the same scenes at 8888 with a 24-bit Z and stencil; the alpha test; the second and third units.
+### 32 bits, the stencil, the alpha test and three units: DTRI32 (2026-11-24)
+
+`DTRI32` draws to ARGB8888 with a Z24S8 buffer. All its lines pass on the P3, twice:
+
+- **Coverage is exact** against the top-left rule (58,057 pixels, none outside, none missing), ties included: a
+  pixel centre exactly on a right edge is not drawn. (RTRI32's reference had the tie rule the other way round; its
+  scene has 24 such pixels, which is how this showed.)
+- **Z24S8:** the depth in bits 23-0, the stencil in bits 31-24, as on the Rage 128.
+- **The stencil** (`RB3D_CNTL`'s `STENCIL_ENABLE`, the test and operations in `RB3D_ZSTENCILCNTL`, the reference
+  and masks in `RB3D_STENCILREFMASK`): a triangle wrote 5, a quad with EQUAL drew only there.
+- **The alpha test** (`PP_CNTL`'s `ALPHA_TEST_ENABLE`, the function and reference in `PP_MISC`): GEQUAL 128 along
+  an alpha ramp cut at alpha 129.
+- **Three texture units** multiplied together gave the product to the last bit; the units' coordinates follow one
+  another in the vertex (`SE_VTX_FMT`'s ST0, ST1, ST2), each unit's `TXFORMAT` routed to its own.
+
+RD2 is complete: `DTRI0`, `DTRI`, `DTRI32` and `DMIP` pass on the P3.
 
 ## The rest of the family: the RV200 (Radeon 7500) and the first Radeon (R100)
 
