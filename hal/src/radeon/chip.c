@@ -18,8 +18,21 @@ static uint32_t pci_read32(int bus, int dev, int reg)
     return sys_inl(0xCFC);
 }
 
-uint32_t radeon_rd(uint32_t off) { return *(volatile uint32_t *)(radeon.mmio + off); }
-void radeon_wr(uint32_t off, uint32_t v) { *(volatile uint32_t *)(radeon.mmio + off) = v; }
+int radeon_dead;
+
+uint32_t radeon_rd(uint32_t off)
+{
+    if (radeon_dead && off >= 0x1000u)
+        return 0;
+    return *(volatile uint32_t *)(radeon.mmio + off);
+}
+
+void radeon_wr(uint32_t off, uint32_t v)
+{
+    if (radeon_dead && off >= 0x1000u)
+        return;
+    *(volatile uint32_t *)(radeon.mmio + off) = v;
+}
 
 /* A PLL register through the clock index (radeon_driver.c's INPLL: the index's low 6 bits, PLL_WR_EN clear), with
  * the chips' errata: the RV200's two dummy reads after the index (RADEONPllErrataAfterIndex), the RV100's 5 ms

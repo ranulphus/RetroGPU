@@ -218,6 +218,8 @@ void radeon_cp_peek(uint32_t *rp, uint32_t *wp, const volatile uint32_t **base, 
     *dwords = ring_dw;
 }
 
+uint32_t radeon_cp_wptr(void) { return wptr; }
+
 /* The ring's new dwords to the chip (the ring is ordinary memory: x86 keeps these stores before the uncached write
  * of the index; the read after it posts the write, as the DRM's COMMIT_RING). */
 MGA_HOT void radeon_cp_flush(void)
@@ -307,10 +309,13 @@ MGA_HOT void radeon_out(uint32_t reg, uint32_t v)
         radeon_cp_reg(reg, v);
         return;
     }
-    {
+    if (!radeon_dead) {
         uint32_t t0 = sys_time_us();
-        while ((radeon_rd(RADEON_RBBM_STATUS) & RADEON_RBBM_FIFOCNT_MASK) < 1u && sys_time_us() - t0 < 200000u)
-            ;
+        while ((radeon_rd(RADEON_RBBM_STATUS) & RADEON_RBBM_FIFOCNT_MASK) < 1u)
+            if (sys_time_us() - t0 >= 200000u) {
+                radeon_dead = 1;        /* (stuck: engine2d.c's fifo_wait) */
+                break;
+            }
     }
     radeon_wr(reg, v);
 }
@@ -322,6 +327,8 @@ int radeon_cp_idle_wait(uint32_t timeout_us)
     uint32_t t0, p[6];
     if (!running)
         return 0;
+    if (radeon_dead)
+        return -1;
     p[0] = RADEON_CP_PACKET0(RADEON_RB3D_DSTCACHE_CTLSTAT, 0), p[1] = RADEON_RB3D_DC_FLUSH | RADEON_RB3D_DC_FREE;
     p[2] = RADEON_CP_PACKET0(RADEON_RB3D_ZCACHE_CTLSTAT, 0), p[3] = RADEON_RB3D_ZC_FLUSH | RADEON_RB3D_ZC_FREE;
     p[4] = RADEON_CP_PACKET0(RADEON_WAIT_UNTIL, 0);
@@ -349,6 +356,27 @@ void radeon_cp_stop(void)
     stop_now();
 }
 
+/* After a hang (a fence or a sync not reached): the command processor's queue off at once (no wait for a ring it
+ * isn't fetching), then radeon_engine_recover. The block is freed only when the engine came back: a stuck one keeps
+ * bus mastering off and the block stays allocated, unused. 0 when the engine came back. */
+int radeon_cp_abandon(void)
+{
+    int r;
+    if (running)
+        radeon_wr(RADEON_CP_CSQ_CNTL, RADEON_CSQ_PRIDIS_INDDIS);
+    running = 0;
+    ring = NULL;
+    r = radeon_engine_recover();
+    if (r == 0)
+        release();
+    else {
+        block = NULL;
+        radeon_cp_varea = NULL;
+        radeon_cp_varea_gart = radeon_cp_varea_bytes = 0;
+    }
+    return r;
+}
+
 /* (after a fault: the layer's own state only) */
 void radeon_cp_forget(void)
 {
@@ -374,6 +402,8 @@ int radeon_cp_fence_wait(uint32_t f, uint32_t timeout_us)
     uint32_t t0 = sys_time_us();
     if (!running || !f)
         return 0;
+    if (radeon_dead)
+        return -1;
     radeon_cp_flush();
     while ((int32_t)(radeon_rd(RADEON_GUI_SCRATCH_REG1) - f) < 0)
         if (sys_time_us() - t0 > timeout_us)

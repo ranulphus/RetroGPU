@@ -21,11 +21,14 @@ static int vwhat = RADEON_VTX_RHW | RADEON_VTX_ARGB;
 MGA_HOT static void fifo(int n)
 {
     uint32_t t0;
-    if (radeon_cp_running())
+    if (radeon_cp_running() || radeon_dead)
         return;
     t0 = sys_time_us();
-    while ((int)(radeon_rd(RADEON_RBBM_STATUS) & RADEON_RBBM_FIFOCNT_MASK) < n && sys_time_us() - t0 < 200000u)
-        ;
+    while ((int)(radeon_rd(RADEON_RBBM_STATUS) & RADEON_RBBM_FIFOCNT_MASK) < n)
+        if (sys_time_us() - t0 >= 200000u) {
+            radeon_dead = 1;            /* (stuck: engine2d.c's fifo_wait) */
+            return;
+        }
 }
 
 void radeon_3d_init(uint32_t color_off, int pitch_bytes, int bpp, uint32_t z_off, int z_pitch_bytes, int zbits,

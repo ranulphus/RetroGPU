@@ -19,24 +19,29 @@ static void eng_wr(uint32_t reg, uint32_t v)
 }
 
 static uint32_t t_off, t_dt;
+uint32_t radeon_recover_status;
 static int t_pitch, t_bpp, t_bytes;
 static int c_x0, c_y0, c_x1 = 0x7FFF, c_y1 = 0x7FFF;
 
-/* Room for n register writes in the 64-entry FIFO, bounded (a stuck engine shows at the next sync). */
+/* Room for n register writes in the 64-entry FIFO, bounded: an engine that frees none in 200 ms is stuck, and the
+ * layer stops writing to it (radeon_dead) rather than hold the PCI bus at the next write. */
 static void fifo_wait(int n)
 {
     uint32_t t0;
-    if (radeon_cp_running())            /* (the ring has its own room) */
+    if (radeon_cp_running() || radeon_dead)     /* (the ring has its own room) */
         return;
     t0 = sys_time_us();
-    while ((int)(radeon_rd(RADEON_RBBM_STATUS) & RADEON_RBBM_FIFOCNT_MASK) < n && sys_time_us() - t0 < 200000u)
-        ;
+    while ((int)(radeon_rd(RADEON_RBBM_STATUS) & RADEON_RBBM_FIFOCNT_MASK) < n)
+        if (sys_time_us() - t0 >= 200000u) {
+            radeon_dead = 1;
+            return;
+        }
 }
 
 int radeon_idle(void)
 {
     uint32_t st;
-    if (!radeon.mmio)
+    if (!radeon.mmio || radeon_dead)
         return 0;
     st = radeon_rd(RADEON_RBBM_STATUS);
     return (st & RADEON_RBBM_FIFOCNT_MASK) >= 64 && !(st & RADEON_RBBM_ACTIVE);
@@ -74,6 +79,8 @@ int radeon_sync(uint32_t timeout_us)
     uint32_t t0 = sys_time_us();
     if (!radeon.mmio)
         return 0;
+    if (radeon_dead)
+        return -1;
     if (radeon_cp_running())            /* (the caches purged in the stream, the ring fetched, the engine idle) */
         return radeon_cp_idle_wait(timeout_us);
     while (!radeon_idle())
@@ -86,8 +93,10 @@ int radeon_sync(uint32_t timeout_us)
  * what it read: nothing changes, and every PLL access wants the RV100's 5 ms): the engines' soft reset bits set and
  * cleared (the host interface's among them the first time), the cache flushed, the engines' again and the host data
  * path's by HOST_PATH_CNTL ("soft resetting HDP through RBBM_SOFT_RESET can cause some unexpected behaviour on
- * some machines"). Nothing of the memory controller's. */
-void radeon_engine_reset(void)
+ * some machines"). Nothing of the memory controller's. The cache's flush only once the first reset has emptied the
+ * FIFO: its registers are behind it, and a write to a full FIFO holds the bus. -1 when the engine is still busy at
+ * the end (radeon_engine_recover's to deal with). */
+int radeon_engine_reset(void)
 {
     const uint32_t eng = RADEON_SOFT_RESET_CP | RADEON_SOFT_RESET_SE | RADEON_SOFT_RESET_RE | RADEON_SOFT_RESET_PP |
                          RADEON_SOFT_RESET_E2 | RADEON_SOFT_RESET_RB;
@@ -99,7 +108,8 @@ void radeon_engine_reset(void)
     (void)radeon_rd(RADEON_RBBM_SOFT_RESET);
     radeon_wr(RADEON_RBBM_SOFT_RESET, rbbm);
     (void)radeon_rd(RADEON_RBBM_SOFT_RESET);
-    cache_flush(sys_time_us(), 100000u);
+    if ((radeon_rd(RADEON_RBBM_STATUS) & RADEON_RBBM_FIFOCNT_MASK) >= 64)
+        cache_flush(sys_time_us(), 100000u);
     host = radeon_rd(RADEON_HOST_PATH_CNTL);
     rbbm = radeon_rd(RADEON_RBBM_SOFT_RESET);
     radeon_wr(RADEON_RBBM_SOFT_RESET, rbbm | eng);
@@ -110,6 +120,52 @@ void radeon_engine_reset(void)
     (void)radeon_rd(RADEON_HOST_PATH_CNTL);
     radeon_wr(RADEON_HOST_PATH_CNTL, host);
     radeon_wr(RADEON_RBBM_SOFT_RESET, rbbm);
+    return radeon_idle() ? 0 : -1;
+}
+
+/* After a hang (a fence or a sync not reached in a second): the order of Linux's r100_asic_reset (the radeon KMS
+ * driver, MIT): the command processor's queue off, the chip's bus mastering off, the engines' soft reset held half a
+ * second, then the command processor's, then the check that the setup, raster, texture and pixel engines are idle.
+ * (The brief reset above left the P3's 7500 stuck: setup engine busy, the FIFO full.) Then, the engine idle with an
+ * empty FIFO, bus mastering back and the usual reset; else radeon_dead, bus mastering left off (a stuck engine
+ * fetches nothing more from memory the program may free). */
+int radeon_engine_recover(void)
+{
+    const uint32_t eng = RADEON_SOFT_RESET_HI | RADEON_SOFT_RESET_SE | RADEON_SOFT_RESET_RE | RADEON_SOFT_RESET_PP |
+                         RADEON_SOFT_RESET_E2 | RADEON_SOFT_RESET_RB;
+    const uint32_t busy = 1u << 20 | 1u << 21 | 1u << 22 | 1u << 24;    /* (SE, RE, TAM, PB) */
+    uint32_t bus, rbbm, st;
+    if (!radeon.mmio)
+        return -1;
+    radeon_dead = 0;                    /* (its registers below 1000h: these writes are all there) */
+    radeon_wr(RADEON_CP_CSQ_CNTL, RADEON_CSQ_PRIDIS_INDDIS);
+    bus = radeon_rd(RADEON_BUS_CNTL);
+    radeon_wr(RADEON_BUS_CNTL, bus | RADEON_BUS_MASTER_DIS);
+    sys_delay_us(1000u);
+    rbbm = radeon_rd(RADEON_RBBM_SOFT_RESET);
+    radeon_wr(RADEON_RBBM_SOFT_RESET, rbbm | eng);
+    (void)radeon_rd(RADEON_RBBM_SOFT_RESET);
+    sys_delay_us(500000u);
+    radeon_wr(RADEON_RBBM_SOFT_RESET, rbbm & ~eng);
+    sys_delay_us(1000u);
+    radeon_wr(RADEON_RBBM_SOFT_RESET, rbbm | RADEON_SOFT_RESET_CP);
+    (void)radeon_rd(RADEON_RBBM_SOFT_RESET);
+    sys_delay_us(500000u);
+    radeon_wr(RADEON_RBBM_SOFT_RESET, rbbm & ~RADEON_SOFT_RESET_CP);
+    sys_delay_us(1000u);
+    st = radeon_rd(RADEON_RBBM_STATUS);
+    radeon_recover_status = st;
+    if ((st & busy) || (st & RADEON_RBBM_FIFOCNT_MASK) < 64 || (st & RADEON_RBBM_ACTIVE)) {
+        radeon_dead = 1;
+        return -1;
+    }
+    radeon_wr(RADEON_BUS_CNTL, bus & ~RADEON_BUS_MASTER_DIS);
+    if (radeon_engine_reset() != 0) {
+        radeon_wr(RADEON_BUS_CNTL, bus | RADEON_BUS_MASTER_DIS);
+        radeon_dead = 1;
+        return -1;
+    }
+    return 0;
 }
 
 void radeon_set_target(uint32_t off, int pitch_bytes, int bpp)

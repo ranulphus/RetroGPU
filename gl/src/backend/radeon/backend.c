@@ -1205,6 +1205,8 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
  * processor's read index (the packet it stopped at), when a fence is missed. */
 typedef struct {
     uint32_t mode, count, nv, ni, pairs, dwords, vfmt, prim, addr, between, fence, fmt, sel;
+    uint32_t wp0, wp1, se_cntl, ucp;    /* (the ring's span of its packets; the engine's words for it) */
+    float mvp[16], vp[6];
 } tnl_rec;
 static tnl_rec tnl_recs[32];
 static unsigned tnl_nrec;
@@ -1246,7 +1248,7 @@ static void trace_ring(const char *what, unsigned long a, unsigned long b, unsig
 }
 
 static void tnl_note(GLenum mode, GLsizei count, int nv, int ni, int pairs, int dwords, uint32_t vfmt, uint32_t prim,
-                     uint32_t addr)
+                     uint32_t addr, uint32_t wp0)
 {
     tnl_rec *r = &tnl_recs[tnl_nrec++ & 31u];
     trace_ring(mode == GL_TRIANGLES ? "draw-tris" : "draw", (unsigned long)count, (unsigned long)nv,
@@ -1256,6 +1258,9 @@ static void tnl_note(GLenum mode, GLsizei count, int nv, int ni, int pairs, int 
     r->between = (uint32_t)(dgl_prims.begins - tnl_begins - 1u);
     r->fence = va_fence[0] > va_fence[1] ? va_fence[0] : va_fence[1];
     r->fmt = radeon_tcl.output_vtx_fmt, r->sel = radeon_tcl.output_vtx_sel;
+    r->wp0 = wp0, r->wp1 = radeon_cp_wptr(), r->se_cntl = radeon_3d.se_cntl, r->ucp = radeon_tcl.ucp_vert_blend_ctl;
+    memcpy(r->mvp, tnl_mvp, sizeof r->mvp);
+    memcpy(r->vp, tnl_vp, sizeof r->vp);
     tnl_begins = dgl_prims.begins;
 }
 
@@ -1312,6 +1317,72 @@ static void tnl_dump(const char *why)
                  (unsigned long)r->vfmt, (unsigned long)r->prim, (unsigned long)r->addr, (unsigned long)r->between,
                  (unsigned long)r->fence, (unsigned long)r->fmt, (unsigned long)r->sel);
     }
+    /* The draw whose packets hold the read index: its packets, its state and its vertices as the engine fetches them
+     * (the vertex area isn't written again before its fence passes), with what its matrix makes of them. */
+    for (i = 0; ring && dw && i < 32; i++) {
+        const tnl_rec *r = &tnl_recs[(tnl_nrec + i) & 31u];
+        uint32_t len = (r->wp1 - r->wp0 + dw) % dw, at = (rp - r->wp0 + dw) % dw, n, j;
+        const volatile uint32_t *v = NULL;
+        if (!r->count || at >= len)
+            continue;
+        DGL_WARN("DGL-TNLDIAG stuck draw: ring %lu..%lu, read index %lu; se_cntl %08lx ucp %08lx vp %g %g %g %g %g %g",
+                 (unsigned long)r->wp0, (unsigned long)r->wp1, (unsigned long)rp, (unsigned long)r->se_cntl,
+                 (unsigned long)r->ucp, r->vp[0], r->vp[1], r->vp[2], r->vp[3], r->vp[4], r->vp[5]);
+        for (k = 0; k < 4; k++)
+            DGL_WARN("DGL-TNLDIAG stuck mvp col %lu: %.9g %.9g %.9g %.9g", (unsigned long)k, r->mvp[k * 4],
+                     r->mvp[k * 4 + 1], r->mvp[k * 4 + 2], r->mvp[k * 4 + 3]);
+        for (k = 0; k < len && k < 64; k += 8) {
+            uint32_t b = (r->wp0 + k) % dw;
+            DGL_WARN("DGL-TNLDIAG stuck ring[%lu..] %08lx %08lx %08lx %08lx %08lx %08lx %08lx %08lx", (unsigned long)b,
+                     (unsigned long)ring[b], (unsigned long)ring[(b + 1) % dw], (unsigned long)ring[(b + 2) % dw],
+                     (unsigned long)ring[(b + 3) % dw], (unsigned long)ring[(b + 4) % dw],
+                     (unsigned long)ring[(b + 5) % dw], (unsigned long)ring[(b + 6) % dw],
+                     (unsigned long)ring[(b + 7) % dw]);
+        }
+        if (radeon_cp_varea && r->addr >= radeon_cp_varea_gart && r->addr < radeon_cp_varea_gart + radeon_cp_varea_bytes)
+            v = (const volatile uint32_t *)(radeon_cp_varea + (r->addr - radeon_cp_varea_gart));
+        else if (!radeon_cp_varea && r->addr >= radeon.fb_location)
+            v = (const volatile uint32_t *)(radeon.fb + (r->addr - radeon.fb_location));
+        n = r->nv < 32u ? r->nv : 32u;
+        for (j = 0; v && j < n; j++, v += r->dwords) {
+            union { uint32_t u; float f; } p[4];
+            float c[4];
+            int q;
+            for (q = 0; q < 4; q++)
+                p[q].u = v[q];
+            for (q = 0; q < 4; q++)     /* (GL's column-major matrix times the vertex) */
+                c[q] = r->mvp[q] * p[0].f + r->mvp[4 + q] * p[1].f + r->mvp[8 + q] * p[2].f + r->mvp[12 + q] * p[3].f;
+            DGL_WARN("DGL-TNLDIAG stuck v%lu: %.9g %.9g %.9g %.9g col %08lx clip %.6g %.6g %.6g %.6g%s",
+                     (unsigned long)j, p[0].f, p[1].f, p[2].f, p[3].f, (unsigned long)v[4], c[0], c[1], c[2], c[3],
+                     r->dwords > 5 ? " (st follow)" : "");
+        }
+        break;
+    }
+}
+
+/* The engine stayed stuck through radeon_engine_recover, or a FIFO wait in the register writes ran out: nothing more
+ * can be drawn, and the layer writes nothing more to it (radeon_dead), so the program ends here with the PC alive,
+ * rather than hold the PCI bus at its next write. */
+static void dead_end(const char *why)
+{
+    DGL_ERR("DGL-ERR radeon: %s; the engine stayed stuck through a full reset (RBBM_STATUS %08lx): the program ends "
+            "here. Switch the PC off and on to clear the card.", why, (unsigned long)radeon_recover_status);
+    exit(3);
+}
+
+/* A fence or a sync not reached in a second: the engine isn't getting through its commands. No more of them from
+ * here: the CPU's path for the rest of the run, after the recovery reset (radeon_cp_abandon), drawing by register
+ * writes; or, the engine still stuck, the program's end (dead_end). */
+static void tnl_hung(const char *why, const char *warn)
+{
+    tnl_dump(why);
+    tnl_mode = 0;
+    dgl_sink.tnl = NULL;
+    radeon_tcl_forget();
+    if (radeon_cp_abandon() != 0)
+        dead_end(why);
+    install();
+    warn_once(9, warn);
 }
 
 static int rb_tnl(GLenum mode, GLsizei count, const GLint *idx, GLint first)
@@ -1435,17 +1506,9 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
             if (va_fence[va_half] && (radeon_cp_fence_wait(va_fence[va_half], 1000000u) != 0 || (fake > 0 && !--fake))) {
                 /* (the chip isn't getting through its commands: no more of them from here, the CPU's path for the
                  * rest of the run, rather than writing over vertices it may still be fetching) */
-                tnl_dump("a fence not passed in a second");
-                tnl_mode = 0;
-                dgl_sink.tnl = NULL;
-                /* (the Linux DRM's way out of a lockup: the command processor stopped, after a second's wait for it,
-                 * and the engine reset (radeon_cp_stop); drawing goes on by register writes, slower, with the card
-                 * working rather than wedged: a program that ran on used to leave it for the PC to die at its end) */
-                radeon_cp_stop();
-                radeon_tcl_forget();
-                install();
-                warn_once(9, "the transform engine's vertex area: a fence not passed in a second; the engine reset and "
-                             "off for the rest of the run, drawing by register writes");
+                tnl_hung("a fence not passed in a second",
+                         "the transform engine's vertex area: a fence not passed in a second; the engine reset and "
+                         "off for the rest of the run, drawing by register writes");
                 return 0;
             }
         }
@@ -1467,14 +1530,9 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
             trace_ring("vram-wrap", (unsigned long)vb_used, (unsigned long)bytes, 0, 0);
             if (radeon_sync(1000000) != 0) {
                 /* (the chip not through its commands in a second: as at a missed fence, the engine reset) */
-                tnl_dump("the vertex area's sync not done in a second");
-                tnl_mode = 0;
-                dgl_sink.tnl = NULL;
-                radeon_cp_stop();
-                radeon_tcl_forget();
-                install();
-                warn_once(9, "the transform engine's vertex area: a sync not done in a second; the engine reset and "
-                             "off for the rest of the run, drawing by register writes");
+                tnl_hung("the vertex area's sync not done in a second",
+                         "the transform engine's vertex area: a sync not done in a second; the engine reset and off "
+                         "for the rest of the run, drawing by register writes");
                 return 0;
             }
             vb_used = 0;
@@ -1543,6 +1601,16 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
     s |= flat ? RADEON_DIFFUSE_SHADE_FLAT | RADEON_ALPHA_SHADE_FLAT | RADEON_SPECULAR_SHADE_FLAT
               : RADEON_DIFFUSE_SHADE_GOURAUD | RADEON_ALPHA_SHADE_GOURAUD | RADEON_SPECULAR_SHADE_GOURAUD;
     s |= mode == GL_POLYGON && flat == 1 ? RADEON_FLAT_SHADE_VTX_0 : RADEON_FLAT_SHADE_VTX_LAST;
+    {   /* (experiment, DGL_TNL_ROUND=8: Mesa's rounding for the engine's vertices, truncated to eighths of a pixel,
+         * against the sixteenths, rounded, that the CPU's path uses; a sub-pixel mesh of Echoes' hung the P3's) */
+        static int round8 = -1;
+        if (round8 < 0) {
+            const char *e = getenv("DGL_TNL_ROUND");
+            round8 = e && *e == '8';
+        }
+        if (round8)
+            s = (s & ~(3u << 28 | 3u << 30)) | RADEON_ROUND_MODE_TRUNC | RADEON_ROUND_PREC_8TH_PIX;
+    }
     radeon_tcl.ucp_vert_blend_ctl = RADEON_UCP_IN_CLIP_SPACE;
     if (dgl_gl.front_face == GL_CCW)
         s |= RADEON_FFACE_CULL_CCW, radeon_tcl.ucp_vert_blend_ctl |= RADEON_CULL_FRONT_IS_CCW;
@@ -1559,8 +1627,9 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
            (pairs ? RADEON_CP_VC_FRMT_ST0 : 0u) | (pairs > 1 ? RADEON_CP_VC_FRMT_ST1 : 0u);
     if (!tnl_tris)
         DGL_WARN("DGL-RADEON the transform engine draws (DGL_TNL=0: the CPU transforms instead)");   /* (said once) */
+    s = radeon_cp_wptr();
     radeon_tcl_draw_indexed(prim, vfmt, addr, dwords, ix, ni);
-    tnl_note(mode, count, nv, ni, pairs, dwords, vfmt, prim, addr);
+    tnl_note(mode, count, nv, ni, pairs, dwords, vfmt, prim, addr, s);
     radeon_cp_flush();
     tris += (uint32_t)(prim == RADEON_PRIM_TRI_LIST ? ni / 3 : ni - 2);
     tnl_tris += (uint32_t)(prim == RADEON_PRIM_TRI_LIST ? ni / 3 : ni - 2);
@@ -1594,6 +1663,8 @@ static void clear(GLbitfield mask)
     int c[4];
     if (!dgl_ctx.active || !rg_radeon.active)
         return;
+    if (radeon_dead)                    /* (a FIFO wait ran out in the frame before: the engine stuck) */
+        dead_end("a register write found the engine's FIFO full for 200 ms");
     scissor(0, c);
     if (mask & GL_COLOR_BUFFER_BIT) {
         const GLfloat *k = dgl_gl.clear_color;

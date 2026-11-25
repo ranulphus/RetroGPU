@@ -20,6 +20,11 @@ typedef struct {
     volatile uint8_t *mmio;             /* the registers */
 } radeon_chip;
 extern radeon_chip radeon;              /* the one Radeon this layer drives */
+/* 1 once the engine stayed stuck through radeon_engine_recover or a FIFO wait ran out: from then on the layer neither
+ * writes nor reads the engine's registers (offsets 1000h up, behind the command FIFO), and its waits fail at once. A
+ * write to a full FIFO holds the PCI bus until the engine takes it, which never comes: the PC froze that way twice
+ * (the P3, 2026-11-25). The display's registers below 1000h stay usable. */
+extern int radeon_dead;
 
 /* The R100 family's chips differ in these (Mesa's radeon_screen.c, the DRM's radeon_cp.c, X.org's radeon_driver.c):
  *   - the first Radeon (R100, the 7200: 5144-5147) and the RV200 (the 7500: 5157, 5158) have a transform and
@@ -85,7 +90,9 @@ void radeon_ramp_off(void);
  * within the target) trims everything drawn, in software. Colours are pixel values in the target's format. */
 int  radeon_sync(uint32_t timeout_us);  /* 0 when the engine is idle and its cache flushed, -1 on time-out */
 int  radeon_idle(void);                 /* 1: the engine is idle now */
-void radeon_engine_reset(void);         /* (X.org's RADEONEngineReset, without its PLL accesses) */
+int  radeon_engine_reset(void);         /* (X.org's RADEONEngineReset, without its PLL accesses); -1: still busy */
+int  radeon_engine_recover(void);       /* after a hang: 0 when the engine came back, else radeon_dead is set */
+extern uint32_t radeon_recover_status;  /* (RBBM_STATUS after the recovery's resets, for the log) */
 /* The target: its first pixel at off in VRAM, pitch_bytes apart (a multiple of 64 bytes: the engine's unit), bpp 8,
  * 15, 16 or 32. The engine places a surface in 1 KB steps: the rest of off goes into x. */
 void radeon_set_target(uint32_t off, int pitch_bytes, int bpp);
@@ -206,6 +213,7 @@ void radeon_cp_advance(int n);          /* ... and given to the ring */
 void radeon_cp_flush(void);
 int  radeon_cp_idle_wait(uint32_t timeout_us);
 void radeon_cp_stop(void);
+int  radeon_cp_abandon(void);           /* after a hang: the CP off at once, radeon_engine_recover; 0: back */
 void radeon_cp_forget(void);
 /* A vertex area in conventional memory beside the ring, through the same GART (the transform engine's vertices: the
  * CPU writes cached memory, the chip fetches it): radeon_cp_varea_want bytes (a multiple of 4 KB) asked for before
@@ -217,6 +225,7 @@ extern uint32_t radeon_cp_varea_gart, radeon_cp_varea_bytes;
 uint32_t radeon_cp_fence(void);
 int  radeon_cp_fence_wait(uint32_t f, uint32_t timeout_us);
 void radeon_cp_peek(uint32_t *rp, uint32_t *wp, const volatile uint32_t **base, uint32_t *dwords);
+uint32_t radeon_cp_wptr(void);          /* (diagnostics: the CPU's write index, no register read) */
 void radeon_out(uint32_t reg, uint32_t v);      /* a drawing-engine register, either way */
 /* (engine2d.c) Bytes into video memory through the command stream, ordered with the drawing around them: texture
  * levels without an engine sync. off and bytes multiples of 32. 0, or -1 without the command processor. */
