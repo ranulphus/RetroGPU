@@ -1385,6 +1385,40 @@ static void tnl_hung(const char *why, const char *warn)
     warn_once(9, warn);
 }
 
+/* A draw whose window extent (its object-space box's corners through the matrix) is under DGL_TNL_MINPX pixels each
+ * way (2 by default; 0: never): the CPU's path draws it. The 7500's transform engine stopped for good, through every
+ * reset, on one such draw of Echoes' (a far animal of a quarter of a pixel, 2026-11-25): the engine gains nothing on a
+ * draw that size, and the CPU's path draws it right. A corner at or behind the eye: not small. */
+static unsigned long tnl_small;
+static int tnl_too_small(const float lo[3], const float hi[3])
+{
+    static float minpx = -1;
+    const float *m = dgl_mvp()->m;
+    float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
+    int c;
+    if (minpx < 0) {
+        const char *e = getenv("DGL_TNL_MINPX");
+        minpx = e && *e ? (float)atof(e) : 2.0f;
+    }
+    if (minpx <= 0)
+        return 0;
+    for (c = 0; c < 8; c++) {
+        float p[3], cx, cy, cw;
+        p[0] = c & 1 ? hi[0] : lo[0], p[1] = c & 2 ? hi[1] : lo[1], p[2] = c & 4 ? hi[2] : lo[2];
+        cx = m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12];
+        cy = m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13];
+        cw = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
+        if (!(cw > 1e-6f))
+            return 0;
+        cx = cx / cw * vx_s + vx_o, cy = cy / cw * vy_s + vy_o;
+        if (cx < x0) x0 = cx;
+        if (cx > x1) x1 = cx;
+        if (cy < y0) y0 = cy;
+        if (cy > y1) y1 = cy;
+    }
+    return x1 - x0 < minpx && y1 - y0 < minpx;
+}
+
 static int rb_tnl(GLenum mode, GLsizei count, const GLint *idx, GLint first)
 {
     if (!tnl_mode || !(radeon.flags & RADEON_HAS_TCL))
@@ -1401,8 +1435,10 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
     int dwords = 5 + 2 * pairs, flat = dgl_gl.shade_model == GL_FLAT;
     GLint vmin, vmax, i;
     int nv, ni = 0, k;
-    uint32_t prim = RADEON_PRIM_TRI_LIST, vfmt, bytes, addr, s;
+    uint32_t prim = RADEON_PRIM_TRI_LIST, vfmt, bytes, addr, s, took;
     volatile uint32_t *dst;
+    float lo[3] = { 1e30f, 1e30f, 1e30f }, hi[3] = { -1e30f, -1e30f, -1e30f };
+    int w1 = 1;                         /* (every vertex's w 1: the box below applies) */
     uint16_t *ix;
     dgl_vin v;
     const float *m0, *m1;
@@ -1514,7 +1550,8 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
         }
         addr = radeon_cp_varea_gart + (uint32_t)va_half * half + va_used;     /* (in the chip's space already) */
         dst = (volatile uint32_t *)(radeon_cp_varea + (uint32_t)va_half * half + va_used);
-        va_used += (bytes + 31u) & ~31u;
+        took = (bytes + 31u) & ~31u;
+        va_used += took;
     } else {
         /* Room in the vertex area in video memory (made at the first draw; used again from its start after a sync
          * once full). */
@@ -1538,7 +1575,8 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
             vb_used = 0;
         }
         addr = ((vb_block + 31u) & ~31u) + vb_used;
-        vb_used += (bytes + 31u) & ~31u;
+        took = (bytes + 31u) & ~31u;
+        vb_used += took;
         dst = (volatile uint32_t *)(radeon.fb + addr);
         addr += radeon.fb_location;             /* (the chip's space: video memory starts at its frame buffer's base) */
     }
@@ -1562,6 +1600,11 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
         c.f = v.pos[1], dst[1] = c.u;
         c.f = v.pos[2], dst[2] = c.u;
         c.f = v.pos[3], dst[3] = c.u;
+        for (k = 0; k < 3; k++) {
+            if (v.pos[k] < lo[k]) lo[k] = v.pos[k];
+            if (v.pos[k] > hi[k]) hi[k] = v.pos[k];
+        }
+        w1 &= v.pos[3] == 1.0f;
         dst[4] = ub(v.col[3]) << 24 | ub(v.col[0]) << 16 | ub(v.col[1]) << 8 | ub(v.col[2]);
         if (pairs) {
             c.f = v.tex[0], dst[5] = c.u;
@@ -1573,6 +1616,16 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
         }
     }
     (void)dst[-1];                      /* (the CPU's writes out before the chip reads them) */
+    if (w1 && tnl_too_small(lo, hi)) {
+        /* (the whole draw within a pixel or two: the CPU's path for it, the area's room given back) */
+        if (radeon_cp_varea)
+            va_used -= took;
+        else
+            vb_used -= took;
+        tnl_small++;
+        trace_ring("small", (unsigned long)count, (unsigned long)nv, 0, 0);
+        return 0;
+    }
     /* The engine's state: on, the matrix and viewport where they changed, the outputs, shading and culling. */
     radeon_tcl_on(1);
     {
