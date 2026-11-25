@@ -20,6 +20,7 @@ static void eng_wr(uint32_t reg, uint32_t v)
 
 static uint32_t t_off, t_dt;
 uint32_t radeon_recover_status;
+int radeon_recover_waited;          /* (0: idle with bus mastering off, 1: only once it was back on) */
 static int t_pitch, t_bpp, t_bytes;
 static int c_x0, c_y0, c_x1 = 0x7FFF, c_y1 = 0x7FFF;
 
@@ -135,6 +136,7 @@ int radeon_engine_recover(void)
                          RADEON_SOFT_RESET_E2 | RADEON_SOFT_RESET_RB;
     const uint32_t busy = 1u << 20 | 1u << 21 | 1u << 22 | 1u << 24;    /* (SE, RE, TAM, PB) */
     uint32_t bus, rbbm, st;
+    int k;
     if (!radeon.mmio)
         return -1;
     radeon_dead = 0;                    /* (its registers below 1000h: these writes are all there) */
@@ -152,13 +154,27 @@ int radeon_engine_recover(void)
     (void)radeon_rd(RADEON_RBBM_SOFT_RESET);
     sys_delay_us(500000u);
     radeon_wr(RADEON_RBBM_SOFT_RESET, rbbm & ~RADEON_SOFT_RESET_CP);
-    sys_delay_us(1000u);
-    st = radeon_rd(RADEON_RBBM_STATUS);
-    radeon_recover_status = st;
-    if ((st & busy) || (st & RADEON_RBBM_FIFOCNT_MASK) < 64 || (st & RADEON_RBBM_ACTIVE)) {
+    /* (then the engine given time: on the P3 it read busy just after the resets, yet was idle by the program's end
+     * a few seconds later, with nothing written to it between; first with bus mastering still off, then on) */
+    for (k = 0; k < 2; k++) {
+        uint32_t t0 = sys_time_us();
+        if (k)
+            radeon_wr(RADEON_BUS_CNTL, bus & ~RADEON_BUS_MASTER_DIS);
+        do {
+            sys_delay_us(1000u);
+            st = radeon_rd(RADEON_RBBM_STATUS);
+        } while (((st & busy) || (st & RADEON_RBBM_FIFOCNT_MASK) < 64 || (st & RADEON_RBBM_ACTIVE)) &&
+                 sys_time_us() - t0 < 2000000u);
+        radeon_recover_status = st;
+        if (!((st & busy) || (st & RADEON_RBBM_FIFOCNT_MASK) < 64 || (st & RADEON_RBBM_ACTIVE)))
+            break;
+    }
+    if (k == 2) {
+        radeon_wr(RADEON_BUS_CNTL, bus | RADEON_BUS_MASTER_DIS);
         radeon_dead = 1;
         return -1;
     }
+    radeon_recover_waited = k;
     radeon_wr(RADEON_BUS_CNTL, bus & ~RADEON_BUS_MASTER_DIS);
     if (radeon_engine_reset() != 0) {
         radeon_wr(RADEON_BUS_CNTL, bus | RADEON_BUS_MASTER_DIS);

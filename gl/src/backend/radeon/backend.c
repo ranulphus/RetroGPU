@@ -1402,6 +1402,8 @@ static void tnl_hung(const char *why, const char *warn)
     radeon_tcl_forget();
     if (radeon_cp_abandon() != 0)
         dead_end(why);
+    DGL_WARN("DGL-TNLDIAG the engine came back after the recovery reset (RBBM_STATUS %08lx, bus mastering %s)",
+             (unsigned long)radeon_recover_status, radeon_recover_waited ? "back on" : "still off");
     install();
     warn_once(9, warn);
 }

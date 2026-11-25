@@ -93,6 +93,7 @@ int  radeon_idle(void);                 /* 1: the engine is idle now */
 int  radeon_engine_reset(void);         /* (X.org's RADEONEngineReset, without its PLL accesses); -1: still busy */
 int  radeon_engine_recover(void);       /* after a hang: 0 when the engine came back, else radeon_dead is set */
 extern uint32_t radeon_recover_status;  /* (RBBM_STATUS after the recovery's resets, for the log) */
+extern int radeon_recover_waited;       /* (how the engine came back: 0 bus mastering off, 1 on) */
 /* The target: its first pixel at off in VRAM, pitch_bytes apart (a multiple of 64 bytes: the engine's unit), bpp 8,
  * 15, 16 or 32. The engine places a surface in 1 KB steps: the rest of off goes into x. */
 void radeon_set_target(uint32_t off, int pitch_bytes, int bpp);
