@@ -1143,7 +1143,9 @@ int dgl_radeon_tnl_active(void)
 {
     if (tnl_mode < 0) {
         const char *e = getenv("DGL_TNL");
-        tnl_mode = e && *e ? *e != '0' : 1;
+        /* (opt-in, DGL_TNL=1, since the engine hung the P3's 7500 twice in Echoes' ECHB fly scene on 2026-11-25,
+         * the second time with the 300-index pieces: gl/docs/dx7.md) */
+        tnl_mode = e && *e == '1';
     }
     return tnl_mode && (radeon.flags & RADEON_HAS_TCL) && radeon_cp_running();
 }

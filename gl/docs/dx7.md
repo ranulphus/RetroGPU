@@ -8,7 +8,7 @@ file; this file records what is built and what the cards showed.
 |---|---|---|
 | X1 | Picture-quality features, per card, and settings that apply them to programs that don't ask | under way |
 | X2 | GL 1.1's lighting, normals, texture-coordinate generation and clip planes on the CPU (accepted and ignored until now) | done |
-| X3 | Hardware transform and lighting on the Radeon 7500 (RV200) and 7200 (R100): `GL_DGL_hw_tnl`, `DGL_TNL=0/1` | transform on (X3a); lighting, fog, texgen to come |
+| X3 | Hardware transform and lighting on the Radeon 7500 (RV200) and 7200 (R100): `GL_DGL_hw_tnl`, `DGL_TNL=1` (opt-in since 2026-11-25) | transform (X3a), off by default until the P3's hang is understood; lighting, fog, texgen to come |
 | X4 | SSE in the software transform (needs GLOS to enable it) | to do |
 
 ## X1: what each renderer offers
@@ -127,7 +127,7 @@ last vertex when flat; a flat polygon's first vertex as the provoking one), sets
 model-view-projection matrix and the viewport where they changed, outputs, shading, culling in both the setup engine
 and the engine, as Mesa's radeonCullFace and radeonFrontFace) and sends the indexed draw (`hal/src/radeon/tcl.c`). A
 window-space draw after it puts the window's words back (`tri.c`). `GL_DGL_hw_tnl` is in `GL_EXTENSIONS` while it is
-on; `DGL_TNL=0` keeps every draw on the CPU; `DGL-STAT` counts `tnl/s`; the first such draw says
+on; it is opt-in, `DGL_TNL=1` (off by default since the P3's hangs, below); `DGL-STAT` counts `tnl/s`; the first such draw says
 `DGL-RADEON the transform engine draws`.
 
 On the P3's 7500 (2026-11-24): the whole suite passes with it, 32 of the 42 tests drawn through the engine (the rest:
@@ -196,4 +196,12 @@ before used big indexed draws (GLQuake's polygons, the conformance spheres, DTCL
 
 Affine texture matrices are taken by the engine path since (s and t made while the vertices are copied); a
 projective one still takes the CPU's path. Fifth Wheel's HIGH (texel coordinates scaled by 1/512) is drawn so.
+
+**The second hang (2026-11-25, 14:31).** With the 300-index pieces (main 7a71642), Echoes' fly scene hung the P3
+again at frame 372: a 700 ms stall between its HUD and the next tick (the chip already stuck), then the missed fence;
+the engine switched itself off, but the card didn't recover and the PC went down. So the pieces' size was not the
+(whole) cause. T&L is opt-in (`DGL_TNL=1`) until it is found. The suspect now: the fly scene interleaves the engine's
+draws with window-space draws inline in the stream (`3D_DRAW_IMMD`: its HUD lines, and batches too big for half the
+vertex area), many times a frame, with the matrix sent 20-30 times a frame; GLQuake, which never hung, draws nearly
+everything through the engine, and Mesa's driver never interleaves the two that way.
 
