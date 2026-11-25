@@ -1219,6 +1219,26 @@ static void tnl_note(GLenum mode, GLsizei count, int nv, int ni, int pairs, int 
     tnl_begins = dgl_prims.begins;
 }
 
+/* (a float neither infinite nor NaN, by its bits: no FPU compare in the copy loop) */
+static int finite_f(float f)
+{
+    union { float f; uint32_t u; } c;
+    c.f = f;
+    return (c.u & 0x7F800000u) != 0x7F800000u;
+}
+
+/* A position or the matrix not finite: the engine isn't given it (the CPU's path draws such a draw as it always
+ * did); said once, counted for the diagnostics (suspected in the P3's hang: the chip's clipper may not survive
+ * them). */
+static unsigned long tnl_nonfinite;
+static void tnl_refuse_nonfinite(void)
+{
+    if (!tnl_nonfinite++)
+        DGL_WARN("DGL-TNLDIAG a draw with a non-finite position or matrix: the CPU's path draws it");
+}
+
+static void install(void);
+
 static void tnl_dump(const char *why)
 {
     static int done;
@@ -1230,8 +1250,9 @@ static void tnl_dump(const char *why)
     done = 1;
     radeon_cp_peek(&rp, &wp, &ring, &dw);
     DGL_WARN("DGL-TNLDIAG %s: RBBM_STATUS %08lx CP_CSQ_STAT %08lx SCRATCH1 %lu RPTR %lu WPTR %lu (ring %lu dwords) "
-             "draws %u", why, (unsigned long)radeon_rd(RADEON_RBBM_STATUS), (unsigned long)radeon_rd(RADEON_CP_CSQ_STAT),
-             (unsigned long)radeon_rd(0x15E4), (unsigned long)rp, (unsigned long)wp, (unsigned long)dw, tnl_nrec);
+             "draws %u non-finite %lu", why, (unsigned long)radeon_rd(RADEON_RBBM_STATUS),
+             (unsigned long)radeon_rd(RADEON_CP_CSQ_STAT), (unsigned long)radeon_rd(0x15E4), (unsigned long)rp,
+             (unsigned long)wp, (unsigned long)dw, tnl_nrec, tnl_nonfinite);
     if (ring && dw)
         for (k = 0; k < 24; k += 8) {
             uint32_t b = (rp + dw - 8u + k) % dw;
@@ -1276,6 +1297,14 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
     const float *m0, *m1;
     if (!dgl_radeon_tnl_active() || count < 3 || !tnl_state_ok(mode))
         return 0;
+    {
+        const float *mm = dgl_mvp()->m;
+        for (i = 0; i < 16; i++)
+            if (!finite_f(mm[i])) {
+                tnl_refuse_nonfinite();
+                return 0;
+            }
+    }
     m0 = tex_matrix(0), m1 = tex_matrix(1);
     /* The vertices the draw uses: a range of at most 65,536 (16-bit indices). */
     if (idx) {
@@ -1356,14 +1385,25 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
             va_fence[va_half] = radeon_cp_fence();
             va_half ^= 1;
             va_used = 0;
-            if (va_fence[va_half] && radeon_cp_fence_wait(va_fence[va_half], 1000000u) != 0) {
+            static long fake = -1;          /* (DGL_TNL_FAKEMISS=n: the n-th wait taken as missed, to test what follows) */
+            if (fake < 0) {
+                const char *e = getenv("DGL_TNL_FAKEMISS");
+                fake = e && *e ? atol(e) : 0;
+            }
+            if (va_fence[va_half] && (radeon_cp_fence_wait(va_fence[va_half], 1000000u) != 0 || (fake > 0 && !--fake))) {
                 /* (the chip isn't getting through its commands: no more of them from here, the CPU's path for the
                  * rest of the run, rather than writing over vertices it may still be fetching) */
                 tnl_dump("a fence not passed in a second");
                 tnl_mode = 0;
                 dgl_sink.tnl = NULL;
-                warn_once(9, "the transform engine's vertex area: a fence not passed in a second; the engine is off "
-                             "for the rest of the run");
+                /* (the Linux DRM's way out of a lockup: the command processor stopped, after a second's wait for it,
+                 * and the engine reset (radeon_cp_stop); drawing goes on by register writes, slower, with the card
+                 * working rather than wedged: a program that ran on used to leave it for the PC to die at its end) */
+                radeon_cp_stop();
+                radeon_tcl_forget();
+                install();
+                warn_once(9, "the transform engine's vertex area: a fence not passed in a second; the engine reset and "
+                             "off for the rest of the run, drawing by register writes");
                 return 0;
             }
         }
@@ -1402,6 +1442,10 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
                                      v.tex1[1] < -1024.0f))))
             return 0;                   /* (coordinates past 1,024 lose their fraction in the chip's floats: the CPU's
                                          * path takes whole periods off per triangle, conformance t14) */
+        if (!finite_f(v.pos[0]) || !finite_f(v.pos[1]) || !finite_f(v.pos[2]) || !finite_f(v.pos[3])) {
+            tnl_refuse_nonfinite();
+            return 0;
+        }
         c.f = v.pos[0], dst[0] = c.u;
         c.f = v.pos[1], dst[1] = c.u;
         c.f = v.pos[2], dst[2] = c.u;

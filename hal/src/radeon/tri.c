@@ -294,7 +294,13 @@ void radeon_2d_begin(void)
 
 void radeon_3d_depth_clear(int x, int y, int w, int h, uint32_t z, int write_z, int stencil)
 {
-    radeon_ctx3d keep = radeon_3d, *c = &radeon_3d;
+    radeon_ctx3d keep, *c = &radeon_3d;
+    /* (the engine's coordinates off first: else the state kept below is the engine's while tcl.c has gone back to
+     * window space for the clear's quad, and the restore leaves the two disagreeing; the next draw through the engine
+     * turns it on again) */
+    if (radeon_tcl_live)
+        radeon_tcl_on(0);
+    keep = radeon_3d;
     int keep_what = vwhat, i, z24 = (c->rb3d_zstencilcntl & 0xFu) != RADEON_DEPTH_FORMAT_16BIT_INT_Z;
     radeon_vertex v[4];
     float fz = z24 ? (float)((double)(z & 0xFFFFFFu) / 16777215.0) : (float)((double)(z & 0xFFFFu) / 65535.0);
