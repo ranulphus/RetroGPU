@@ -164,7 +164,10 @@ typedef struct {
              light_model_ctl, per_light_ctl[4];
 } radeon_tcl_regs;
 extern radeon_tcl_regs radeon_tcl;
-#define RADEON_TCL_PIECE 4092
+/* (300, as Mesa's radeon_tcl.c's GET_MAX_HW_ELTS: "testing shows a maximum around here". DOS-GL's first 4,092 hung
+ * the P3's 7500 in Echoes' ECHB fly scene, 2026-11-25: a fence never reached, the PC down till a power cycle.
+ * A multiple of 6, so a list's piece ends at a triangle's end.) */
+#define RADEON_TCL_PIECE 300
 void radeon_tcl_defaults(void);
 void radeon_tcl_on(int yes);
 uint32_t radeon_tcl_window_cntl(void);  /* SE_CNTL as the window-space draws have it (the engine's start from it) */

@@ -118,10 +118,11 @@ works, as Mesa's radeon driver does it:
 
 The front end tries a back end's `tnl` sink hook before anything else for every draw (`src/gl/vertex.c`); the Radeon
 back end takes it where its engine does the state (so far: no lighting, fog, texture-coordinate generation, clip
-planes, texture matrix, cube map, polygon offset or line and point primitives; texture coordinates within 1,024, as
-the chip's floats lose a fraction beyond, conformance t14). It writes the draw's vertices in object coordinates
-(x, y, z, w, the colour, the units' s and t) into a vertex area, makes indices for GL's primitive (strips and fans as the chip's below
-4,092 vertices, else lists; quads and quad strips as lists with the general path's diagonal, or ending at the quad's
+planes, projective texture matrix, cube map, polygon offset or line and point primitives; texture coordinates
+within 1,024, as the chip's floats lose a fraction beyond, conformance t14). It writes the draw's vertices in object
+coordinates (x, y, z, w, the colour, the units' s and t, through the texture matrix where it is affine) into a vertex
+area, makes indices for GL's primitive, sent in pieces of at most 300 (strips and fans as the chip's up to 300
+vertices, else lists; quads and quad strips as lists with the general path's diagonal, or ending at the quad's
 last vertex when flat; a flat polygon's first vertex as the provoking one), sets the engine's state (the
 model-view-projection matrix and the viewport where they changed, outputs, shading, culling in both the setup engine
 and the engine, as Mesa's radeonCullFace and radeonFrontFace) and sends the indexed draw (`hal/src/radeon/tcl.c`). A
@@ -178,4 +179,21 @@ it did nothing, and the hot functions carried X1/X2's rare cases inline. What br
 Instruction-cache misses are back to before X1 (22.6 million against 21.8); what is left is about 5% more
 instructions retired. Copying the larger vertex (76 bytes against 52) by GCC's dword loop is part of it, but an
 unrolled copy, inline or shared, measured slower: on this CPU code size costs more than those instructions.
+
+## X3: the P3's hang of 2026-11-25, and the pieces' size
+
+Echoes' ECHB fly scene hung the P3 with the engine on (main 2c6081c): a fence never reached (`DGL-WARN ... a fence
+not passed in a second`), the job killed, the PC down until a power cycle. Its ground is drawn in big indexed draws,
+which DOS-GL sent to the engine in pieces of up to 4,092 indices inline in the command stream; Mesa's driver never
+sends more than 300 (`radeon_tcl.c`'s `GET_MAX_HW_ELTS`: "testing shows a maximum around here"). Nothing tested
+before used big indexed draws (GLQuake's polygons, the conformance spheres, DTCL0's unindexed list). Now:
+
+- pieces of 300 indices (`RADEON_TCL_PIECE`), strips and fans longer than that drawn as lists;
+- a fence not passed in a second switches the engine off for the rest of the run (the CPU's path from there), instead
+  of writing over vertices the chip may still be fetching;
+- t43: big draws in one call each (three 15,000-index grids that cycle the vertex area's halves, a 2,002-vertex strip,
+  a 1,002-vertex fan, a textured grid through an affine texture matrix), against OSMesa.
+
+Affine texture matrices are taken by the engine path since (s and t made while the vertices are copied); a
+projective one still takes the CPU's path. Fifth Wheel's HIGH (texel coordinates scaled by 1/512) is drawn so.
 

@@ -1148,13 +1148,37 @@ int dgl_radeon_tnl_active(void)
     return tnl_mode && (radeon.flags & RADEON_HAS_TCL) && radeon_cp_running();
 }
 
+/* A unit's texture matrix as the engine path takes it: the identity, or affine (no projective row: s and t made while
+ * the vertices are copied, below; Fifth Wheel's HIGH scales texel coordinates by 1/512 this way). NULL: the identity. */
+static const float *tex_matrix(int unit)
+{
+    return unit ? (dgl_gl.tex1_identity ? NULL : dgl_gl.tex1.stack[dgl_gl.tex1.depth - 1].m)
+                : (dgl_gl.tex_identity ? NULL : dgl_gl.tex.stack[dgl_gl.tex.depth - 1].m);
+}
+
+/* s and t through an affine texture matrix (GL's column order; q divided out at glTexCoord, so the matrix's own
+ * scale m[15] divides) */
+static void tex_affine(const float *m, float st[2], float r)
+{
+    float s = st[0], t = st[1], iq = 1.0f / m[15];
+    st[0] = (m[0] * s + m[4] * t + m[8] * r + m[12]) * iq;
+    st[1] = (m[1] * s + m[5] * t + m[9] * r + m[13]) * iq;
+}
+
+static int tex_matrix_ok(int unit)
+{
+    const float *m = tex_matrix(unit);
+    return !m || (m[3] == 0.0f && m[7] == 0.0f && m[11] == 0.0f && m[15] != 0.0f);
+}
+
 static int tnl_state_ok(GLenum mode)
 {
     if (mode == GL_POINTS || mode == GL_LINES || mode == GL_LINE_STRIP || mode == GL_LINE_LOOP)
         return 0;                       /* (lines and points: the CPU's path, as their widths and ends are drawn) */
-    if (DGL_VTX_EXTRA() || dgl_gl.fog || !dgl_gl.tex_identity || !dgl_gl.tex1_identity || dgl_gl.offset_fill ||
-        dgl_gl.polygon_mode != GL_FILL)
+    if (DGL_VTX_EXTRA() || dgl_gl.fog || dgl_gl.offset_fill || dgl_gl.polygon_mode != GL_FILL)
         return 0;
+    if (!tex_matrix_ok(0) || !tex_matrix_ok(1))
+        return 0;                       /* (a projective texture matrix: the CPU's path divides per vertex there) */
     return 1;
 }
 
@@ -1191,8 +1215,10 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
     volatile uint32_t *dst;
     uint16_t *ix;
     dgl_vin v;
+    const float *m0, *m1;
     if (!dgl_radeon_tnl_active() || count < 3 || !tnl_state_ok(mode))
         return 0;
+    m0 = tex_matrix(0), m1 = tex_matrix(1);
     /* The vertices the draw uses: a range of at most 65,536 (16-bit indices). */
     if (idx) {
         vmin = vmax = idx[0];
@@ -1272,8 +1298,15 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
             va_fence[va_half] = radeon_cp_fence();
             va_half ^= 1;
             va_used = 0;
-            if (va_fence[va_half] && radeon_cp_fence_wait(va_fence[va_half], 1000000u) != 0)
-                warn_once(9, "the transform engine's vertex area: a fence not passed in a second");
+            if (va_fence[va_half] && radeon_cp_fence_wait(va_fence[va_half], 1000000u) != 0) {
+                /* (the chip isn't getting through its commands: no more of them from here, the CPU's path for the
+                 * rest of the run, rather than writing over vertices it may still be fetching) */
+                tnl_mode = 0;
+                dgl_sink.tnl = NULL;
+                warn_once(9, "the transform engine's vertex area: a fence not passed in a second; the engine is off "
+                             "for the rest of the run");
+                return 0;
+            }
         }
         addr = radeon_cp_varea_gart + (uint32_t)va_half * half + va_used;
         dst = (volatile uint32_t *)(radeon_cp_varea + (uint32_t)va_half * half + va_used);
@@ -1300,6 +1333,10 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
     for (i = 0; i < nv; i++, dst += dwords) {
         union { float f; uint32_t u; } c;
         dgl_vertex_of(vmin + i, &v);
+        if (m0 && pairs)
+            tex_affine(m0, v.tex, dgl_gl.texr_used ? v.texr[0] : 0.0f);
+        if (m1 && pairs > 1)
+            tex_affine(m1, v.tex1, dgl_gl.texr_used ? v.texr[1] : 0.0f);
         if (pairs && (v.tex[0] > 1024.0f || v.tex[0] < -1024.0f || v.tex[1] > 1024.0f || v.tex[1] < -1024.0f ||
                       (pairs > 1 && (v.tex1[0] > 1024.0f || v.tex1[0] < -1024.0f || v.tex1[1] > 1024.0f ||
                                      v.tex1[1] < -1024.0f))))
