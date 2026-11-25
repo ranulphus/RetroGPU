@@ -1416,41 +1416,22 @@ static void tnl_hung(const char *why, const char *warn)
     warn_once(9, warn);
 }
 
-/* The distance in dwords between a draw's vertices of dwords each: 8 for up to 8 (one unit's coordinates or none), 16
- * beyond, so no vertex reaches the end of a 64-byte line. The P3's 7500 stopped for good on Echoes' far terrain
- * (twenty-byte vertices, packed) whenever one of its vertices ended at or past a 64-byte boundary in some state of the
- * engine's fetching: at five placements in a row of every sixteen, with either packet (DTMIX mode R, 2026-11-25).
- * DGL_TNL_STRIDE=0: packed, as before (to test); =n: n dwords. */
+/* The distance in dwords between a draw's vertices of dwords each: packed (DGL_TNL_STRIDE=n, up to 16: n dwords apart,
+ * through LOAD_VBPNTR's stride field; an experiment of the 7500's hang hunt, kept for tests) */
 static int tnl_stride(int dwords)
 {
     static int want = -1;
     if (want < 0) {
         const char *e = getenv("DGL_TNL_STRIDE");
-        want = e && *e ? atoi(e) : 99;
+        want = e && *e ? atoi(e) : 0;
     }
-    if (want == 99)
-        return dwords <= 8 ? 8 : 16;
-    return want >= dwords && want <= 16 ? want : dwords;
-}
-
-/* The padding before a draw's vertices at chip address a (a multiple of 32): 32 when a is a multiple of 64. The P3's
- * 7500 stopped for good on Echoes' far terrain (945 indices over 394 twenty-byte vertices) whenever its vertices
- * began on a 64-byte boundary of the vertex area, at every such offset tried, and drew it at offsets 32 past one
- * (DTMIX mode R with the draw captured from the P3, 2026-11-25). DGL_TNL_ALIGN64=1: no padding (to test). */
-static uint32_t tnl_pad(uint32_t a)
-{
-    static int keep = -1;
-    if (keep < 0) {
-        const char *e = getenv("DGL_TNL_ALIGN64");
-        keep = e && *e == '1';
-    }
-    return !keep && !(a & 63u) ? 32u : 0u;
+    return want > dwords && want <= 16 ? want : dwords;
 }
 
 /* A draw whose window extent (its object-space box's corners through the matrix) is under DGL_TNL_MINPX pixels each
- * way (2 by default; 0: never): the CPU's path draws it. The 7500's transform engine stopped for good, through every
- * reset, on one such draw of Echoes' (a far animal of a quarter of a pixel, 2026-11-25): the engine gains nothing on a
- * draw that size, and the CPU's path draws it right. A corner at or behind the eye: not small. */
+ * way (off by default): the CPU's path draws it. (An experiment of the 7500's hang hunt: a sub-pixel mesh of Echoes'
+ * was the first suspect; it was only queued behind the draw the engine was stuck in.) A corner at or behind the eye:
+ * not small. */
 static unsigned long tnl_small;
 static int tnl_too_small(const float lo[3], const float hi[3])
 {
@@ -1460,7 +1441,7 @@ static int tnl_too_small(const float lo[3], const float hi[3])
     int c;
     if (minpx < 0) {
         const char *e = getenv("DGL_TNL_MINPX");
-        minpx = e && *e ? (float)atof(e) : 2.0f;
+        minpx = e && *e ? (float)atof(e) : 0.0f;
     }
     if (minpx <= 0)
         return 0;
@@ -1588,10 +1569,10 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
     bytes = (uint32_t)nv * (uint32_t)stride * 4u;
     if (radeon_cp_varea) {
         /* Room in the system-memory area: this half, else the other once its fence has passed. */
-        uint32_t half = radeon_cp_varea_bytes / 2u, pad = tnl_pad(radeon_cp_varea_gart + va_used);
-        if (bytes + 32u > half)
+        uint32_t half = radeon_cp_varea_bytes / 2u;
+        if (bytes > half)
             return 0;
-        if (va_used + pad + bytes > half) {
+        if (va_used + bytes > half) {
             va_fence[va_half] = radeon_cp_fence();
             trace_ring("fence-half", (unsigned long)va_fence[va_half], (unsigned long)va_half,
                        (unsigned long)va_fence[va_half ^ 1], (unsigned long)radeon_rd(0x15E4));
@@ -1611,7 +1592,6 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
                 return 0;
             }
         }
-        va_used += tnl_pad(radeon_cp_varea_gart + (uint32_t)va_half * half + va_used);
         addr = radeon_cp_varea_gart + (uint32_t)va_half * half + va_used;     /* (in the chip's space already) */
         dst = (volatile uint32_t *)(radeon_cp_varea + (uint32_t)va_half * half + va_used);
         took = (bytes + 31u) & ~31u;
@@ -1627,7 +1607,7 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
             warn_once(8, "no video memory for the transform engine's vertices: transformed by the CPU");
             return 0;
         }
-        if (vb_used + 32u + bytes > VB_BYTES) {
+        if (vb_used + bytes > VB_BYTES) {
             trace_ring("vram-wrap", (unsigned long)vb_used, (unsigned long)bytes, 0, 0);
             if (radeon_sync(1000000) != 0) {
                 /* (the chip not through its commands in a second: as at a missed fence, the engine reset) */
@@ -1638,7 +1618,6 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
             }
             vb_used = 0;
         }
-        vb_used += tnl_pad(((vb_block + 31u) & ~31u) + vb_used + radeon.fb_location);
         addr = ((vb_block + 31u) & ~31u) + vb_used;
         took = (bytes + 31u) & ~31u;
         vb_used += took;
@@ -1763,6 +1742,10 @@ static void install(void)
     {   /* (DGL_TNL_PKT=new: the engine's draws by LOAD_VBPNTR and DRAW_INDX, to compare; else Mesa's packet) */
         const char *e = getenv("DGL_TNL_PKT");
         radeon_tcl_old_packets = !(e && !strcmp(e, "new"));
+        /* (the 3D engine idle between the packets of one split draw, by default (4); DGL_TNL_SYNC=0 none, 1 before
+         * every draw packet, 2 before each draw, 3 between pieces idle and clean: see radeon_tcl_sync) */
+        e = getenv("DGL_TNL_SYNC");
+        radeon_tcl_sync = e && *e >= '0' && *e <= '4' ? *e - '0' : 4;
         e = getenv("DGL_TNL_PIECE");    /* (tests: the indices a list's packet takes, a multiple of 6 up to 300) */
         radeon_tcl_piece = e && atoi(e) >= 6 && atoi(e) <= RADEON_TCL_PIECE ? atoi(e) / 6 * 6 : RADEON_TCL_PIECE;
     }

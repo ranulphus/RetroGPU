@@ -197,6 +197,13 @@ void radeon_tcl_draw(uint32_t prim, uint32_t vfmt, uint32_t addr, int dwords, in
 }
 
 int radeon_tcl_old_packets = 1;
+/* Between the packets of one draw split into pieces, the 3D engine waited for (WAIT_UNTIL 3D_IDLE: 4, the default).
+ * Without it the P3's 7500 stopped for good, through every reset, on Echoes' far terrain (945 indices in four pieces)
+ * at some placements of its vertices in memory, with either packet; with it, ~9,800 placements and vertex shifts of
+ * that draw ran clean (DTMIX mode R, 2026-11-25). A wait before each draw alone didn't help. The Linux DRM waits for 3D
+ * idle between repeated command batches for a lockup it couldn't explain either (radeon_emit_packet3_cliprect).
+ * 0 none, 1 3D idle and clean before every draw packet, 2 before each draw, 3 between pieces idle and clean. */
+int radeon_tcl_sync = 4;
 int radeon_tcl_piece = RADEON_TCL_PIECE;    /* (a multiple of 6; DOS-GL's DGL_TNL_PIECE, for tests) */
 
 /* (lists, of triangles, lines or points, in pieces of RADEON_TCL_PIECE indices: a multiple of 6, so a piece ends at
@@ -212,7 +219,7 @@ void radeon_tcl_draw_indexed_s(uint32_t prim, uint32_t vfmt, uint32_t addr, int 
                                int n)
 {
     uint32_t *d;
-    int i;
+    int i, first = 1;
     radeon_tcl_emit();
     if (radeon_tcl_old_packets && stride == dwords) {
         /* (Mesa 7's R100 driver as it shipped (RADEON_OLD_PACKETS 1): 3D_RNDR_GEN_INDX_PRIM with the vertices' address,
@@ -222,6 +229,11 @@ void radeon_tcl_draw_indexed_s(uint32_t prim, uint32_t vfmt, uint32_t addr, int 
         (void)dwords;
         while (n > 0) {
             int k = n > radeon_tcl_piece ? radeon_tcl_piece : n, words = (k + 1) / 2;
+            if (radeon_tcl_sync == 1 || (radeon_tcl_sync == 2 && first) || (radeon_tcl_sync == 3 && !first))
+                radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLECLEAN);
+            else if (radeon_tcl_sync == 4 && !first)
+                radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLE);
+            first = 0;
             d = radeon_cp_reserve(5 + words);
             if (!d)
                 return;
@@ -237,6 +249,8 @@ void radeon_tcl_draw_indexed_s(uint32_t prim, uint32_t vfmt, uint32_t addr, int 
         }
         return;
     }
+    if (radeon_tcl_sync == 1 || radeon_tcl_sync == 2)
+        radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLECLEAN);
     d = radeon_cp_reserve(4);
     if (!d)
         return;
@@ -247,6 +261,11 @@ void radeon_tcl_draw_indexed_s(uint32_t prim, uint32_t vfmt, uint32_t addr, int 
     radeon_cp_advance(4);
     while (n > 0) {
         int k = n > radeon_tcl_piece ? radeon_tcl_piece : n, words = (k + 1) / 2;
+        if ((radeon_tcl_sync == 1 || radeon_tcl_sync == 3) && !first)
+            radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLECLEAN);
+        else if (radeon_tcl_sync == 4 && !first)
+            radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLE);
+        first = 0;
         d = radeon_cp_reserve(3 + words);
         if (!d)
             return;

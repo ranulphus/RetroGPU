@@ -113,6 +113,7 @@
                                                  * the drawing) */
 #define RADEON_WAIT_UNTIL           0x1720      /* (the queue stalled until the events named) */
 #define     RADEON_WAIT_DMA_GUI_IDLE    (1u << 9)
+#define     RADEON_WAIT_3D_IDLE         (1u << 15)
 #define     RADEON_WAIT_2D_IDLECLEAN    (1u << 16)
 #define     RADEON_WAIT_3D_IDLECLEAN    (1u << 17)
 #define     RADEON_WAIT_HOST_IDLECLEAN  (1u << 18)
