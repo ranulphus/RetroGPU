@@ -1284,8 +1284,8 @@ static void tnl_refuse_nonfinite(void)
 
 static void install(void);
 
-/* (one draw's record for the dump: what, its ring span, state, matrix, its packets' first 64 dwords and up to 160 of
- * its vertices with their clip-space values) */
+/* (one draw's record for the dump: what, its ring span, state, matrix, its packets (up to 640 dwords: a 945-index
+ * draw's four pieces are 489) and up to 512 of its vertices with their clip-space values) */
 static void tnl_dump_rec(const tnl_rec *r, const char *what, uint32_t rp, const volatile uint32_t *ring, uint32_t dw)
 {
     uint32_t len = (r->wp1 - r->wp0 + dw) % dw, n, j, k;
@@ -1298,7 +1298,7 @@ static void tnl_dump_rec(const tnl_rec *r, const char *what, uint32_t rp, const 
     for (k = 0; k < 4; k++)
         DGL_WARN("DGL-TNLDIAG %s mvp col %lu: %.9g %.9g %.9g %.9g", what, (unsigned long)k, r->mvp[k * 4],
                  r->mvp[k * 4 + 1], r->mvp[k * 4 + 2], r->mvp[k * 4 + 3]);
-    for (k = 0; k < len && k < 64; k += 8) {
+    for (k = 0; k < len && k < 640; k += 8) {
         uint32_t b = (r->wp0 + k) % dw;
         DGL_WARN("DGL-TNLDIAG %s ring[%lu..] %08lx %08lx %08lx %08lx %08lx %08lx %08lx %08lx", what, (unsigned long)b,
                  (unsigned long)ring[b], (unsigned long)ring[(b + 1) % dw], (unsigned long)ring[(b + 2) % dw],
@@ -1309,7 +1309,7 @@ static void tnl_dump_rec(const tnl_rec *r, const char *what, uint32_t rp, const 
         v = (const volatile uint32_t *)(radeon_cp_varea + (r->addr - radeon_cp_varea_gart));
     else if (!radeon_cp_varea && r->addr >= radeon.fb_location)
         v = (const volatile uint32_t *)(radeon.fb + (r->addr - radeon.fb_location));
-    n = r->nv < 160u ? r->nv : 160u;
+    n = r->nv < 512u ? r->nv : 512u;
     for (j = 0; v && j < n; j++, v += r->dwords) {
         union { uint32_t u; float f; } p[4];
         float c[4];
@@ -1362,8 +1362,10 @@ static void tnl_dump(const char *why)
      * held the index in both hangs of Echoes' frame 371): their packets, state and vertices as the engine fetches
      * them (the vertex area isn't written again before its fence passes), with what their matrix makes of them. */
     if (ring && dw) {
-        const tnl_rec *in = NULL, *before = NULL;
-        uint32_t best = 0xFFFFFFFFu;
+        /* (and the two before it: the command processor's queue holds up to 128 dwords, so the draw the engine is
+         * stuck on can be one or two back; CP_CSQ_STAT's second field is where the microcode reads, mod 128) */
+        const tnl_rec *in = NULL, *before = NULL, *before2 = NULL;
+        uint32_t best = 0xFFFFFFFFu, best2 = 0xFFFFFFFFu;
         for (i = 32; i-- > 0;) {         /* (the newest first: an older lap of the ring holds the index too) */
             const tnl_rec *r = &tnl_recs[(tnl_nrec + i) & 31u];
             uint32_t len = (r->wp1 - r->wp0 + dw) % dw, at = (rp - r->wp0 + dw) % dw;
@@ -1371,13 +1373,19 @@ static void tnl_dump(const char *why)
                 continue;
             if (at < len && !in)
                 in = r;
-            else if (at >= len && at < best && r != in)
-                best = at, before = r;
+            else if (at >= len && r != in) {
+                if (at < best)
+                    best2 = best, before2 = before, best = at, before = r;
+                else if (at < best2)
+                    best2 = at, before2 = r;
+            }
         }
         if (in)
             tnl_dump_rec(in, "stuck", rp, ring, dw);
         if (before)
             tnl_dump_rec(before, "before", rp, ring, dw);
+        if (before2)
+            tnl_dump_rec(before2, "before2", rp, ring, dw);
     }
 }
 
