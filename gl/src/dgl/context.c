@@ -27,6 +27,7 @@ static int exit_pending;           /* DGL-START printed, DGL-EXIT owed */
 static int stats_on;                /* DGL_STATS: 1 = DGL-STAT, 2 = also DGL-PRIMS */
 static uint32_t stats_t0, stats_tris0;
 static unsigned long stats_swaps0;
+unsigned long dgl_frame_no;
 /* DGL_STATS: time the swaps spent waiting for the engine to finish the frame
  * (the drain), in the second being reported; the retrace's and the scaled
  * presents' are the device's (rg_stats), taken as differences. */
@@ -544,6 +545,7 @@ static void swap_buffers(void)
     } else
         drain_with_hook();
     stats.swaps++;
+    dgl_frame_no = stats.swaps;
     dgl_snap_frame(stats.swaps);        /* DGL_SNAP: before the frame is shown */
     stats.frames++;
     stats.triangles = be_tris();

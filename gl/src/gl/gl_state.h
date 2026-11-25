@@ -207,6 +207,7 @@ typedef struct {
     unsigned long seqs;                         /* fans and strips sent as one sequence of the WARPs' */
 } dgl_prim_counts;
 extern dgl_prim_counts dgl_prims;
+extern unsigned long dgl_frame_no;            /* (context.c: swaps so far; a back end's traces) */
 
 /* buffer.c */
 const dgl_buffer *dgl_array_buffer(void);                 /* bound to GL_ARRAY_BUFFER_ARB, or NULL */

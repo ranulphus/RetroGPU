@@ -53,6 +53,7 @@ typedef struct {
 
 static unsigned stamp;
 static uint32_t tris, lines_, points_;
+static void trace_ring(const char *what, unsigned long a, unsigned long b, unsigned long c, unsigned long d);
 static int warned[12];
 
 static void warn_once(int k, const char *what)
@@ -165,6 +166,8 @@ static void send_rows(const dgl_texture *t, const dgl_level *l, const dgl_palett
             } else
                 put_texels(d, l->rgba + (y + j) * l->w * 4, l->w, dt);
         }
+        trace_ring("upload", (unsigned long)(off + (uint32_t)y * stride), (unsigned long)(stride * (uint32_t)rows),
+                   (unsigned long)stream, 0);
         if (!stream || radeon_upload(off + (uint32_t)y * stride, up, stride * (uint32_t)rows) != 0) {
             volatile uint32_t *v = (volatile uint32_t *)(radeon.fb + off + (uint32_t)y * stride);
             uint32_t n = stride * (uint32_t)rows / 4u, i;
@@ -1207,10 +1210,47 @@ static tnl_rec tnl_recs[32];
 static unsigned tnl_nrec;
 static unsigned long tnl_begins;
 
+/* DGL_TNL_TRACE=from,to[:from2,to2]: every engine draw, texture upload and depth clear of those frames (swaps counted
+ * from 0) as DGL-TNLTRACE lines, with the ring's indices (Echoes' fly scene hangs the P3 at frame 111 or 373,
+ * whichever the build: its draws there). */
+static long trace_r[4] = { -2, -1, -1, -1 };
+static int tracing(void)
+{
+    long f = (long)dgl_frame_no;
+    if (trace_r[0] == -2) {
+        const char *e = getenv("DGL_TNL_TRACE"), *c;
+        trace_r[0] = -1;
+        if (e && *e) {
+            trace_r[0] = atol(e);
+            c = strchr(e, ',');
+            trace_r[1] = c ? atol(c + 1) : trace_r[0];
+            if ((c = strchr(e, ':')) != NULL) {
+                trace_r[2] = atol(c + 1);
+                c = strchr(c, ',');
+                trace_r[3] = c ? atol(c + 1) : trace_r[2];
+            }
+        }
+    }
+    return (trace_r[0] >= 0 && f >= trace_r[0] && f <= trace_r[1]) || (trace_r[2] >= 0 && f >= trace_r[2] && f <= trace_r[3]);
+}
+
+static void trace_ring(const char *what, unsigned long a, unsigned long b, unsigned long c, unsigned long d)
+{
+    uint32_t rp = 0, wp = 0, dw = 0;
+    const volatile uint32_t *ring = NULL;
+    if (!tracing())
+        return;
+    radeon_cp_peek(&rp, &wp, &ring, &dw);
+    DGL_WARN("DGL-TNLTRACE f%lu %s %lu %lu %lu %lx rp %lu wp %lu begins %lu", dgl_frame_no, what, a, b, c, d,
+             (unsigned long)rp, (unsigned long)wp, dgl_prims.begins);
+}
+
 static void tnl_note(GLenum mode, GLsizei count, int nv, int ni, int pairs, int dwords, uint32_t vfmt, uint32_t prim,
                      uint32_t addr)
 {
     tnl_rec *r = &tnl_recs[tnl_nrec++ & 31u];
+    trace_ring(mode == GL_TRIANGLES ? "draw-tris" : "draw", (unsigned long)count, (unsigned long)nv,
+               (unsigned long)(pairs * 16 + dwords), (unsigned long)addr);
     r->mode = mode, r->count = (uint32_t)count, r->nv = (uint32_t)nv, r->ni = (uint32_t)ni;
     r->pairs = (uint32_t)pairs, r->dwords = (uint32_t)dwords, r->vfmt = vfmt, r->prim = prim, r->addr = addr;
     r->between = (uint32_t)(dgl_prims.begins - tnl_begins - 1u);
@@ -1383,6 +1423,8 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
             return 0;
         if (va_used + bytes > half) {
             va_fence[va_half] = radeon_cp_fence();
+            trace_ring("fence-half", (unsigned long)va_fence[va_half], (unsigned long)va_half,
+                       (unsigned long)va_fence[va_half ^ 1], (unsigned long)radeon_rd(0x15E4));
             va_half ^= 1;
             va_used = 0;
             static long fake = -1;          /* (DGL_TNL_FAKEMISS=n: the n-th wait taken as missed, to test what follows) */
@@ -1422,7 +1464,19 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
             return 0;
         }
         if (vb_used + bytes > VB_BYTES) {
-            radeon_sync(1000000);
+            trace_ring("vram-wrap", (unsigned long)vb_used, (unsigned long)bytes, 0, 0);
+            if (radeon_sync(1000000) != 0) {
+                /* (the chip not through its commands in a second: as at a missed fence, the engine reset) */
+                tnl_dump("the vertex area's sync not done in a second");
+                tnl_mode = 0;
+                dgl_sink.tnl = NULL;
+                radeon_cp_stop();
+                radeon_tcl_forget();
+                install();
+                warn_once(9, "the transform engine's vertex area: a sync not done in a second; the engine reset and "
+                             "off for the rest of the run, drawing by register writes");
+                return 0;
+            }
             vb_used = 0;
         }
         addr = ((vb_block + 31u) & ~31u) + vb_used;
@@ -1558,6 +1612,8 @@ static void clear(GLbitfield mask)
         if (radeon.flags & RADEON_TILED_Z) {
             /* (a tiled depth buffer: by the 3D engine, depth and stencil each as asked) */
             uint32_t z = rg_radeon.depth_bits == 24 ? (uint32_t)(d * 16777215.0 + 0.5) : (uint32_t)(d * 65535.0 + 0.5);
+            trace_ring("depth-clear", (unsigned long)(c[2] - c[0]), (unsigned long)(c[3] - c[1]), (unsigned long)zw,
+                       (unsigned long)radeon_tcl_live);
             radeon_3d_depth_clear(c[0], c[1], c[2] - c[0], c[3] - c[1], z, zw,
                                   (mask & GL_STENCIL_BUFFER_BIT) && rg_radeon.depth_bits == 24 ? dgl_gl.clear_stencil & 255 : -1);
         } else {
