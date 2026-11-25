@@ -72,10 +72,10 @@ class Glos:
         lines += ["put %s %s/%s" % (src, remote, name) for src, name in files]
         return self.sftp(lines)
 
-    def get_dir(self, remote, local):
+    def get_dir(self, remote, local, timeout=300):
         """Every file of a directory on the PC; the names fetched."""
         os.makedirs(local, exist_ok=True)
-        rc, said = self.sftp(["-get %s/* %s/" % (remote, local)])
+        rc, said = self.sftp(["-get %s/* %s/" % (remote, local)], timeout=timeout)
         return sorted(os.listdir(local))
 
     def follow(self):
@@ -109,8 +109,11 @@ class Glos:
     def close(self):
         if self.follower:
             self.follower.terminate()
-        subprocess.run(["ssh", "-p", str(self.port)] + self.opts + ["-O", "exit", self.dest],
-                       capture_output=True, timeout=30)
+        try:
+            subprocess.run(["ssh", "-p", str(self.port)] + self.opts + ["-O", "exit", self.dest],
+                           capture_output=True, timeout=30)
+        except subprocess.TimeoutExpired:       # (a PC gone down: nothing left to close politely)
+            pass
         shutil.rmtree(self.tmp, ignore_errors=True)
 
 

@@ -369,7 +369,9 @@ def main():
             proc.kill()
             said = proc.communicate()[0]
         open(os.path.join(out, "stdout.txt"), "wb").write(said)
-        received = [] if stuck else glos.get_dir("/C/OUT", files)
+        # (after a hang the PC may have gone down at the kill: fetching from a dead host waited out sftp's whole
+        # time-out, and no result was written; Echoes, 2026-11-25)
+        received = [] if stuck or (status in ("HANG", "TIMEOUT") and not glos.up()) else glos.get_dir("/C/OUT", files)
         upload_end = upload_end or (not stuck and time.time())
         glos.close()
     if stuck and pc.get("reset"):
