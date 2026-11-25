@@ -85,8 +85,11 @@ int radeon_sync(uint32_t timeout_us)
     if (radeon_cp_running())            /* (the caches purged in the stream, the ring fetched, the engine idle) */
         return radeon_cp_idle_wait(timeout_us);
     while (!radeon_idle())
-        if (sys_time_us() - t0 >= timeout_us)
+        if (sys_time_us() - t0 >= timeout_us) {
+            if (timeout_us >= 500000u)
+                radeon_stalled = 1;
             return -1;
+        }
     return cache_flush(t0, timeout_us);
 }
 
@@ -154,12 +157,11 @@ int radeon_engine_recover(void)
     (void)radeon_rd(RADEON_RBBM_SOFT_RESET);
     sys_delay_us(500000u);
     radeon_wr(RADEON_RBBM_SOFT_RESET, rbbm & ~RADEON_SOFT_RESET_CP);
-    /* (then the engine given time: on the P3 it read busy just after the resets, yet was idle by the program's end
-     * a few seconds later, with nothing written to it between; first with bus mastering still off, then on) */
-    for (k = 0; k < 2; k++) {
+    /* (then the engine given 2 s, bus mastering still off: on the P3 it read busy just after the resets, yet was
+     * once idle by the program's end. Turning bus mastering back on while it was stuck never brought it back, and
+     * would let a stuck engine fetch from memory the program then frees: not done) */
+    for (k = 0; k < 1; k++) {
         uint32_t t0 = sys_time_us();
-        if (k)
-            radeon_wr(RADEON_BUS_CNTL, bus & ~RADEON_BUS_MASTER_DIS);
         do {
             sys_delay_us(1000u);
             st = radeon_rd(RADEON_RBBM_STATUS);
@@ -169,9 +171,8 @@ int radeon_engine_recover(void)
         if (!((st & busy) || (st & RADEON_RBBM_FIFOCNT_MASK) < 64 || (st & RADEON_RBBM_ACTIVE)))
             break;
     }
-    if (k == 2) {
-        radeon_wr(RADEON_BUS_CNTL, bus | RADEON_BUS_MASTER_DIS);
-        radeon_dead = 1;
+    if (k == 1) {
+        radeon_dead = 1;                /* (bus mastering left off) */
         return -1;
     }
     radeon_recover_waited = k;

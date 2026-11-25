@@ -341,8 +341,11 @@ int radeon_cp_idle_wait(uint32_t timeout_us)
             rptr_seen = wptr;
             return 0;
         }
-        if (sys_time_us() - t0 > timeout_us)
+        if (sys_time_us() - t0 > timeout_us) {
+            if (timeout_us >= 500000u)
+                radeon_stalled = 1;
             return -1;
+        }
     }
 }
 
@@ -406,7 +409,10 @@ int radeon_cp_fence_wait(uint32_t f, uint32_t timeout_us)
         return -1;
     radeon_cp_flush();
     while ((int32_t)(radeon_rd(RADEON_GUI_SCRATCH_REG1) - f) < 0)
-        if (sys_time_us() - t0 > timeout_us)
+        if (sys_time_us() - t0 > timeout_us) {
+            if (timeout_us >= 500000u)
+                radeon_stalled = 1;
             return -1;
+        }
     return 0;
 }

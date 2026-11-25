@@ -19,6 +19,7 @@ static uint32_t pci_read32(int bus, int dev, int reg)
 }
 
 int radeon_dead;
+int radeon_stalled;
 
 uint32_t radeon_rd(uint32_t off)
 {

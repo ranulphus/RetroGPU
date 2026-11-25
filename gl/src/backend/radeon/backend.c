@@ -1416,6 +1416,37 @@ static void tnl_hung(const char *why, const char *warn)
     warn_once(9, warn);
 }
 
+/* The distance in dwords between a draw's vertices of dwords each: 8 for up to 8 (one unit's coordinates or none), 16
+ * beyond, so no vertex reaches the end of a 64-byte line. The P3's 7500 stopped for good on Echoes' far terrain
+ * (twenty-byte vertices, packed) whenever one of its vertices ended at or past a 64-byte boundary in some state of the
+ * engine's fetching: at five placements in a row of every sixteen, with either packet (DTMIX mode R, 2026-11-25).
+ * DGL_TNL_STRIDE=0: packed, as before (to test); =n: n dwords. */
+static int tnl_stride(int dwords)
+{
+    static int want = -1;
+    if (want < 0) {
+        const char *e = getenv("DGL_TNL_STRIDE");
+        want = e && *e ? atoi(e) : 99;
+    }
+    if (want == 99)
+        return dwords <= 8 ? 8 : 16;
+    return want >= dwords && want <= 16 ? want : dwords;
+}
+
+/* The padding before a draw's vertices at chip address a (a multiple of 32): 32 when a is a multiple of 64. The P3's
+ * 7500 stopped for good on Echoes' far terrain (945 indices over 394 twenty-byte vertices) whenever its vertices
+ * began on a 64-byte boundary of the vertex area, at every such offset tried, and drew it at offsets 32 past one
+ * (DTMIX mode R with the draw captured from the P3, 2026-11-25). DGL_TNL_ALIGN64=1: no padding (to test). */
+static uint32_t tnl_pad(uint32_t a)
+{
+    static int keep = -1;
+    if (keep < 0) {
+        const char *e = getenv("DGL_TNL_ALIGN64");
+        keep = e && *e == '1';
+    }
+    return !keep && !(a & 63u) ? 32u : 0u;
+}
+
 /* A draw whose window extent (its object-space box's corners through the matrix) is under DGL_TNL_MINPX pixels each
  * way (2 by default; 0: never): the CPU's path draws it. The 7500's transform engine stopped for good, through every
  * reset, on one such draw of Echoes' (a far animal of a quarter of a pixel, 2026-11-25): the engine gains nothing on a
@@ -1463,7 +1494,7 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
     /* (the coordinates: GL's unit 0's s and t, then unit 1's where the chip's second unit draws or the first draws GL's
      * unit 1, swap_st; the engine's outputs take the chip's units from them) */
     int units = cur_tx[1] ? 2 : cur_tx[0] ? 1 : 0, pairs = units == 2 || (units && swap_st) ? 2 : units;
-    int dwords = 5 + 2 * pairs, flat = dgl_gl.shade_model == GL_FLAT;
+    int dwords = 5 + 2 * pairs, stride, flat = dgl_gl.shade_model == GL_FLAT;
     GLint vmin, vmax, i;
     int nv, ni = 0, k;
     uint32_t prim = RADEON_PRIM_TRI_LIST, vfmt, bytes, addr, s, took;
@@ -1553,13 +1584,14 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
 #undef IX
     if (!ni)
         return 1;
-    bytes = (uint32_t)nv * (uint32_t)dwords * 4u;
+    stride = tnl_stride(dwords);
+    bytes = (uint32_t)nv * (uint32_t)stride * 4u;
     if (radeon_cp_varea) {
         /* Room in the system-memory area: this half, else the other once its fence has passed. */
-        uint32_t half = radeon_cp_varea_bytes / 2u;
-        if (bytes > half)
+        uint32_t half = radeon_cp_varea_bytes / 2u, pad = tnl_pad(radeon_cp_varea_gart + va_used);
+        if (bytes + 32u > half)
             return 0;
-        if (va_used + bytes > half) {
+        if (va_used + pad + bytes > half) {
             va_fence[va_half] = radeon_cp_fence();
             trace_ring("fence-half", (unsigned long)va_fence[va_half], (unsigned long)va_half,
                        (unsigned long)va_fence[va_half ^ 1], (unsigned long)radeon_rd(0x15E4));
@@ -1579,6 +1611,7 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
                 return 0;
             }
         }
+        va_used += tnl_pad(radeon_cp_varea_gart + (uint32_t)va_half * half + va_used);
         addr = radeon_cp_varea_gart + (uint32_t)va_half * half + va_used;     /* (in the chip's space already) */
         dst = (volatile uint32_t *)(radeon_cp_varea + (uint32_t)va_half * half + va_used);
         took = (bytes + 31u) & ~31u;
@@ -1594,7 +1627,7 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
             warn_once(8, "no video memory for the transform engine's vertices: transformed by the CPU");
             return 0;
         }
-        if (vb_used + bytes > VB_BYTES) {
+        if (vb_used + 32u + bytes > VB_BYTES) {
             trace_ring("vram-wrap", (unsigned long)vb_used, (unsigned long)bytes, 0, 0);
             if (radeon_sync(1000000) != 0) {
                 /* (the chip not through its commands in a second: as at a missed fence, the engine reset) */
@@ -1605,13 +1638,14 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
             }
             vb_used = 0;
         }
+        vb_used += tnl_pad(((vb_block + 31u) & ~31u) + vb_used + radeon.fb_location);
         addr = ((vb_block + 31u) & ~31u) + vb_used;
         took = (bytes + 31u) & ~31u;
         vb_used += took;
         dst = (volatile uint32_t *)(radeon.fb + addr);
         addr += radeon.fb_location;             /* (the chip's space: video memory starts at its frame buffer's base) */
     }
-    for (i = 0; i < nv; i++, dst += dwords) {
+    for (i = 0; i < nv; i++, dst += stride) {
         union { float f; uint32_t u; } c;
         dgl_vertex_of(vmin + i, &v);
         if (m0 && pairs)
@@ -1712,8 +1746,8 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
     if (!tnl_tris)
         DGL_WARN("DGL-RADEON the transform engine draws (DGL_TNL=0: the CPU transforms instead)");   /* (said once) */
     s = radeon_cp_wptr();
-    radeon_tcl_draw_indexed(prim, vfmt, addr, dwords, ix, ni);
-    tnl_note(mode, count, nv, ni, pairs, dwords, vfmt, prim, addr, s);
+    radeon_tcl_draw_indexed_s(prim, vfmt, addr, dwords, stride, ix, ni);
+    tnl_note(mode, count, nv, ni, pairs, stride, vfmt, prim, addr, s);
     radeon_cp_flush();
     tris += (uint32_t)(prim == RADEON_PRIM_TRI_LIST ? ni / 3 : ni - 2);
     tnl_tris += (uint32_t)(prim == RADEON_PRIM_TRI_LIST ? ni / 3 : ni - 2);
@@ -1726,6 +1760,12 @@ static void install(void)
 {
     valid_ok = 0;
     col_set = 0;
+    {   /* (DGL_TNL_PKT=new: the engine's draws by LOAD_VBPNTR and DRAW_INDX, to compare; else Mesa's packet) */
+        const char *e = getenv("DGL_TNL_PKT");
+        radeon_tcl_old_packets = !(e && !strcmp(e, "new"));
+        e = getenv("DGL_TNL_PIECE");    /* (tests: the indices a list's packet takes, a multiple of 6 up to 300) */
+        radeon_tcl_piece = e && atoi(e) >= 6 && atoi(e) <= RADEON_TCL_PIECE ? atoi(e) / 6 * 6 : RADEON_TCL_PIECE;
+    }
     radeon_3d_init(rg_radeon_color_off(0), rg_radeon.pitch_bytes, rg_radeon.bpp, rg_radeon.z_off,
                    rg_radeon.z_pitch_bytes ? rg_radeon.z_pitch_bytes : rg_radeon.pitch_bytes, rg_radeon.depth_bits,
                    rg_radeon.width, rg_radeon.height);
@@ -1749,6 +1789,14 @@ static void clear(GLbitfield mask)
         return;
     if (radeon_dead)                    /* (a FIFO wait ran out in the frame before: the engine stuck) */
         dead_end("a register write found the engine's FIFO full for 200 ms");
+    if (radeon_stalled) {               /* (a wait for the engine ran out in the frame before: the same recovery) */
+        radeon_stalled = 0;
+        tnl_hung("a wait of half a second or more for the engine ran out",
+                 "the engine stopped (a wait for it ran out); the engine reset, the transform engine off for the rest "
+                 "of the run, drawing by register writes");
+        if (radeon_dead)
+            dead_end("a wait of half a second or more for the engine ran out");
+    }
     scissor(0, c);
     if (mask & GL_COLOR_BUFFER_BIT) {
         const GLfloat *k = dgl_gl.clear_color;

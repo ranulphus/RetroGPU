@@ -25,6 +25,10 @@ extern radeon_chip radeon;              /* the one Radeon this layer drives */
  * write to a full FIFO holds the PCI bus until the engine takes it, which never comes: the PC froze that way twice
  * (the P3, 2026-11-25). The display's registers below 1000h stay usable. */
 extern int radeon_dead;
+/* 1 once a wait of half a second or more for the engine ran out (radeon_sync, radeon_cp_idle_wait, a fence): the
+ * engine is stuck, though its registers still answer. The layer's user deals with it (DOS-GL: the recovery reset at
+ * its next clear) and clears it. A program that only waited, its frames crawling, left the card stuck once. */
+extern int radeon_stalled;
 
 /* The R100 family's chips differ in these (Mesa's radeon_screen.c, the DRM's radeon_cp.c, X.org's radeon_driver.c):
  *   - the first Radeon (R100, the 7200: 5144-5147) and the RV200 (the 7500: 5157, 5158) have a transform and
@@ -191,6 +195,10 @@ void radeon_tcl_matrix_t(int slot, const float m[16]);  /* (as it is: an inverse
 void radeon_tcl_guard_band(void);
 void radeon_tcl_draw(uint32_t prim, uint32_t vfmt, uint32_t addr, int dwords, int n);
 void radeon_tcl_draw_indexed(uint32_t prim, uint32_t vfmt, uint32_t addr, int dwords, const uint16_t *idx, int n);
+void radeon_tcl_draw_indexed_s(uint32_t prim, uint32_t vfmt, uint32_t addr, int dwords, int stride, const uint16_t *idx,
+                               int n);         /* (vertices stride dwords apart: LOAD_VBPNTR's stride field) */
+extern int radeon_tcl_piece;           /* the indices a list's packet takes (RADEON_TCL_PIECE; tests only) */
+extern int radeon_tcl_old_packets;      /* 1 (default): 3D_RNDR_GEN_INDX_PRIM, Mesa 7's; 0: LOAD_VBPNTR + DRAW_INDX */
 
 /* chip.c: a surface over the depth buffer at off (1 KB aligned), bytes long (a multiple of 1 KB), pitch_bytes a row,
  * 16 or 32 bits (24-bit Z with its stencil): the CPU's reads and writes there translated to the chip's tiling, so

@@ -27,6 +27,7 @@
 #define LOAD_VBPNTR              0x00002F00u
 #define DRAW_VBUF                0x00002800u
 #define DRAW_INDX                0x00002A00u
+#define RNDR_GEN_INDX_PRIM       0x00002300u
 #define VC_WALK_IND              0x00000010u
 #define VC_WALK_LIST             0x00000020u
 #define VC_MAOS_ENABLE           0x00000080u
@@ -195,23 +196,57 @@ void radeon_tcl_draw(uint32_t prim, uint32_t vfmt, uint32_t addr, int dwords, in
     radeon_cp_advance(7);
 }
 
+int radeon_tcl_old_packets = 1;
+int radeon_tcl_piece = RADEON_TCL_PIECE;    /* (a multiple of 6; DOS-GL's DGL_TNL_PIECE, for tests) */
+
 /* (lists, of triangles, lines or points, in pieces of RADEON_TCL_PIECE indices: a multiple of 6, so a piece ends at
  * a primitive's end; a strip or fan must come in one piece) */
 void radeon_tcl_draw_indexed(uint32_t prim, uint32_t vfmt, uint32_t addr, int dwords, const uint16_t *idx, int n)
 {
+    radeon_tcl_draw_indexed_s(prim, vfmt, addr, dwords, dwords, idx, n);
+}
+
+/* (the same, the vertices stride dwords apart, holding dwords of data each: a stride other than the size takes
+ * LOAD_VBPNTR's own stride field, so DRAW_INDX) */
+void radeon_tcl_draw_indexed_s(uint32_t prim, uint32_t vfmt, uint32_t addr, int dwords, int stride, const uint16_t *idx,
+                               int n)
+{
     uint32_t *d;
     int i;
     radeon_tcl_emit();
+    if (radeon_tcl_old_packets && stride == dwords) {
+        /* (Mesa 7's R100 driver as it shipped (RADEON_OLD_PACKETS 1): 3D_RNDR_GEN_INDX_PRIM with the vertices' address,
+         * the largest index (0xFFFF, Mesa's), the format, then the indices; the vertex size from the format, no
+         * LOAD_VBPNTR, no MAOS_ENABLE. With LOAD_VBPNTR and DRAW_INDX, the path Mesa compiled out, the P3's 7500
+         * stopped for good on Echoes' far terrain at some placements of its vertices in memory) */
+        (void)dwords;
+        while (n > 0) {
+            int k = n > radeon_tcl_piece ? radeon_tcl_piece : n, words = (k + 1) / 2;
+            d = radeon_cp_reserve(5 + words);
+            if (!d)
+                return;
+            d[0] = RADEON_CP_PACKET3(RNDR_GEN_INDX_PRIM, 3 + words);
+            d[1] = addr;
+            d[2] = 0xFFFFu;
+            d[3] = vfmt;
+            d[4] = prim | VC_WALK_IND | VC_RADEON_MODE | VC_TCL_ENABLE | (uint32_t)k << 16;
+            for (i = 0; i < words; i++)         /* (two to a dword, the first in the low half) */
+                d[5 + i] = (uint32_t)idx[2 * i] | (2 * i + 1 < k ? (uint32_t)idx[2 * i + 1] << 16 : 0u);
+            radeon_cp_advance(5 + words);
+            idx += k, n -= k;
+        }
+        return;
+    }
     d = radeon_cp_reserve(4);
     if (!d)
         return;
     d[0] = RADEON_CP_PACKET3(LOAD_VBPNTR, 2);
     d[1] = 1;
-    d[2] = (uint32_t)dwords << 8 | (uint32_t)dwords;
+    d[2] = (uint32_t)stride << 8 | (uint32_t)dwords;    /* (stride, size) */
     d[3] = addr;
     radeon_cp_advance(4);
     while (n > 0) {
-        int k = n > RADEON_TCL_PIECE ? RADEON_TCL_PIECE : n, words = (k + 1) / 2;
+        int k = n > radeon_tcl_piece ? radeon_tcl_piece : n, words = (k + 1) / 2;
         d = radeon_cp_reserve(3 + words);
         if (!d)
             return;
