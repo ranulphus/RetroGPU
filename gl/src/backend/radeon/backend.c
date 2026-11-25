@@ -1197,6 +1197,62 @@ static uint16_t *idx_room(int n)
 
 static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first);
 
+/* DGL_TNL=1's diagnostics while the P3's hang (gl/docs/dx7.md) is open: the last 32 draws sent to the engine, and
+ * how many other primitives came between them; printed once, with the chip's state and the ring around the command
+ * processor's read index (the packet it stopped at), when a fence is missed. */
+typedef struct {
+    uint32_t mode, count, nv, ni, pairs, dwords, vfmt, prim, addr, between, fence, fmt, sel;
+} tnl_rec;
+static tnl_rec tnl_recs[32];
+static unsigned tnl_nrec;
+static unsigned long tnl_begins;
+
+static void tnl_note(GLenum mode, GLsizei count, int nv, int ni, int pairs, int dwords, uint32_t vfmt, uint32_t prim,
+                     uint32_t addr)
+{
+    tnl_rec *r = &tnl_recs[tnl_nrec++ & 31u];
+    r->mode = mode, r->count = (uint32_t)count, r->nv = (uint32_t)nv, r->ni = (uint32_t)ni;
+    r->pairs = (uint32_t)pairs, r->dwords = (uint32_t)dwords, r->vfmt = vfmt, r->prim = prim, r->addr = addr;
+    r->between = (uint32_t)(dgl_prims.begins - tnl_begins - 1u);
+    r->fence = va_fence[0] > va_fence[1] ? va_fence[0] : va_fence[1];
+    r->fmt = radeon_tcl.output_vtx_fmt, r->sel = radeon_tcl.output_vtx_sel;
+    tnl_begins = dgl_prims.begins;
+}
+
+static void tnl_dump(const char *why)
+{
+    static int done;
+    uint32_t rp = 0, wp = 0, dw = 0, k;
+    const volatile uint32_t *ring = NULL;
+    unsigned i;
+    if (done)
+        return;
+    done = 1;
+    radeon_cp_peek(&rp, &wp, &ring, &dw);
+    DGL_WARN("DGL-TNLDIAG %s: RBBM_STATUS %08lx CP_CSQ_STAT %08lx SCRATCH1 %lu RPTR %lu WPTR %lu (ring %lu dwords) "
+             "draws %u", why, (unsigned long)radeon_rd(RADEON_RBBM_STATUS), (unsigned long)radeon_rd(RADEON_CP_CSQ_STAT),
+             (unsigned long)radeon_rd(0x15E4), (unsigned long)rp, (unsigned long)wp, (unsigned long)dw, tnl_nrec);
+    if (ring && dw)
+        for (k = 0; k < 24; k += 8) {
+            uint32_t b = (rp + dw - 8u + k) % dw;
+            DGL_WARN("DGL-TNLDIAG ring[%lu..] %08lx %08lx %08lx %08lx %08lx %08lx %08lx %08lx", (unsigned long)b,
+                     (unsigned long)ring[b], (unsigned long)ring[(b + 1) % dw], (unsigned long)ring[(b + 2) % dw],
+                     (unsigned long)ring[(b + 3) % dw], (unsigned long)ring[(b + 4) % dw],
+                     (unsigned long)ring[(b + 5) % dw], (unsigned long)ring[(b + 6) % dw],
+                     (unsigned long)ring[(b + 7) % dw]);
+        }
+    for (i = 0; i < 32; i++) {
+        const tnl_rec *r = &tnl_recs[(tnl_nrec + i) & 31u];
+        if (!r->count)
+            continue;
+        DGL_WARN("DGL-TNLDIAG draw mode %lx count %lu nv %lu ni %lu pairs %lu dwords %lu vfmt %08lx prim %08lx "
+                 "addr %08lx between %lu fence %lu out %08lx/%08lx", (unsigned long)r->mode, (unsigned long)r->count,
+                 (unsigned long)r->nv, (unsigned long)r->ni, (unsigned long)r->pairs, (unsigned long)r->dwords,
+                 (unsigned long)r->vfmt, (unsigned long)r->prim, (unsigned long)r->addr, (unsigned long)r->between,
+                 (unsigned long)r->fence, (unsigned long)r->fmt, (unsigned long)r->sel);
+    }
+}
+
 static int rb_tnl(GLenum mode, GLsizei count, const GLint *idx, GLint first)
 {
     if (!tnl_mode || !(radeon.flags & RADEON_HAS_TCL))
@@ -1303,6 +1359,7 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
             if (va_fence[va_half] && radeon_cp_fence_wait(va_fence[va_half], 1000000u) != 0) {
                 /* (the chip isn't getting through its commands: no more of them from here, the CPU's path for the
                  * rest of the run, rather than writing over vertices it may still be fetching) */
+                tnl_dump("a fence not passed in a second");
                 tnl_mode = 0;
                 dgl_sink.tnl = NULL;
                 warn_once(9, "the transform engine's vertex area: a fence not passed in a second; the engine is off "
@@ -1310,7 +1367,7 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
                 return 0;
             }
         }
-        addr = radeon_cp_varea_gart + (uint32_t)va_half * half + va_used;
+        addr = radeon_cp_varea_gart + (uint32_t)va_half * half + va_used;     /* (in the chip's space already) */
         dst = (volatile uint32_t *)(radeon_cp_varea + (uint32_t)va_half * half + va_used);
         va_used += (bytes + 31u) & ~31u;
     } else {
@@ -1331,6 +1388,7 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
         addr = ((vb_block + 31u) & ~31u) + vb_used;
         vb_used += (bytes + 31u) & ~31u;
         dst = (volatile uint32_t *)(radeon.fb + addr);
+        addr += radeon.fb_location;             /* (the chip's space: video memory starts at its frame buffer's base) */
     }
     for (i = 0; i < nv; i++, dst += dwords) {
         union { float f; uint32_t u; } c;
@@ -1403,7 +1461,8 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
            (pairs ? RADEON_CP_VC_FRMT_ST0 : 0u) | (pairs > 1 ? RADEON_CP_VC_FRMT_ST1 : 0u);
     if (!tnl_tris)
         DGL_WARN("DGL-RADEON the transform engine draws (DGL_TNL=0: the CPU transforms instead)");   /* (said once) */
-    radeon_tcl_draw_indexed(prim, vfmt, radeon.fb_location + addr, dwords, ix, ni);
+    radeon_tcl_draw_indexed(prim, vfmt, addr, dwords, ix, ni);
+    tnl_note(mode, count, nv, ni, pairs, dwords, vfmt, prim, addr);
     radeon_cp_flush();
     tris += (uint32_t)(prim == RADEON_PRIM_TRI_LIST ? ni / 3 : ni - 2);
     tnl_tris += (uint32_t)(prim == RADEON_PRIM_TRI_LIST ? ni / 3 : ni - 2);
