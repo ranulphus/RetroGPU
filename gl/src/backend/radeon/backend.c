@@ -1319,7 +1319,7 @@ static void tnl_dump(const char *why)
     }
     /* The draw whose packets hold the read index: its packets, its state and its vertices as the engine fetches them
      * (the vertex area isn't written again before its fence passes), with what its matrix makes of them. */
-    for (i = 0; ring && dw && i < 32; i++) {
+    for (i = 32; ring && dw && i-- > 0;) {     /* (the newest first: an older lap of the ring holds the index too) */
         const tnl_rec *r = &tnl_recs[(tnl_nrec + i) & 31u];
         uint32_t len = (r->wp1 - r->wp0 + dw) % dw, at = (rp - r->wp0 + dw) % dw, n, j;
         const volatile uint32_t *v = NULL;
