@@ -31,6 +31,9 @@ class Glos:
         os.chmod(self.key, 0o600)
         self.opts = ["-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
                      "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR", "-o", "ConnectTimeout=8",
+                     # (an open session to a PC that went down ends within ~15 s, not at the TCP stack's time-out:
+                     # the job's session and the master connection held run.py for 7.5 minutes, Echoes 2026-11-25)
+                     "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3",
                      "-o", "ControlMaster=auto", "-o", "ControlPath=" + os.path.join(self.tmp, "cm"),
                      "-o", "ControlPersist=3600", "-i", self.key]
         self.dest = "glos@" + self.host
