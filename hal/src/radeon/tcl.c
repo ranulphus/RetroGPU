@@ -197,13 +197,16 @@ void radeon_tcl_draw(uint32_t prim, uint32_t vfmt, uint32_t addr, int dwords, in
 }
 
 int radeon_tcl_old_packets = 1;
-/* Between the packets of one draw split into pieces, the 3D engine waited for (WAIT_UNTIL 3D_IDLE: 4, the default).
- * Without it the P3's 7500 stopped for good, through every reset, on Echoes' far terrain (945 indices in four pieces)
- * at some placements of its vertices in memory, with either packet; with it, ~9,800 placements and vertex shifts of
- * that draw ran clean (DTMIX mode R, 2026-11-25). A wait before each draw alone didn't help. The Linux DRM waits for 3D
- * idle between repeated command batches for a lockup it couldn't explain either (radeon_emit_packet3_cliprect).
- * 0 none, 1 3D idle and clean before every draw packet, 2 before each draw, 3 between pieces idle and clean. */
-int radeon_tcl_sync = 4;
+/* After every draw packet, the 3D engine waited for (WAIT_UNTIL 3D_IDLE: 5, the default), so the next packet, a draw's
+ * next piece or the state of the next draw, meets an idle engine. Without it the P3's 7500 stopped for good, through
+ * every reset: on Echoes' far terrain (945 indices in four pieces) at some placements of its vertices in memory, with
+ * either packet; with waits between the pieces (4), ~9,800 placements and vertex shifts of that draw ran clean (DTMIX
+ * mode R, 2026-11-25), but the fly scene then stopped in the state writes between a 96-index draw and a textured one
+ * (the engine's output format changing while the draw was in flight). A wait before each draw alone didn't help. The
+ * Linux DRM waits for 3D idle between repeated command batches for a lockup it couldn't explain either
+ * (radeon_emit_packet3_cliprect). 0 none, 1 3D idle and clean before every draw packet, 2 before each draw, 3 between
+ * pieces idle and clean, 4 between pieces idle. */
+int radeon_tcl_sync = 5;
 int radeon_tcl_piece = RADEON_TCL_PIECE;    /* (a multiple of 6; DOS-GL's DGL_TNL_PIECE, for tests) */
 
 /* (lists, of triangles, lines or points, in pieces of RADEON_TCL_PIECE indices: a multiple of 6, so a piece ends at
@@ -245,6 +248,8 @@ void radeon_tcl_draw_indexed_s(uint32_t prim, uint32_t vfmt, uint32_t addr, int 
             for (i = 0; i < words; i++)         /* (two to a dword, the first in the low half) */
                 d[5 + i] = (uint32_t)idx[2 * i] | (2 * i + 1 < k ? (uint32_t)idx[2 * i + 1] << 16 : 0u);
             radeon_cp_advance(5 + words);
+            if (radeon_tcl_sync == 5)
+                radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLE);
             idx += k, n -= k;
         }
         return;
@@ -275,6 +280,8 @@ void radeon_tcl_draw_indexed_s(uint32_t prim, uint32_t vfmt, uint32_t addr, int 
         for (i = 0; i < words; i++)             /* (two to a dword, the first in the low half) */
             d[3 + i] = (uint32_t)idx[2 * i] | (2 * i + 1 < k ? (uint32_t)idx[2 * i + 1] << 16 : 0u);
         radeon_cp_advance(3 + words);
+        if (radeon_tcl_sync == 5)
+            radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLE);
         idx += k, n -= k;
     }
 }
