@@ -1284,6 +1284,46 @@ static void tnl_refuse_nonfinite(void)
 
 static void install(void);
 
+/* (one draw's record for the dump: what, its ring span, state, matrix, its packets' first 64 dwords and up to 160 of
+ * its vertices with their clip-space values) */
+static void tnl_dump_rec(const tnl_rec *r, const char *what, uint32_t rp, const volatile uint32_t *ring, uint32_t dw)
+{
+    uint32_t len = (r->wp1 - r->wp0 + dw) % dw, n, j, k;
+    const volatile uint32_t *v = NULL;
+    DGL_WARN("DGL-TNLDIAG %s draw: ring %lu..%lu, read index %lu; count %lu nv %lu dwords %lu addr %08lx; se_cntl %08lx "
+             "ucp %08lx vp %g %g %g %g %g %g", what, (unsigned long)r->wp0, (unsigned long)r->wp1, (unsigned long)rp,
+             (unsigned long)r->count, (unsigned long)r->nv, (unsigned long)r->dwords, (unsigned long)r->addr,
+             (unsigned long)r->se_cntl, (unsigned long)r->ucp, r->vp[0], r->vp[1], r->vp[2], r->vp[3], r->vp[4],
+             r->vp[5]);
+    for (k = 0; k < 4; k++)
+        DGL_WARN("DGL-TNLDIAG %s mvp col %lu: %.9g %.9g %.9g %.9g", what, (unsigned long)k, r->mvp[k * 4],
+                 r->mvp[k * 4 + 1], r->mvp[k * 4 + 2], r->mvp[k * 4 + 3]);
+    for (k = 0; k < len && k < 64; k += 8) {
+        uint32_t b = (r->wp0 + k) % dw;
+        DGL_WARN("DGL-TNLDIAG %s ring[%lu..] %08lx %08lx %08lx %08lx %08lx %08lx %08lx %08lx", what, (unsigned long)b,
+                 (unsigned long)ring[b], (unsigned long)ring[(b + 1) % dw], (unsigned long)ring[(b + 2) % dw],
+                 (unsigned long)ring[(b + 3) % dw], (unsigned long)ring[(b + 4) % dw], (unsigned long)ring[(b + 5) % dw],
+                 (unsigned long)ring[(b + 6) % dw], (unsigned long)ring[(b + 7) % dw]);
+    }
+    if (radeon_cp_varea && r->addr >= radeon_cp_varea_gart && r->addr < radeon_cp_varea_gart + radeon_cp_varea_bytes)
+        v = (const volatile uint32_t *)(radeon_cp_varea + (r->addr - radeon_cp_varea_gart));
+    else if (!radeon_cp_varea && r->addr >= radeon.fb_location)
+        v = (const volatile uint32_t *)(radeon.fb + (r->addr - radeon.fb_location));
+    n = r->nv < 160u ? r->nv : 160u;
+    for (j = 0; v && j < n; j++, v += r->dwords) {
+        union { uint32_t u; float f; } p[4];
+        float c[4];
+        int q;
+        for (q = 0; q < 4; q++)
+            p[q].u = v[q];
+        for (q = 0; q < 4; q++)         /* (GL's column-major matrix times the vertex) */
+            c[q] = r->mvp[q] * p[0].f + r->mvp[4 + q] * p[1].f + r->mvp[8 + q] * p[2].f + r->mvp[12 + q] * p[3].f;
+        DGL_WARN("DGL-TNLDIAG %s v%lu: %.9g %.9g %.9g %.9g col %08lx clip %.6g %.6g %.6g %.6g%s", what,
+                 (unsigned long)j, p[0].f, p[1].f, p[2].f, p[3].f, (unsigned long)v[4], c[0], c[1], c[2], c[3],
+                 r->dwords > 5 ? " (st follow)" : "");
+    }
+}
+
 static void tnl_dump(const char *why)
 {
     static int done;
@@ -1317,46 +1357,27 @@ static void tnl_dump(const char *why)
                  (unsigned long)r->vfmt, (unsigned long)r->prim, (unsigned long)r->addr, (unsigned long)r->between,
                  (unsigned long)r->fence, (unsigned long)r->fmt, (unsigned long)r->sel);
     }
-    /* The draw whose packets hold the read index: its packets, its state and its vertices as the engine fetches them
-     * (the vertex area isn't written again before its fence passes), with what its matrix makes of them. */
-    for (i = 32; ring && dw && i-- > 0;) {     /* (the newest first: an older lap of the ring holds the index too) */
-        const tnl_rec *r = &tnl_recs[(tnl_nrec + i) & 31u];
-        uint32_t len = (r->wp1 - r->wp0 + dw) % dw, at = (rp - r->wp0 + dw) % dw, n, j;
-        const volatile uint32_t *v = NULL;
-        if (!r->count || at >= len)
-            continue;
-        DGL_WARN("DGL-TNLDIAG stuck draw: ring %lu..%lu, read index %lu; se_cntl %08lx ucp %08lx vp %g %g %g %g %g %g",
-                 (unsigned long)r->wp0, (unsigned long)r->wp1, (unsigned long)rp, (unsigned long)r->se_cntl,
-                 (unsigned long)r->ucp, r->vp[0], r->vp[1], r->vp[2], r->vp[3], r->vp[4], r->vp[5]);
-        for (k = 0; k < 4; k++)
-            DGL_WARN("DGL-TNLDIAG stuck mvp col %lu: %.9g %.9g %.9g %.9g", (unsigned long)k, r->mvp[k * 4],
-                     r->mvp[k * 4 + 1], r->mvp[k * 4 + 2], r->mvp[k * 4 + 3]);
-        for (k = 0; k < len && k < 64; k += 8) {
-            uint32_t b = (r->wp0 + k) % dw;
-            DGL_WARN("DGL-TNLDIAG stuck ring[%lu..] %08lx %08lx %08lx %08lx %08lx %08lx %08lx %08lx", (unsigned long)b,
-                     (unsigned long)ring[b], (unsigned long)ring[(b + 1) % dw], (unsigned long)ring[(b + 2) % dw],
-                     (unsigned long)ring[(b + 3) % dw], (unsigned long)ring[(b + 4) % dw],
-                     (unsigned long)ring[(b + 5) % dw], (unsigned long)ring[(b + 6) % dw],
-                     (unsigned long)ring[(b + 7) % dw]);
+    /* The draw whose packets hold the read index, and the engine's draw that began before it (the command processor
+     * fetches some way past the primitive the engine is stuck on: a draw by the CPU's path, or the next engine draw,
+     * held the index in both hangs of Echoes' frame 371): their packets, state and vertices as the engine fetches
+     * them (the vertex area isn't written again before its fence passes), with what their matrix makes of them. */
+    if (ring && dw) {
+        const tnl_rec *in = NULL, *before = NULL;
+        uint32_t best = 0xFFFFFFFFu;
+        for (i = 32; i-- > 0;) {         /* (the newest first: an older lap of the ring holds the index too) */
+            const tnl_rec *r = &tnl_recs[(tnl_nrec + i) & 31u];
+            uint32_t len = (r->wp1 - r->wp0 + dw) % dw, at = (rp - r->wp0 + dw) % dw;
+            if (!r->count)
+                continue;
+            if (at < len && !in)
+                in = r;
+            else if (at >= len && at < best && r != in)
+                best = at, before = r;
         }
-        if (radeon_cp_varea && r->addr >= radeon_cp_varea_gart && r->addr < radeon_cp_varea_gart + radeon_cp_varea_bytes)
-            v = (const volatile uint32_t *)(radeon_cp_varea + (r->addr - radeon_cp_varea_gart));
-        else if (!radeon_cp_varea && r->addr >= radeon.fb_location)
-            v = (const volatile uint32_t *)(radeon.fb + (r->addr - radeon.fb_location));
-        n = r->nv < 32u ? r->nv : 32u;
-        for (j = 0; v && j < n; j++, v += r->dwords) {
-            union { uint32_t u; float f; } p[4];
-            float c[4];
-            int q;
-            for (q = 0; q < 4; q++)
-                p[q].u = v[q];
-            for (q = 0; q < 4; q++)     /* (GL's column-major matrix times the vertex) */
-                c[q] = r->mvp[q] * p[0].f + r->mvp[4 + q] * p[1].f + r->mvp[8 + q] * p[2].f + r->mvp[12 + q] * p[3].f;
-            DGL_WARN("DGL-TNLDIAG stuck v%lu: %.9g %.9g %.9g %.9g col %08lx clip %.6g %.6g %.6g %.6g%s",
-                     (unsigned long)j, p[0].f, p[1].f, p[2].f, p[3].f, (unsigned long)v[4], c[0], c[1], c[2], c[3],
-                     r->dwords > 5 ? " (st follow)" : "");
-        }
-        break;
+        if (in)
+            tnl_dump_rec(in, "stuck", rp, ring, dw);
+        if (before)
+            tnl_dump_rec(before, "before", rp, ring, dw);
     }
 }
 
