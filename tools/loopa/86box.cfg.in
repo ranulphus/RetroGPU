@@ -62,6 +62,7 @@ fdd_01_type = 35_2hd
 fdd_01_fn = @BOOTIMG@
 fdd_01_check_bpb = 0
 fdd_02_type = none
+@EXTRA_CD@
 
 [Other peripherals]
 unittester_enabled = 1

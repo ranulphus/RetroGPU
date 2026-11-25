@@ -321,10 +321,20 @@ def config_text(a, serial, cimg, bootimg, extra_hdd, tail=""):
         "@CYLS@": str(getattr(a, "hdd_cyls", 1000)),
         "@BOOTIMG@": bootimg,
         "@EXTRA_HDD@": extra_hdd,
+        "@EXTRA_CD@": cd_config(getattr(a, "cdrom", None)),
     }
     for k, v in subst.items():
         tpl = tpl.replace(k, v)
     return tpl
+
+
+def cd_config(img):
+    """--cdrom: an ATAPI CD-ROM drive on the second IDE channel's slave (1:1; --scratch-hdd has its master), the
+    image (ISO 9660, or CUE/BIN) in it; its audio on, as on a PC with the drive's cable to the sound card."""
+    if not img:
+        return ""
+    return ("cdrom_01_parameters = 1, atapi\ncdrom_01_ide_channel = 1:1\ncdrom_01_speed = 24\n"
+            "cdrom_01_image_path = %s\n" % os.path.abspath(img))
 
 
 def run_bat_lines(a, exe_name, game):
@@ -800,6 +810,8 @@ def main():
     ap.add_argument("--scratch-hdd", metavar="MB", help="a blank disk of MB megabytes (sparse, made for the run) on "
                     "IDE 1:0, unpartitioned, so DOS leaves it alone: for raw-sector tests (GLOS's DSKTORT)")
     ap.add_argument("--pre", action="append", default=[], help="extra RUN.BAT lines before the test")
+    ap.add_argument("--cdrom", metavar="IMG", help="an ATAPI CD-ROM drive on IDE 1:1 with this image in it (ISO 9660, "
+                    "or a CUE sheet): GLOS's own CD-ROM driver and MSCDEX (docs/v1/native-dos.md, N4)")
     ap.add_argument("--keys", default="", help="comma list of SECONDS:SCANCODE[:down|up] after HX-BOOT, "
                     "or SECONDS:mouse:DX:DY[:BUTTONS] (mickeys; buttons bit 0 left, 1 right, 2 middle; needs --mouse), "
                     "or SECONDS:joy:axis|button:N:VALUE (see --joystick); "
