@@ -1339,9 +1339,9 @@ static void tnl_dump(const char *why)
              "draws %u non-finite %lu", why, (unsigned long)radeon_rd(RADEON_RBBM_STATUS),
              (unsigned long)radeon_rd(RADEON_CP_CSQ_STAT), (unsigned long)radeon_rd(0x15E4), (unsigned long)rp,
              (unsigned long)wp, (unsigned long)dw, tnl_nrec, tnl_nonfinite);
-    if (ring && dw)
-        for (k = 0; k < 24; k += 8) {
-            uint32_t b = (rp + dw - 8u + k) % dw;
+    if (ring && dw)                     /* (120 dwords before the read index: the packets the engine took last) */
+        for (k = 0; k < 144; k += 8) {
+            uint32_t b = (rp + dw - 120u + k) % dw;
             DGL_WARN("DGL-TNLDIAG ring[%lu..] %08lx %08lx %08lx %08lx %08lx %08lx %08lx %08lx", (unsigned long)b,
                      (unsigned long)ring[b], (unsigned long)ring[(b + 1) % dw], (unsigned long)ring[(b + 2) % dw],
                      (unsigned long)ring[(b + 3) % dw], (unsigned long)ring[(b + 4) % dw],
@@ -1567,7 +1567,7 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
     case GL_TRIANGLE_STRIP:
     case GL_TRIANGLE_FAN:
     case GL_POLYGON:
-        if (count <= RADEON_TCL_PIECE) {
+        if (count <= radeon_tcl_piece) {  /* (one packet: a strip or fan isn't split) */
             if (!(ix = idx_room(count)))
                 return 0;
             for (i = 0; i < count; i++)
@@ -1805,7 +1805,11 @@ static void install(void)
         /* (the 3D engine idle between pieces and before new state, by default (6); DGL_TNL_SYNC=0 none, 1-5 other
          * waits for tests: see radeon_tcl_sync) */
         e = getenv("DGL_TNL_SYNC");
-        radeon_tcl_sync = e && *e >= '0' && *e <= '6' ? *e - '0' : 6;
+        radeon_tcl_sync = e && *e >= '0' && *e <= '8' ? *e - '0' : 6;
+        e = getenv("DGL_TEST_STICK");   /* (tests only: the first window-space draw sticks the engine, to prove the
+                                         * recovery's end and the next program's refusal leave the PC alive) */
+        if (e && *e == '1')
+            radeon_test_stick = 1;
         e = getenv("DGL_TNL_PIECE");    /* (tests: the indices a list's packet takes, a multiple of 6 up to 300) */
         radeon_tcl_piece = e && atoi(e) >= 6 && atoi(e) <= RADEON_TCL_PIECE ? atoi(e) / 6 * 6 : RADEON_TCL_PIECE;
     }

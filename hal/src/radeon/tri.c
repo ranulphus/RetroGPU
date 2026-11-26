@@ -227,6 +227,9 @@ static int vwords(void)
  * processor one 3D_DRAW_IMMD packet (the DRM's and X.org's: the vertex format, the control word, the vertices'
  * words) written straight into the ring; else SE_VF_CNTL (the primitive, its vertices following as data, the
  * Radeon's own vertex layout) and the words to SE_PORT_DATA0. */
+int radeon_test_stick;                  /* (tests: the next draw claims three vertices more than it sends: the engine
+                                         * waits for them for good, as the X550's did; DOS-GL's DGL_TEST_STICK=1) */
+
 MGA_HOT static void prim(uint32_t type, const radeon_vertex *const *v, int nv)
 {
     static uint32_t fmt_sent;
@@ -246,7 +249,8 @@ MGA_HOT static void prim(uint32_t type, const radeon_vertex *const *v, int nv)
             d[0] = RADEON_CP_PACKET3(RADEON_3D_DRAW_IMMD, words + 1);
             d[1] = vfmt;
             d[2] = type | RADEON_CP_VC_WALK_RING | RADEON_CP_VC_MAOS_ENABLE | RADEON_VF_RADEON_MODE |
-                   (uint32_t)nv << RADEON_VF_NUM_VERTICES_SHIFT;
+                   (uint32_t)(nv + (radeon_test_stick ? 3 : 0)) << RADEON_VF_NUM_VERTICES_SHIFT;
+            radeon_test_stick = 0;
             for (i = 0, n = 3; i < nv; i++)
                 n += pack(d + n, v[i]);
             radeon_cp_advance(n);

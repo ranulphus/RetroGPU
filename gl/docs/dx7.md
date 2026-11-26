@@ -251,3 +251,29 @@ fps against 65.0); each immediate-mode primitive was a draw of its own (immediat
 Half-Life wasn't run on the P3 (its data's long names can't be copied there yet). The rest of the engine's gains are
 X3b's: batching small draws, lighting on the engine, static geometry kept in video memory.
 
+
+## X3: engine draws back to back, and a card left stuck (2026-11-26)
+
+**The hazard.** Two of the engine's draw packets straight after each other, with neither a wait nor a matrix between,
+stop the 7500 as a split draw's pieces did. X3b's GLQuake, its polygons sent to the engine one draw each, stopped it
+within a second in every run, batched or not (the dumps: the setup engine busy, the rasteriser idle, the command FIFO
+full behind the next state). A wait before a matrix too didn't help; a wait after every draw, or before every engine
+draw that follows another, did. On `551cc82` the programs measured never sent two such draws in a row (Echoes' and
+Fifth Wheel's are a matrix apart, GLQuake's and Quake 2's immediate mode is the CPU's, PrBoom-plus's quads too small),
+but any program drawing several arrays of eight vertices or more under one matrix would. Mode 6 now also waits before
+an engine draw that follows another with no matrix between (`radeon_tcl_adjacent`); draws a matrix keeps apart keep
+their overlap.
+
+**Strips and fans in one packet.** The HAL sends a strip, a fan or a line strip as one packet whatever its length (the
+back end makes a longer one a list first): cut into pieces, a fan's later pieces lose their centre and a piece can be
+one or two vertices long, which stopped the engine every time (found through `DGL_TNL_PIECE=6`, a test setting that
+used to leave strips of up to 300 indices to the HAL).
+
+**A card an earlier program left stuck.** No reset this layer knows frees an engine stopped this way; a warm reboot
+(`glos reboot`) does. A second program used to freeze the PC on such a card at its mode set or first write (the P3
+twice). The device's open now waits half a second for the engine, tries the recovery, and if the engine is still
+stuck fails with "the card's engine is stuck, left so by an earlier program ... reboot the PC", touching nothing that
+could hold the bus. Tested on the P3 with `DGL_TEST_STICK=1` (tests only: the first window-space draw claims three
+vertices more than it sends): the first program ends with `DGL-ERR`, GLOS's guard skips the BIOS's mode set, a second
+program refuses the card, `glos reboot` clears it. `DGL_TEST_NOCHECK=1` (tests only) skips the open's check, so that
+GLOS's own refusal of mode sets on a dead card can be tried.

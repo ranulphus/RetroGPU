@@ -317,6 +317,23 @@ static int open_screen(const rg_open *o, rg_opened *out)
     rg_surface s;
     if (probe() != 0)
         return -1;
+    {   /* An engine an earlier program left stuck: the BIOS's mode set, or the first write to it, would hold the PCI
+         * bus (a write to a full FIFO) and freeze the PC, as it did the P3 twice (2026-11-25, -26). Half a second for
+         * it to be idle, else the recovery reset (registers below 1000h only until it is free); still stuck: no open. */
+        uint32_t t0 = sys_time_us();
+        int check = 1;
+#if !defined(__WATCOMC__)
+        const char *e = getenv("DGL_TEST_NOCHECK");     /* (tests only: 1 skips it, so GLOS's own guard is what's tried) */
+        check = !(e && *e == '1');
+#endif
+        while (check && !radeon_idle() && sys_time_us() - t0 < 500000u)
+            ;
+        if (check && !radeon_idle() && radeon_engine_recover() != 0) {
+            rg_set_error("the card's engine is stuck, left so by an earlier program (RBBM_STATUS %08lx): reboot the "
+                         "PC or switch it off and on", (unsigned long)radeon_recover_status);
+            return -1;
+        }
+    }
     list_modes(NULL, 0);
     for (i = 0; i < nmodes; i++)
         if (modes[i].width == o->width && modes[i].height == o->height && modes[i].color_bits == bpp)

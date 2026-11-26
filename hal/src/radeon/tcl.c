@@ -100,7 +100,7 @@ void radeon_tcl_emit(void)
         radeon_3d_emit();               /* (it settles first, 6) */
     for (k = 0; k < n; k++)                     /* (SE_TCL_OUTPUT_VTX_FMT on: the registers are consecutive) */
         if (!known || now[k] != was[k]) {
-            if (radeon_tcl_sync == 6)
+            if (radeon_tcl_sync >= 6)
                 radeon_tcl_settle();
             radeon_cp_reg(SE_TCL_OUTPUT_VTX_FMT + 4u * (uint32_t)k, now[k]);
         }
@@ -111,7 +111,7 @@ void radeon_tcl_emit(void)
 void radeon_tcl_viewport(const float v[6])
 {
     int i;
-    if (radeon_tcl_sync == 6)
+    if (radeon_tcl_sync >= 6)
         radeon_tcl_settle();
     for (i = 0; i < 6; i++)
         radeon_cp_reg(SE_VPORT_XSCALE + 4u * (uint32_t)i, fbits(v[i]));
@@ -139,6 +139,7 @@ void radeon_tcl_vectors(unsigned start, unsigned stride, const float *v, int n)
 {
     uint32_t w[64];
     int i;
+    radeon_tcl_adjacent = 0;                    /* (a matrix between two engine draws keeps them apart) */
     radeon_cp_reg(SE_TCL_STATE_FLUSH, 0);
     radeon_cp_reg(SE_TCL_VECTOR_INDX_REG, start | stride << 16);
     while (n > 0) {
@@ -212,19 +213,25 @@ int radeon_tcl_old_packets = 1;
  * (the engine's output format changing while the draw was in flight). A wait before each draw alone didn't help. The
  * Linux DRM waits for 3D idle between repeated command batches for a lockup it couldn't explain either
  * (radeon_emit_packet3_cliprect). 0 none, 1 3D idle and clean before every draw packet, 2 before each draw, 3 between
- * pieces idle and clean, 4 between pieces idle. */
+ * pieces idle and clean, 4 between pieces idle, 8 (tests) as 6 with every engine draw after an engine draw waiting,
+ * a matrix between or not.
+ * (6) also waits before an engine draw that follows another straight on, with no matrix between (2026-11-26: X3b's
+ * GLQuake, polygons as engine draws, stopped the P3's 7500 within a second, 4 runs of 4, batched or not; with the
+ * wait, clean. Draws that a matrix keeps apart, Echoes' and Fifth Wheel's, ran clean through hours without it, so
+ * they keep the overlap.) */
 int radeon_tcl_sync = 6;
-int radeon_tcl_piece = RADEON_TCL_PIECE;
+int radeon_tcl_piece = RADEON_TCL_PIECE;    /* (a multiple of 6; DOS-GL's DGL_TNL_PIECE, for tests) */
 int radeon_tcl_pending;                      /* (6: an engine draw sent, no wait since) */
+int radeon_tcl_adjacent;                     /* (6: an engine draw sent, no wait and no matrix since) */
 
 /* (6) Before state other than a matrix changes after an engine draw: the 3D engine waited for, once. */
 void radeon_tcl_settle(void)
 {
     if (radeon_tcl_pending) {
-        radeon_tcl_pending = 0;
+        radeon_tcl_pending = radeon_tcl_adjacent = 0;
         radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLE);
     }
-}    /* (a multiple of 6; DOS-GL's DGL_TNL_PIECE, for tests) */
+}
 
 /* (lists, of triangles, lines or points, in pieces of RADEON_TCL_PIECE indices: a multiple of 6, so a piece ends at
  * a primitive's end; a strip or fan must come in one piece) */
@@ -240,7 +247,13 @@ void radeon_tcl_draw_indexed_s(uint32_t prim, uint32_t vfmt, uint32_t addr, int 
 {
     uint32_t *d;
     int i, first = 1;
+    /* (a strip or fan in one packet whatever its length: its pieces wouldn't join up, and a piece of one or two
+     * vertices stopped the P3's 7500) */
+    int whole = prim == RADEON_PRIM_TRI_STRIP || prim == RADEON_PRIM_TRI_FAN || prim == RADEON_PRIM_LINE_STRIP;
     radeon_tcl_emit();
+    if (radeon_tcl_sync == 8 || (radeon_tcl_sync == 6 && radeon_tcl_adjacent))
+        radeon_tcl_settle();                    /* (6: straight after an engine draw; 8, tests: after one at all) */
+    radeon_tcl_adjacent = 0;
     if (radeon_tcl_old_packets && stride == dwords) {
         /* (Mesa 7's R100 driver as it shipped (RADEON_OLD_PACKETS 1): 3D_RNDR_GEN_INDX_PRIM with the vertices' address,
          * the largest index (0xFFFF, Mesa's), the format, then the indices; the vertex size from the format, no
@@ -248,10 +261,10 @@ void radeon_tcl_draw_indexed_s(uint32_t prim, uint32_t vfmt, uint32_t addr, int 
          * stopped for good on Echoes' far terrain at some placements of its vertices in memory) */
         (void)dwords;
         while (n > 0) {
-            int k = n > radeon_tcl_piece ? radeon_tcl_piece : n, words = (k + 1) / 2;
+            int k = n > radeon_tcl_piece && !whole ? radeon_tcl_piece : n, words = (k + 1) / 2;
             if (radeon_tcl_sync == 1 || (radeon_tcl_sync == 2 && first) || (radeon_tcl_sync == 3 && !first))
                 radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLECLEAN);
-            else if ((radeon_tcl_sync == 4 || radeon_tcl_sync == 6) && !first)
+            else if ((radeon_tcl_sync == 4 || radeon_tcl_sync >= 6) && !first)
                 radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLE);
             first = 0;
             d = radeon_cp_reserve(5 + words);
@@ -269,7 +282,7 @@ void radeon_tcl_draw_indexed_s(uint32_t prim, uint32_t vfmt, uint32_t addr, int 
                 radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLE);
             idx += k, n -= k;
         }
-        radeon_tcl_pending = radeon_tcl_sync == 6;
+        radeon_tcl_pending = radeon_tcl_adjacent = radeon_tcl_sync >= 6;
         return;
     }
     if (radeon_tcl_sync == 1 || radeon_tcl_sync == 2)
@@ -283,10 +296,10 @@ void radeon_tcl_draw_indexed_s(uint32_t prim, uint32_t vfmt, uint32_t addr, int 
     d[3] = addr;
     radeon_cp_advance(4);
     while (n > 0) {
-        int k = n > radeon_tcl_piece ? radeon_tcl_piece : n, words = (k + 1) / 2;
+        int k = n > radeon_tcl_piece && !whole ? radeon_tcl_piece : n, words = (k + 1) / 2;
         if ((radeon_tcl_sync == 1 || radeon_tcl_sync == 3) && !first)
             radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLECLEAN);
-        else if ((radeon_tcl_sync == 4 || radeon_tcl_sync == 6) && !first)
+        else if ((radeon_tcl_sync == 4 || radeon_tcl_sync >= 6) && !first)
             radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLE);
         first = 0;
         d = radeon_cp_reserve(3 + words);
@@ -302,5 +315,5 @@ void radeon_tcl_draw_indexed_s(uint32_t prim, uint32_t vfmt, uint32_t addr, int 
             radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLE);
         idx += k, n -= k;
     }
-    radeon_tcl_pending = radeon_tcl_sync == 6;
+    radeon_tcl_pending = radeon_tcl_adjacent = radeon_tcl_sync >= 6;
 }
