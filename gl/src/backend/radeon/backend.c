@@ -1124,8 +1124,9 @@ MGA_HOT static int rb_fast(GLenum mode, GLsizei count, const GLint *idx, GLint f
 
 /* ---- Hardware transform (gl/docs/dx7.md, X3) -------------------------------------------------------------------
  * On a chip with the engine (the 7500, the 7200) and the command processor running, a draw goes through the engine
- * when its state is one it does (so far: lighting one-sided and fog (X3b), but no texture-coordinate generation, clip
- * planes, projective texture matrix, cube map or polygon offset; filled triangles, strips, fans, quads and polygons): the draw's vertices in
+ * when its state is one it does (tnl_state_ok: one-sided lighting, fog where its depths allow, linear texture-
+ * coordinate generation and user clip planes (X3b); no sphere or cube maps, projective texture matrix or polygon
+ * offset; filled triangles, strips, fans, quads and polygons): the draw's vertices in
  * object coordinates (x, y, z, w, the colour, each unit's s and t) written into a vertex area in video memory, then
  * the engine's indexed draw over them (tcl.c). Everything else takes the CPU's path as before. DGL_TNL=0 keeps every
  * draw on the CPU. */
@@ -1547,11 +1548,11 @@ static int lt_known;
  * draw without it fogged as at depth 0, conformance t10 on the P3, 2026-11-26) */
 static float mv_sent[16];
 static int mv_known;
-/* (X3b) GL's fog on the engine (Mesa's radeonFogfv): its factor computed into the specular alpha, as the CPU's path
- * puts it there for the pixel pipeline's vertex fog; the mode in UCP_VERT_BLEND_CTL, c and d in vector 123 (linear:
- * end / (end - start) and -1 / (end - start); exp and exp2: 0 and minus the density, or its square). The specular is
- * computed with the lighting on and no light, for fog alone ("Bizarre: have to leave lighting enabled to get fog").
- * NOT YET RIGHT on the P3 (one factor a draw): DGL_TNL_FOG=1 only, fogged draws on the CPU by default. */
+/* (X3b) GL's fog on the engine: its factor computed into the specular alpha, as the CPU's path puts it there for the
+ * pixel pipeline's vertex fog; the mode in UCP_VERT_BLEND_CTL, the factors in vector 123 as the 7500 reads them (in
+ * rb_tnl_draw: on eye z, not Mesa's c and d), the specular computed with the lighting on and no light, for fog alone
+ * (Mesa's "Bizarre: have to leave lighting enabled to get fog"). On by default; DGL_TNL_FOG=0 keeps fogged draws on
+ * the CPU's path. */
 static float fog_sent[4];
 static int fog_known;
 static float tg_sent[2][16], ucp_sent[6][4];
@@ -1864,11 +1865,11 @@ static int rb_tnl(GLenum mode, GLsizei count, const GLint *idx, GLint first)
     return rb_tnl_draw(mode, count, idx, first);
 }
 
-/* Fog on the engine is a factor at each vertex, clamped there, then interpolated; the CPU's path splits a triangle
- * whose factor changes by more than a tenth across it (fog_split). So a fogged draw goes to the engine only where
- * that gives the CPU's picture: its depths (the box's corners through the modelview) all within linear fog's start
- * and end (the factor then exact at every pixel), or the factor changing by a tenth at most over them (conformance
- * t10's long floor quads: the CPU's path). */
+/* Fog on the engine is a factor at each vertex, clamped there, then interpolated across the screen (not in
+ * perspective: linear fog over one long triangle drifts too, conformance t44 on the P3); the CPU's path splits a
+ * triangle whose factor changes by more than a tenth across it (fog_split). So a fogged draw goes to the engine only
+ * where that gives the CPU's picture: the factor changing by a tenth at most over its depths (the box's corners
+ * through the modelview). Others (t10's long floor quads) take the CPU's path. */
 static int tnl_fog_fits(const float lo[3], const float hi[3], int w1)
 {
     const float *m = dgl_gl.mv.stack[dgl_gl.mv.depth - 1].m;
@@ -1893,8 +1894,6 @@ static int tnl_fog_fits(const float lo[3], const float hi[3], int w1)
             dlo = dhi, dhi = t;
         }
     }
-    if (dgl_gl.fog_mode == GL_LINEAR && dlo >= dgl_gl.fog_start && dhi <= dgl_gl.fog_end)
-        return 1;
     return fabsf(fog_factor(dlo) - fog_factor(dhi)) <= 0.1f;
 }
 

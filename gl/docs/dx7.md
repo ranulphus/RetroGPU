@@ -8,7 +8,7 @@ file; this file records what is built and what the cards showed.
 |---|---|---|
 | X1 | Picture-quality features, per card, and settings that apply them to programs that don't ask | under way |
 | X2 | GL 1.1's lighting, normals, texture-coordinate generation and clip planes on the CPU (accepted and ignored until now) | done |
-| X3 | Hardware transform and lighting on the Radeon 7500 (RV200) and 7200 (R100): `GL_DGL_hw_tnl`, on by default (`DGL_TNL=0` turns it off) | transform (X3a), the hangs cured and on by default since 2026-11-26; lighting, fog and static buffer objects on the engine (X3b); texture-coordinate generation and clip planes to come |
+| X3 | Hardware transform and lighting on the Radeon 7500 (RV200) and 7200 (R100): `GL_DGL_hw_tnl`, on by default (`DGL_TNL=0` turns it off) | transform (X3a), the hangs cured and on by default since 2026-11-26; lighting, fog, linear texture-coordinate generation, user clip planes and static buffer objects on the engine (X3b, done 2026-11-26) |
 | X4 | SSE in the software transform (needs GLOS to enable it) | to do |
 
 ## X1: what each renderer offers
@@ -323,11 +323,12 @@ vector (x, y, z, w) against the eye-space position (ex, ey, ez), clamped at each
 to the byte at 32 bits. Range-based fog (UCP_VERT_BLEND_CTL bit 10), TCL_VTX_FP_FOG, the pixel pipeline's
 FOG_USE_DEPTH, the lighting's enable and the eye vector changed nothing that GL needs.
 
-The engine's factor is per vertex, clamped there and interpolated; the CPU's path splits a triangle whose factor
-changes by more than a tenth across it. So a fogged draw goes to the engine only where both give the same picture: its
-depths (its box's corners through the modelview, kept with a buffer object's vertices in video memory) all within
-linear fog's start and end, where the interpolated factor is exact, or the factor changing by a tenth at most over
-them. Others (t10's floor quads, 1.5 to 20 deep, fog ending at 15) go to the CPU's path. `DGL_TNL_FOG=0` keeps every
+The engine's factor is per vertex, clamped there and interpolated across the screen, not in perspective: one long
+linear-fogged triangle drifts as much as an exp one (t44's first version, one draw from depth 2 to 15, 8,718 pixels
+out on the P3). The CPU's path splits a triangle whose factor changes by more than a tenth across it. So a fogged draw
+goes to the engine only where both give the same picture: the factor changing by a tenth at most over its depths (its
+box's corners through the modelview, kept with a buffer object's vertices in video memory). Others (t10's floor
+quads, 1.5 to 20 deep) go to the CPU's path; conformance t44 draws the same floors in bands that the engine takes. `DGL_TNL_FOG=0` keeps every
 fogged draw there.
 
 **Texture-coordinate generation and clip planes on the engine.** As Mesa's `radeon_validate_texgen`: a unit whose s
