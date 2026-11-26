@@ -368,11 +368,11 @@ static int open_screen(const rg_open *o, rg_opened *out)
     line_flips = 0;
     radeon_cp_varea_want = 0;
 #if !defined(__WATCOMC__)
-    /* With the transform engine (gl/docs/dx7.md X3; opt-in, DGL_TNL=1), its draws' vertices in video memory by
+    /* With the transform engine (gl/docs/dx7.md X3; on unless DGL_TNL=0), its draws' vertices in video memory by
      * default; DGL_RADEON_VAREA=n: an area of n kilobytes beside the ring instead, through the chip's PCI GART. The
      * engine fetching vertices from system memory over the P3's bus made it the bottleneck: DTMIX's textured stress
      * mode 25.5 fps with that area, 65.0 with video memory, 11.9 on the CPU (2026-11-26). */
-    if ((radeon.flags & RADEON_HAS_TCL) && getenv("DGL_TNL") && *getenv("DGL_TNL") == '1') {
+    if ((radeon.flags & RADEON_HAS_TCL) && !(getenv("DGL_TNL") && *getenv("DGL_TNL") == '0')) {
         const char *e = getenv("DGL_RADEON_VAREA");
         long kb = e && *e ? strtol(e, NULL, 10) : 0;
         radeon_cp_varea_want = kb > 0 && kb <= 1024 ? (uint32_t)kb * 1024u : 0u;

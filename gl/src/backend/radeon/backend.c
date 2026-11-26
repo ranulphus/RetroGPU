@@ -1146,9 +1146,10 @@ int dgl_radeon_tnl_active(void)
 {
     if (tnl_mode < 0) {
         const char *e = getenv("DGL_TNL");
-        /* (opt-in, DGL_TNL=1, since the engine hung the P3's 7500 twice in Echoes' ECHB fly scene on 2026-11-25,
-         * the second time with the 300-index pieces: gl/docs/dx7.md) */
-        tnl_mode = e && *e == '1';
+        /* (on wherever the chip has the engine, DGL_TNL=0 turns it off: the owner's decision of 2026-11-26, once the
+         * waits cured the 7500's hangs and video memory for its vertices made it faster than the P3's CPU in Echoes
+         * (+11-18%) and Fifth Wheel (+11-15%), level in GLQuake, Quake 2 and PrBoom-plus: gl/docs/dx7.md) */
+        tnl_mode = !(e && *e == '0');
     }
     return tnl_mode && (radeon.flags & RADEON_HAS_TCL) && radeon_cp_running();
 }

@@ -8,7 +8,7 @@ file; this file records what is built and what the cards showed.
 |---|---|---|
 | X1 | Picture-quality features, per card, and settings that apply them to programs that don't ask | under way |
 | X2 | GL 1.1's lighting, normals, texture-coordinate generation and clip planes on the CPU (accepted and ignored until now) | done |
-| X3 | Hardware transform and lighting on the Radeon 7500 (RV200) and 7200 (R100): `GL_DGL_hw_tnl`, `DGL_TNL=1` (opt-in since 2026-11-25) | transform (X3a), off by default until the P3's hang is understood; lighting, fog, texgen to come |
+| X3 | Hardware transform and lighting on the Radeon 7500 (RV200) and 7200 (R100): `GL_DGL_hw_tnl`, on by default (`DGL_TNL=0` turns it off) | transform (X3a), the hangs cured and on by default since 2026-11-26; lighting, fog, texgen to come |
 | X4 | SSE in the software transform (needs GLOS to enable it) | to do |
 
 ## X1: what each renderer offers
@@ -127,7 +127,7 @@ last vertex when flat; a flat polygon's first vertex as the provoking one), sets
 model-view-projection matrix and the viewport where they changed, outputs, shading, culling in both the setup engine
 and the engine, as Mesa's radeonCullFace and radeonFrontFace) and sends the indexed draw (`hal/src/radeon/tcl.c`). A
 window-space draw after it puts the window's words back (`tri.c`). `GL_DGL_hw_tnl` is in `GL_EXTENSIONS` while it is
-on; it is opt-in, `DGL_TNL=1` (off by default since the P3's hangs, below); `DGL-STAT` counts `tnl/s`; the first such draw says
+on; it is on by default (`DGL_TNL=0` turns it off: below for its history); `DGL-STAT` counts `tnl/s`; the first such draw says
 `DGL-RADEON the transform engine draws`.
 
 On the P3's 7500 (2026-11-24): the whole suite passes with it, 32 of the 42 tests drawn through the engine (the rest:
@@ -135,6 +135,9 @@ fog, lighting, texture generation, cube maps, lines and points, a capped texture
 references.
 
 ## X3: the vertex area in system memory
+
+(Since 2026-11-26 the vertices go to video memory by default, and this area only with `DGL_RADEON_VAREA=n`: the
+engine fetching them through the GART made it the bottleneck; see the last section.)
 
 The engine's vertices go into a 128 KB area of conventional memory beside the command processor's ring, mapped
 through the same PCI GART (`radeon_cp_varea`, asked for at device open on chips with the engine unless `DGL_TNL=0`;
@@ -204,4 +207,47 @@ the engine switched itself off, but the card didn't recover and the PC went down
 draws with window-space draws inline in the stream (`3D_DRAW_IMMD`: its HUD lines, and batches too big for half the
 vertex area), many times a frame, with the matrix sent 20-30 times a frame; GLQuake, which never hung, draws nearly
 everything through the engine, and Mesa's driver never interleaves the two that way.
+
+## X3: the hangs found and cured, and T&L on by default (2026-11-25/26)
+
+**Finding it.** On a missed fence or a stalled wait the back end dumps the ring around the read index, its last 32
+draws, and in full the draw holding the index and the two engine draws before it (`DGL-TNLDIAG`); `DGL_TNL_TRACE`
+traces chosen frames. `CP_CSQ_STAT`'s second field (Linux r100's debugfs layout) gives where the microcode reads, mod
+128: in every dump it sat at the end of a draw or in the state after it, so the draw the engine never finished was the
+one before the read index, not the one at it. Replayed alone from the P3's own dump in a stress program (DTMIX mode R,
+`~/bench-archive/dtmix`, outside the repository), Echoes' far terrain (945 indices in four pieces) stopped the engine
+at five placements in sixteen of its vertices in memory, with either packet (Mesa 7's shipped `3D_RNDR_GEN_INDX_PRIM`
+or `LOAD_VBPNTR` + `DRAW_INDX`); none of the triangles alone, and only after the draw's earlier pieces.
+
+**The cause and the cure.** The chip takes a split draw's pieces back to back, or state written while a draw is in
+flight, badly: the engine stops for good, through every reset. A `WAIT_UNTIL 3D_IDLE` between the pieces of one draw
+cures the first (a 60 s sweep of placements and vertex shifts clean, against a hang at the first frame without), and
+one after an engine draw before the next register really written other than a matrix (matrices go through the
+engine's own state flush) cures the second (Echoes' fly scene stopped there with only the first: a 96-index draw
+then a textured one). `radeon_tcl_sync` = 6 is the default; the Linux DRM waits for 3D idle between repeated batches
+for a lockup it couldn't explain either. Ruled out on the way: the sub-pixel mesh and the atmosphere's limb (only
+queued behind the stuck draw), 64-byte alignment and 32-byte vertex slots (they moved the stall), the packet type.
+
+**Safety.** If the engine sticks anyway: its recovery (Linux KMS r100's order: bus mastering off, the engines' reset
+held, 2 s for it to come back); if it doesn't, the layer touches none of the engine's registers again (`radeon_dead`:
+a write to a full FIFO holds the PCI bus, which froze the P3 twice) and the program ends with `DGL-ERR`, the PC alive;
+GLOS's guard then skips the BIOS's mode set. A wait of half a second or more that runs out counts as a stall.
+
+**Speed.** The card was slower than the P3's CPU at first for DOS-GL's own reasons, not the chip's: a sparse draw's
+whole vertex range was converted and written (now only the vertices named); the engine fetched its vertices from
+system memory through the PCI GART, which made it the bottleneck (now video memory: DTMIX's textured stress mode 25.5
+fps against 65.0); each immediate-mode primitive was a draw of its own (immediate mode now stays on the CPU:
+`DGL_TNL_IMM=n` to send it); draws of a few vertices cost more than they save (fewer than 8 now go to the CPU,
+`DGL_TNL_MINV`). On the P3, T&L on against off (Echoes and Fifth Wheel on `7969d3c`, the rest on the final build):
+
+| Program | T&L on | T&L off | |
+|---|---|---|---|
+| Echoes, fly scene Low / Medium / High | 13.70 / 17.49 / 22.01 ms | 15.32 / 20.12 / 26.79 ms | +11 / +13 / +18% |
+| Fifth Wheel FW1 / FW1H | 74.9 / 69.3 fps | 65.1 / 62.4 fps | +15 / +11% |
+| GLQuake demo1 (immediate mode) | 85.7 fps | 85.8 fps | level |
+| Quake 2 demo1 (immediate mode) | 45.9 fps | 45.9 fps | level |
+| PrBoom-plus demo1 (draws of four vertices: all the CPU's) | 82.1 fps | 82.2 fps | level |
+
+Half-Life wasn't run on the P3 (its data's long names can't be copied there yet). The rest of the engine's gains are
+X3b's: batching small draws, lighting on the engine, static geometry kept in video memory.
 
