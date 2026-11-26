@@ -1428,6 +1428,24 @@ static int tnl_stride(int dwords)
     return want > dwords && want <= 16 ? want : dwords;
 }
 
+/* A sparse draw's vertices compacted: only those its indices name are written to the vertex area, in first-use order,
+ * the indices renumbered. Echoes' and Fifth Wheel's draws often name a few of a chunk's vertices (6 indices over 145,
+ * 9 over 298): writing the whole range cost the CPU several times the vertices the CPU's own path transforms
+ * (Fifth Wheel's FW1 ran 17% slower with T&L). tnl_stamp marks a vertex met in this draw (tnl_gen). */
+static uint16_t tnl_remap[65536], tnl_order[65536], tnl_stamp[65536];
+static uint16_t tnl_gen;
+static int tnl_box_on;                  /* (the window box gathered only while DGL_TNL_MINPX is on) */
+static int tnl_box_on_first(void)       /* (the first draw: DGL_TNL_MINPX read once, so the loop knows) */
+{
+    static int read;
+    if (!read) {
+        const char *e = getenv("DGL_TNL_MINPX");
+        read = 1;
+        tnl_box_on = e && atof(e) > 0;
+    }
+    return 0;
+}
+
 /* A draw whose window extent (its object-space box's corners through the matrix) is under DGL_TNL_MINPX pixels each
  * way (off by default): the CPU's path draws it. (An experiment of the 7500's hang hunt: a sub-pixel mesh of Echoes'
  * was the first suspect; it was only queued behind the draw the engine was stuck in.) A corner at or behind the eye:
@@ -1445,6 +1463,7 @@ static int tnl_too_small(const float lo[3], const float hi[3])
     }
     if (minpx <= 0)
         return 0;
+    tnl_box_on = 1;
     for (c = 0; c < 8; c++) {
         float p[3], cx, cy, cw;
         p[0] = c & 1 ? hi[0] : lo[0], p[1] = c & 2 ? hi[1] : lo[1], p[2] = c & 4 ? hi[2] : lo[2];
@@ -1481,6 +1500,7 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
     uint32_t prim = RADEON_PRIM_TRI_LIST, vfmt, bytes, addr, s, took;
     volatile uint32_t *dst;
     float lo[3] = { 1e30f, 1e30f, 1e30f }, hi[3] = { -1e30f, -1e30f, -1e30f };
+    const uint16_t *map;
     int w1 = 1;                         /* (every vertex's w 1: the box below applies) */
     uint16_t *ix;
     dgl_vin v;
@@ -1519,8 +1539,23 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
         if (nv < minv)
             return 0;
     }
+    map = NULL;
+    if (idx && nv > count) {            /* (fewer indices than vertices in the range: write only those named) */
+        int nu = 0;
+        if (!++tnl_gen) {
+            memset(tnl_stamp, 0, sizeof tnl_stamp);
+            tnl_gen = 1;
+        }
+        for (i = 0; i < count; i++) {
+            int r = idx[i] - vmin;
+            if (tnl_stamp[r] != tnl_gen)
+                tnl_stamp[r] = tnl_gen, tnl_remap[r] = (uint16_t)nu, tnl_order[nu++] = (uint16_t)r;
+        }
+        map = tnl_remap;
+        nv = nu;
+    }
     /* The indices, as the chip's primitive (provoking vertex last, a polygon's first: SE_CNTL below). */
-#define IX(k) ((uint16_t)((idx ? idx[k] : first + (k)) - vmin))
+#define IX(k) (map ? map[idx[k] - vmin] : (uint16_t)((idx ? idx[k] : first + (k)) - vmin))
     switch (mode) {
     case GL_TRIANGLES:
         if (!(ix = idx_room(count)))
@@ -1635,9 +1670,10 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
         dst = (volatile uint32_t *)(radeon.fb + addr);
         addr += radeon.fb_location;             /* (the chip's space: video memory starts at its frame buffer's base) */
     }
+    (void)tnl_box_on_first();
     for (i = 0; i < nv; i++, dst += stride) {
         union { float f; uint32_t u; } c;
-        dgl_vertex_of(vmin + i, &v);
+        dgl_vertex_of(vmin + (map ? tnl_order[i] : i), &v);
         if (m0 && pairs)
             tex_affine(m0, v.tex, dgl_gl.texr_used ? v.texr[0] : 0.0f);
         if (m1 && pairs > 1)
@@ -1655,11 +1691,13 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
         c.f = v.pos[1], dst[1] = c.u;
         c.f = v.pos[2], dst[2] = c.u;
         c.f = v.pos[3], dst[3] = c.u;
-        for (k = 0; k < 3; k++) {
-            if (v.pos[k] < lo[k]) lo[k] = v.pos[k];
-            if (v.pos[k] > hi[k]) hi[k] = v.pos[k];
+        if (tnl_box_on) {
+            for (k = 0; k < 3; k++) {
+                if (v.pos[k] < lo[k]) lo[k] = v.pos[k];
+                if (v.pos[k] > hi[k]) hi[k] = v.pos[k];
+            }
+            w1 &= v.pos[3] == 1.0f;
         }
-        w1 &= v.pos[3] == 1.0f;
         dst[4] = ub(v.col[3]) << 24 | ub(v.col[0]) << 16 | ub(v.col[1]) << 8 | ub(v.col[2]);
         if (pairs) {
             c.f = v.tex[0], dst[5] = c.u;
@@ -1671,7 +1709,7 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
         }
     }
     (void)dst[-1];                      /* (the CPU's writes out before the chip reads them) */
-    if (w1 && tnl_too_small(lo, hi)) {
+    if ((tnl_box_on || tnl_box_on_first()) && w1 && tnl_too_small(lo, hi)) {
         /* (the whole draw within a pixel or two: the CPU's path for it, the area's room given back) */
         if (radeon_cp_varea)
             va_used -= took;
