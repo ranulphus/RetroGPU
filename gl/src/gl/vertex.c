@@ -261,6 +261,20 @@ static void plan_one(const dgl_array *a, int on, aplan *o)
     o->size = a->size;
 }
 
+/* An immediate-mode primitive (glBegin to glEnd) for a back end's transform engine: only with DGL_TNL_IMM=n, n
+ * vertices or more. Each is a draw of its own there (its state, its packet, the Radeon's wait after it): GLQuake's
+ * thousands of small polygons ran 15% slower on the 7500's engine than on the P3's CPU, and still 5% slower when the
+ * engine's side sent them back. Arrays and buffer objects (Echoes, Fifth Wheel, ClassiCube) are what it is for. */
+static int imm_tnl_ok(int count)
+{
+    static int min = -1;
+    if (min < 0) {
+        const char *e = getenv("DGL_TNL_IMM");
+        min = e && atoi(e) > 0 ? atoi(e) : 0;
+    }
+    return min && count >= min;
+}
+
 /* Immediate mode's vertices (glEnd) as arrays, for the fast path: the
  * values fetch() would read from them are these. */
 MGA_HOT static void plan_imm(const dgl_vin *v, GLsizei n)
@@ -577,7 +591,7 @@ MGA_HOT static void assemble(GLenum mode, GLsizei count, const GLint *idx, GLint
                                                                      * instruction-cache lines) */
     tri_slow = clip_user || (dgl_gl.lighting && dgl_gl.light_two_side);
     cur_imm = imm;
-    if (dgl_sink.tnl && dgl_sink.tnl(mode, count, idx, first)) {
+    if (dgl_sink.tnl && (!imm || imm_tnl_ok(count)) && dgl_sink.tnl(mode, count, idx, first)) {
         cur_imm = NULL;
         if (dgl_sink.end)
             dgl_sink.end();

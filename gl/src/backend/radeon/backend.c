@@ -1508,6 +1508,17 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
     nv = vmax - vmin + 1;
     if (nv > 65536)
         return 0;
+    {   /* (DGL_TNL_MINV=n: a draw of fewer than n vertices through the CPU's path: the engine's cost a draw (its
+         * state, the packet, the wait after it) outweighs what it saves on a few vertices; GLQuake's small batches
+         * ran 12% slower on the engine than on the P3's CPU) */
+        static int minv = -1;
+        if (minv < 0) {
+            const char *e = getenv("DGL_TNL_MINV");
+            minv = e && *e ? atoi(e) : 0;
+        }
+        if (nv < minv)
+            return 0;
+    }
     /* The indices, as the chip's primitive (provoking vertex last, a polygon's first: SE_CNTL below). */
 #define IX(k) ((uint16_t)((idx ? idx[k] : first + (k)) - vmin))
     switch (mode) {
