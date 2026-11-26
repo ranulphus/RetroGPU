@@ -1801,10 +1801,10 @@ static void install(void)
     {   /* (DGL_TNL_PKT=new: the engine's draws by LOAD_VBPNTR and DRAW_INDX, to compare; else Mesa's packet) */
         const char *e = getenv("DGL_TNL_PKT");
         radeon_tcl_old_packets = !(e && !strcmp(e, "new"));
-        /* (the 3D engine idle after every draw packet, by default (5); DGL_TNL_SYNC=0 none, 1-4 narrower waits for
-         * tests: see radeon_tcl_sync) */
+        /* (the 3D engine idle between pieces and before new state, by default (6); DGL_TNL_SYNC=0 none, 1-5 other
+         * waits for tests: see radeon_tcl_sync) */
         e = getenv("DGL_TNL_SYNC");
-        radeon_tcl_sync = e && *e >= '0' && *e <= '6' ? *e - '0' : 5;
+        radeon_tcl_sync = e && *e >= '0' && *e <= '6' ? *e - '0' : 6;
         e = getenv("DGL_TNL_PIECE");    /* (tests: the indices a list's packet takes, a multiple of 6 up to 300) */
         radeon_tcl_piece = e && atoi(e) >= 6 && atoi(e) <= RADEON_TCL_PIECE ? atoi(e) / 6 * 6 : RADEON_TCL_PIECE;
     }

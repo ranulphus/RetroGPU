@@ -202,8 +202,10 @@ void radeon_tcl_draw(uint32_t prim, uint32_t vfmt, uint32_t addr, int dwords, in
 }
 
 int radeon_tcl_old_packets = 1;
-/* After every draw packet, the 3D engine waited for (WAIT_UNTIL 3D_IDLE: 5, the default), so the next packet, a draw's
- * next piece or the state of the next draw, meets an idle engine. Without it the P3's 7500 stopped for good, through
+/* The 3D engine waited for (WAIT_UNTIL 3D_IDLE) between a split draw's pieces, and after an engine draw once before
+ * the next register really written other than a matrix's (6, the default: radeon_tcl_settle), so the next piece or
+ * the next draw's state meets an idle engine; draws that differ only in their matrix keep the overlap. (5: after every
+ * draw packet; Fifth Wheel's ~90 chunk draws a frame lost the pipeline's overlap with it.) Without it the P3's 7500 stopped for good, through
  * every reset: on Echoes' far terrain (945 indices in four pieces) at some placements of its vertices in memory, with
  * either packet; with waits between the pieces (4), ~9,800 placements and vertex shifts of that draw ran clean (DTMIX
  * mode R, 2026-11-25), but the fly scene then stopped in the state writes between a 96-index draw and a textured one
@@ -211,7 +213,7 @@ int radeon_tcl_old_packets = 1;
  * Linux DRM waits for 3D idle between repeated command batches for a lockup it couldn't explain either
  * (radeon_emit_packet3_cliprect). 0 none, 1 3D idle and clean before every draw packet, 2 before each draw, 3 between
  * pieces idle and clean, 4 between pieces idle. */
-int radeon_tcl_sync = 5;
+int radeon_tcl_sync = 6;
 int radeon_tcl_piece = RADEON_TCL_PIECE;
 int radeon_tcl_pending;                      /* (6: an engine draw sent, no wait since) */
 
