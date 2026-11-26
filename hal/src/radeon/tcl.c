@@ -165,6 +165,36 @@ void radeon_tcl_scalars(unsigned start, unsigned stride, const float *v, int n)
     }
 }
 
+/* (X3b) The front material for the engine's lighting: emission, ambient, diffuse and specular (RGBA each), then the
+ * shininess: 17 consecutive registers from SE_TCL_MATERIAL_EMMISSIVE_RED (2210h) to SE_TCL_SHININESS (2250h), Mesa
+ * 7.0.3's mtl atom (radeonUpdateMaterial). State: it waits for an engine draw in flight (6). */
+void radeon_tcl_material(const float m[17])
+{
+    uint32_t *d;
+    int i;
+    if (radeon_tcl_sync >= 6)
+        radeon_tcl_settle();
+    d = radeon_cp_reserve(18);
+    if (!d)
+        return;
+    d[0] = RADEON_CP_PACKET0(0x2210u, 16);
+    for (i = 0; i < 17; i++)
+        d[1 + i] = fbits(m[i]);
+    radeon_cp_advance(18);
+}
+
+/* (X3b) Light i (0-7) for the engine, Mesa 7.0.3's lit[i] atom: 24 floats into the vector memory from 64 + i at a
+ * stride of 8 (its ambient, diffuse and specular colours; its position, or its direction with w 0; its spot
+ * direction, negated; its attenuation: quadratic, linear, constant, 0), 6 into the scalar memory from i at a stride
+ * of 8 (0, the spot exponent, the cutoff's cosine, 0, the range cutoff, the constant attenuation's inverse). */
+void radeon_tcl_light(int i, const float vec[24], const float scl[6])
+{
+    if (radeon_tcl_sync >= 6)
+        radeon_tcl_settle();
+    radeon_tcl_vectors(64u + (unsigned)i, 8, vec, 24);
+    radeon_tcl_scalars((unsigned)i, 8, scl, 6);
+}
+
 void radeon_tcl_matrix(int slot, const float m[16])
 {
     float r[16];

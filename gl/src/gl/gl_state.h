@@ -82,6 +82,8 @@ typedef struct dgl_buffer {
     void *data;
     GLenum usage, access;
     int mapped;
+    unsigned serial, gen;              /* (X3b) its number for life, and its contents' generation: a back end's copy
+                                        * in video memory is good while both match */
 } dgl_buffer;
 
 /* Client-side array (glVertexPointer etc.). With a buffer object (buf), ptr

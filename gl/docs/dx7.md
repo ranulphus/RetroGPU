@@ -249,7 +249,7 @@ fps against 65.0); each immediate-mode primitive was a draw of its own (immediat
 | PrBoom-plus demo1 (draws of four vertices: all the CPU's) | 82.1 fps | 82.2 fps | level |
 
 Half-Life wasn't run on the P3 (its data's long names can't be copied there yet). The rest of the engine's gains are
-X3b's: batching small draws, lighting on the engine, static geometry kept in video memory.
+X3b's: lighting on the engine and static geometry kept in video memory (below).
 
 
 ## X3: engine draws back to back, and a card left stuck (2026-11-26)
@@ -277,3 +277,47 @@ could hold the bus. Tested on the P3 with `DGL_TEST_STICK=1` (tests only: the fi
 vertices more than it sends): the first program ends with `DGL-ERR`, GLOS's guard skips the BIOS's mode set, a second
 program refuses the card, `glos reboot` clears it. `DGL_TEST_NOCHECK=1` (tests only) skips the open's check, so that
 GLOS's own refusal of mode sets on a dead card can be tried.
+
+## X3b: lighting on the 7500's engine, buffer objects kept in video memory (2026-11-26)
+
+**Lighting.** A lit draw goes through the engine as Mesa 7.0.3's radeon driver sends one: eye-space lighting, the
+modelview in matrix slot 1 and its inverse (as the rows) in slot 2 for the normals, each vertex's normal straight after
+its position (radeon_maos_vbtmp.h's order), the front material in registers 2210h-2250h, each of the eight lights in the
+vector memory from 64 + i at a stride of 8 and the scalar memory from i at a stride of 8, the light model's ambient and
+the eye vector in vectors 122 and 124, colour material as the vertex's colour for the components it names. Directional,
+point and spot lights, attenuation, the local viewer, GL_NORMALIZE and GL_RESCALE_NORMAL_EXT; the specular is added
+into the colour (OpenGL 1.1 has one). Two-sided lighting stays on the CPU's path. Conformance t40 passes with its lit
+draws on the engine (and with its immediate-mode ones forced there, `DGL_TNL_IMM=3 DGL_TNL_MINV=0`). `DGL_TNL_LIGHT=0`
+keeps every lit draw on the CPU.
+
+**Buffer objects in video memory.** A draw from the arrays whose every enabled array is in a `GL_STATIC_DRAW` buffer
+object has its vertices, 0 to its highest index, converted once into a 4 MB region of video memory and drawn from there,
+indices only, while the buffers' generations (bumped by `glBufferData`, `glBufferSubData` and a writing
+`glUnmapBuffer`), the arrays' layout, the current values standing for disabled arrays, the texture matrices and the
+vertex's format are the same. t24 (a buffer changed both ways and drawn again) passes. `DGL_TNL_VBO=0` converts every
+draw.
+
+**What they gain.** DLIT (a stress program outside the repository: a lit, colour-material terrain, 8 copies of a 24 x
+24 grid, 9,216 triangles a frame, a directional and a point light, from a static buffer object) on the P3:
+
+| | fps |
+|---|---|
+| Everything on the CPU (`DGL_TNL=0`), or lighting on the CPU (`DGL_TNL_LIGHT=0`) | 25.9 / 26.1 |
+| Lighting on the engine, the vertices converted each draw (`DGL_TNL_VBO=0`, or client arrays) | 171.3 |
+| Lighting on the engine, the vertices in video memory | 328.5 |
+| The same unlit | 436.0 |
+
+**Fog on the engine: not yet right.** As Mesa does it (the mode in UCP_VERT_BLEND_CTL, c and d in vector 123, the factor
+computed into the specular alpha with the lighting on and no light, the modelview in slot 1), the P3's engine gave one
+factor per draw: linear fogged solid, exp and exp2 not at all (t10, t13 forced onto it); Mesa's FOG_USE_DEPTH source
+changed nothing. Fogged draws stay on the CPU's path; `DGL_TNL_FOG=1` tries the engine.
+
+**Batching, tried and taken out.** Holding an engine draw for the next of the same state to join never joined one in the
+programs measured (GLQuake's immediate mode and PrBoom-plus's quads stay on the CPU, Echoes' and Fifth Wheel's draws are
+a matrix apart), and its checks in the CPU path's hot functions cost GLQuake 3% on the P3 (the instruction cache).
+Immediate mode through the engine stays opt-in (`DGL_TNL_IMM=n`): GLQuake's polygons ran 72.5 fps there against 84.6 on
+the CPU, batched or not.
+
+**The other programs.** In clean builds on the P3 against main: PrBoom-plus level, Quake 2 0.7% and GLQuake 1.8% below,
+the CPU's path's code the same (its hot sections main's size, the profiling builds level): the placement of the rest of
+the program, which has moved GLQuake by several percent before with no change in work.

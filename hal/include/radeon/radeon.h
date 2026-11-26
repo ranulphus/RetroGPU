@@ -193,6 +193,11 @@ void radeon_tcl_scalars(unsigned start, unsigned stride, const float *v, int n);
 void radeon_tcl_matrix(int slot, const float m[16]);
 void radeon_tcl_matrix_t(int slot, const float m[16]);  /* (as it is: an inverse's, for MODEL_IT) */
 void radeon_tcl_guard_band(void);
+void radeon_tcl_material(const float m[17]);    /* (X3b: emission, ambient, diffuse, specular RGBA, shininess) */
+void radeon_tcl_light(int i, const float vec[24], const float scl[6]);     /* (X3b: light i's vectors, scalars) */
+/* (X3b) the engine's vector memory: 122 the light model's ambient, 124 the eye vector (x, y, z, the normals' rescale) */
+#define RADEON_TCL_VEC_GLOBAL_AMBIENT 122u
+#define RADEON_TCL_VEC_EYE            124u
 void radeon_tcl_draw(uint32_t prim, uint32_t vfmt, uint32_t addr, int dwords, int n);
 void radeon_tcl_draw_indexed(uint32_t prim, uint32_t vfmt, uint32_t addr, int dwords, const uint16_t *idx, int n);
 void radeon_tcl_draw_indexed_s(uint32_t prim, uint32_t vfmt, uint32_t addr, int dwords, int stride, const uint16_t *idx,

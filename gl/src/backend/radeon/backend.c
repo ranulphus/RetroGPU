@@ -26,6 +26,7 @@
 #include "radeon/regs3d_radeon.h"
 #include "mga/prof.h"
 #include "mga/fp.h"
+#include <float.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1123,8 +1124,8 @@ MGA_HOT static int rb_fast(GLenum mode, GLsizei count, const GLint *idx, GLint f
 
 /* ---- Hardware transform (gl/docs/dx7.md, X3) -------------------------------------------------------------------
  * On a chip with the engine (the 7500, the 7200) and the command processor running, a draw goes through the engine
- * when its state is one it does (so far: no lighting, fog, texture-coordinate generation, clip planes, texture
- * matrix, cube map or polygon offset; filled triangles, strips, fans, quads and polygons): the draw's vertices in
+ * when its state is one it does (so far: lighting one-sided and fog (X3b), but no texture-coordinate generation, clip
+ * planes, projective texture matrix, cube map or polygon offset; filled triangles, strips, fans, quads and polygons): the draw's vertices in
  * object coordinates (x, y, z, w, the colour, each unit's s and t) written into a vertex area in video memory, then
  * the engine's indexed draw over them (tcl.c). Everything else takes the CPU's path as before. DGL_TNL=0 keeps every
  * draw on the CPU. */
@@ -1177,12 +1178,29 @@ static int tex_matrix_ok(int unit)
     return !m || (m[3] == 0.0f && m[7] == 0.0f && m[11] == 0.0f && m[15] != 0.0f);
 }
 
+static int tnl_light_ok(void);
+static int tnl_fog_mode = -1;           /* DGL_TNL_FOG: 0 keeps fogged draws on the CPU (X3b) */
+
 static int tnl_state_ok(GLenum mode)
 {
     if (mode == GL_POINTS || mode == GL_LINES || mode == GL_LINE_STRIP || mode == GL_LINE_LOOP)
         return 0;                       /* (lines and points: the CPU's path, as their widths and ends are drawn) */
-    if (DGL_VTX_EXTRA() || dgl_gl.fog || dgl_gl.offset_fill || dgl_gl.polygon_mode != GL_FILL)
+    if ((dgl_gl.clip_enabled | dgl_gl.texgen_on[0] | dgl_gl.texgen_on[1] | dgl_gl.texture_cube[0] |
+         dgl_gl.texture_cube[1]) || dgl_gl.offset_fill || dgl_gl.polygon_mode != GL_FILL)
         return 0;
+    if (dgl_gl.lighting && !tnl_light_ok())
+        return 0;                       /* (X3b: two-sided lighting, or DGL_TNL_LIGHT=0: the CPU's path) */
+    if (dgl_gl.fog) {
+        if (tnl_fog_mode < 0) {
+            const char *e = getenv("DGL_TNL_FOG");
+            /* (off by default: on the P3 the engine's factor came out one value per draw, linear fogged solid,
+             * exp and exp2 not at all, conformance t10 and t13 with fogged draws forced onto it, 2026-11-26; the
+             * CPU's path fogs them right. DGL_TNL_FOG=1 tries it) */
+            tnl_fog_mode = e && *e == '1';
+        }
+        if (!tnl_fog_mode)
+            return 0;
+    }
     if (!tex_matrix_ok(0) || !tex_matrix_ok(1))
         return 0;                       /* (a projective texture matrix: the CPU's path divides per vertex there) */
     return 1;
@@ -1482,6 +1500,301 @@ static int tnl_too_small(const float lo[3], const float hi[3])
     return x1 - x0 < minpx && y1 - y0 < minpx;
 }
 
+/* A draw's vertices into the vertex area at dst, stride dwords apart: x, y, z, w, the colour, each pair's s and t
+ * (through the affine texture matrices); 0 for one the engine shouldn't take (coordinates past 1,024, not finite). */
+/* ---- X3b: GL's lighting on the engine ---------------------------------------------------------------------------
+ * A lit draw goes through the engine as Mesa 7.0.3's radeon driver sends one (radeon_state.c, radeon_state_init.c):
+ * eye-space lighting (LIGHT_IN_MODELSPACE off), the modelview in matrix slot 1 and its inverse, as the rows, in slot 2
+ * for the normals; each vertex's normal after its position (radeon_maos_vbtmp.h's order); the front material in
+ * registers, each light in the vector and scalar memories, the light model's ambient and the eye vector in vectors
+ * 122 and 124; colour material as the vertex's colour for the components it names (LM_SOURCE_VERTEX_DIFFUSE). The
+ * specular added into the colour (GL 1.1's single colour). Two-sided lighting stays on the CPU's path. DGL_TNL_LIGHT=0
+ * keeps every lit draw on the CPU. */
+static int tnl_light_mode = -1;
+static struct {
+    float mtl[17], glt[4], eye[4], mv[16], it[16], vec[8][24], scl[8][6];
+    uint32_t lmc, plc[4], on;
+} lt, lt_sent;
+static int lt_known;
+/* (the modelview in slot 1, for lighting and for fog alike: the engine's eye depth comes from it; a fogged unlit
+ * draw without it fogged as at depth 0, conformance t10 on the P3, 2026-11-26) */
+static float mv_sent[16];
+static int mv_known;
+/* (X3b) GL's fog on the engine (Mesa's radeonFogfv): its factor computed into the specular alpha, as the CPU's path
+ * puts it there for the pixel pipeline's vertex fog; the mode in UCP_VERT_BLEND_CTL, c and d in vector 123 (linear:
+ * end / (end - start) and -1 / (end - start); exp and exp2: 0 and minus the density, or its square). The specular is
+ * computed with the lighting on and no light, for fog alone ("Bizarre: have to leave lighting enabled to get fog").
+ * NOT YET RIGHT on the P3 (one factor a draw): DGL_TNL_FOG=1 only, fogged draws on the CPU by default. */
+static float fog_sent[4];
+static int fog_known;
+
+static int tnl_light_ok(void)
+{
+    if (tnl_light_mode < 0) {
+        const char *e = getenv("DGL_TNL_LIGHT");
+        tnl_light_mode = !(e && *e == '0');
+    }
+    return tnl_light_mode && !dgl_gl.light_two_side;
+}
+
+static void norm3(const float a[3], float r[3])
+{
+    float d = sqrtf(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+    d = d > 0 ? 1.0f / d : 0.0f;
+    r[0] = a[0] * d, r[1] = a[1] * d, r[2] = a[2] * d;
+}
+
+/* GL's lighting state as the engine's words and floats (lt). */
+static void tnl_light_build(void)
+{
+    const dgl_material *m = &dgl_gl.material[0];
+    const dgl_mat4 *mv = &dgl_gl.mv.stack[dgl_gl.mv.depth - 1];
+    dgl_mat4 inv;
+    uint32_t src[4] = { RADEON_LM_SOURCE_STATE_MULT, RADEON_LM_SOURCE_STATE_MULT, RADEON_LM_SOURCE_STATE_MULT,
+                        RADEON_LM_SOURCE_STATE_MULT };     /* (emission, ambient, diffuse, specular) */
+    float f;
+    int i, k;
+    memset(&lt, 0, sizeof lt);
+    for (k = 0; k < 4; k++) {
+        lt.mtl[k] = m->emission[k], lt.mtl[4 + k] = m->ambient[k];
+        lt.mtl[8 + k] = m->diffuse[k], lt.mtl[12 + k] = m->specular[k];
+        lt.glt[k] = dgl_gl.light_model_ambient[k];  /* (every source MULT: the engine multiplies the material in) */
+    }
+    lt.mtl[16] = m->shininess;
+    if (dgl_gl.color_material && dgl_gl.color_material_face != GL_BACK)
+        switch (dgl_gl.color_material_mode) {
+        case GL_EMISSION: src[0] = RADEON_LM_SOURCE_VERTEX_DIFFUSE; break;
+        case GL_AMBIENT: src[1] = RADEON_LM_SOURCE_VERTEX_DIFFUSE; break;
+        case GL_DIFFUSE: src[2] = RADEON_LM_SOURCE_VERTEX_DIFFUSE; break;
+        case GL_SPECULAR: src[3] = RADEON_LM_SOURCE_VERTEX_DIFFUSE; break;
+        default: src[1] = src[2] = RADEON_LM_SOURCE_VERTEX_DIFFUSE; break;  /* (GL_AMBIENT_AND_DIFFUSE) */
+        }
+    lt.lmc = RADEON_LIGHTING_ENABLE | RADEON_SPECULAR_LIGHTS | RADEON_DIFFUSE_SPECULAR_COMBINE |
+             RADEON_LOCAL_LIGHT_VEC_GL | src[0] << RADEON_EMISSIVE_SOURCE_SHIFT | src[1] << RADEON_AMBIENT_SOURCE_SHIFT |
+             src[2] << RADEON_DIFFUSE_SOURCE_SHIFT | src[3] << RADEON_SPECULAR_SOURCE_SHIFT;
+    if (dgl_gl.light_local_viewer)
+        lt.lmc |= RADEON_LOCAL_VIEWER;
+    if (dgl_gl.normalize)
+        lt.lmc |= RADEON_NORMALIZE_NORMALS;
+    else if (dgl_gl.rescale_normal)
+        lt.lmc |= RADEON_RESCALE_NORMALS;
+    memcpy(lt.mv, mv->m, sizeof lt.mv);
+    if (dgl_mat_inverse(&inv, mv) != 0)
+        memcpy(lt.it, inv.m, sizeof lt.it);
+    else
+        for (k = 0; k < 16; k++)
+            lt.it[k] = (k % 5) == 0 ? 1.0f : 0.0f;
+    /* (the eye vector, and the normals' rescale: Mesa's _ModelViewInvScale, from the inverse's third row) */
+    f = lt.it[2] * lt.it[2] + lt.it[6] * lt.it[6] + lt.it[10] * lt.it[10];
+    lt.eye[2] = 1.0f, lt.eye[3] = f < 1e-12f ? 1.0f : 1.0f / sqrtf(f);
+    for (i = 0; i < 8; i++) {
+        const dgl_light *l = &dgl_gl.light[i];
+        float *v = lt.vec[i], *c = lt.scl[i];
+        uint32_t w = 1u | 2u | 4u;      /* (LIGHT_n_ENABLE, its ambient, its specular) */
+        if (!l->enabled)
+            continue;
+        lt.on |= 1u << i;
+        for (k = 0; k < 4; k++)
+            v[k] = l->ambient[k], v[4 + k] = l->diffuse[k], v[8 + k] = l->specular[k];
+        if (l->position[3] == 0) {      /* (a direction: towards the light, and the half vector for the far viewer) */
+            float h[3];
+            norm3(l->position, v + 12);
+            h[0] = v[12], h[1] = v[13], h[2] = v[14] + 1.0f;
+            norm3(h, v + 16);
+        } else {
+            float iw = 1.0f / l->position[3], d[3];
+            v[12] = l->position[0] * iw, v[13] = l->position[1] * iw, v[14] = l->position[2] * iw, v[15] = 1.0f;
+            norm3(l->spot_dir, d);
+            v[16] = -d[0], v[17] = -d[1], v[18] = -d[2];
+            w |= 8u;                    /* (IS_LOCAL) */
+            if (l->spot_cutoff != 180.0f)
+                w |= 16u;               /* (IS_SPOT) */
+            if (!((l->att[0] == 0.0f || l->att[0] == 1.0f) && l->att[1] == 0.0f && l->att[2] == 0.0f))
+                w |= l->att[1] == 0.0f && l->att[2] == 0.0f ? 64u | 128u : 64u;    /* (RANGE_ATTEN, CONSTANT_) */
+        }
+        v[20] = l->att[2], v[21] = l->att[1], v[22] = l->att[0];
+        c[1] = l->spot_exp;
+        c[2] = cosf(l->spot_cutoff * 3.14159265358979f / 180.0f);
+        c[4] = FLT_MAX;
+        c[5] = l->att[0] != 0.0f ? 1.0f / l->att[0] : FLT_MAX;
+        lt.plc[i >> 1] |= w << ((i & 1) * 16);
+    }
+}
+
+/* What changed of it into the engine (the held draw out first, with the state it was made in). */
+static void tnl_light_send(void)
+{
+    int i;
+    if (!lt_known || memcmp(lt.mtl, lt_sent.mtl, sizeof lt.mtl))
+        radeon_tcl_material(lt.mtl);
+    if (!lt_known || memcmp(lt.glt, lt_sent.glt, sizeof lt.glt))
+        radeon_tcl_vectors(RADEON_TCL_VEC_GLOBAL_AMBIENT, 1, lt.glt, 4);
+    if (!lt_known || memcmp(lt.eye, lt_sent.eye, sizeof lt.eye))
+        radeon_tcl_vectors(RADEON_TCL_VEC_EYE, 1, lt.eye, 4);
+    if (!lt_known || memcmp(lt.it, lt_sent.it, sizeof lt.it))
+        radeon_tcl_matrix_t(2, lt.it);
+    for (i = 0; i < 8; i++)
+        if ((lt.on >> i & 1u) && (!lt_known || !(lt_sent.on >> i & 1u) || memcmp(lt.vec[i], lt_sent.vec[i], sizeof lt.vec[i]) ||
+                                  memcmp(lt.scl[i], lt_sent.scl[i], sizeof lt.scl[i])))
+            radeon_tcl_light(i, lt.vec[i], lt.scl[i]);
+    lt_sent = lt;
+    lt_known = 1;
+}
+
+/* (not MGA_HOT: the engine's path only; in .text.hot it parted the CPU path's hot code by 1.3 KB and GLQuake, which
+ * never calls it, lost 3.9% on the P3: the instruction cache, as X1/X2's loss was) */
+static int tnl_pack(volatile uint32_t *dst, GLint vmin, const uint16_t *map, int nv, int stride, int pairs,
+                            const float *m0, const float *m1, float lo[3], float hi[3], int *w1, int lit)
+{
+    dgl_vin v;
+    int i, k;
+    for (i = 0; i < nv; i++, dst += stride) {
+        union { float f; uint32_t u; } c;
+        dgl_vertex_of(vmin + (map ? tnl_order[i] : i), &v);
+        if (m0 && pairs)
+            tex_affine(m0, v.tex, dgl_gl.texr_used ? v.texr[0] : 0.0f);
+        if (m1 && pairs > 1)
+            tex_affine(m1, v.tex1, dgl_gl.texr_used ? v.texr[1] : 0.0f);
+        if (pairs && (v.tex[0] > 1024.0f || v.tex[0] < -1024.0f || v.tex[1] > 1024.0f || v.tex[1] < -1024.0f ||
+                      (pairs > 1 && (v.tex1[0] > 1024.0f || v.tex1[0] < -1024.0f || v.tex1[1] > 1024.0f ||
+                                     v.tex1[1] < -1024.0f))))
+            return 0;                   /* (coordinates past 1,024 lose their fraction in the chip's floats: the CPU's
+                                         * path takes whole periods off per triangle, conformance t14) */
+        if (!finite_f(v.pos[0]) || !finite_f(v.pos[1]) || !finite_f(v.pos[2]) || !finite_f(v.pos[3])) {
+            tnl_refuse_nonfinite();
+            return 0;
+        }
+        c.f = v.pos[0], dst[0] = c.u;
+        c.f = v.pos[1], dst[1] = c.u;
+        c.f = v.pos[2], dst[2] = c.u;
+        c.f = v.pos[3], dst[3] = c.u;
+        if (tnl_box_on) {
+            for (k = 0; k < 3; k++) {
+                if (v.pos[k] < lo[k]) lo[k] = v.pos[k];
+                if (v.pos[k] > hi[k]) hi[k] = v.pos[k];
+            }
+            *w1 &= v.pos[3] == 1.0f;
+        }
+        if (lit) {                      /* (the normal after the position: radeon_maos_vbtmp.h's order) */
+            c.f = v.nrm[0], dst[4] = c.u;
+            c.f = v.nrm[1], dst[5] = c.u;
+            c.f = v.nrm[2], dst[6] = c.u;
+        }
+        dst[4 + lit] = ub(v.col[3]) << 24 | ub(v.col[0]) << 16 | ub(v.col[1]) << 8 | ub(v.col[2]);
+        if (pairs) {
+            c.f = v.tex[0], dst[5 + lit] = c.u;
+            c.f = v.tex[1], dst[6 + lit] = c.u;
+        }
+        if (pairs > 1) {
+            c.f = v.tex1[0], dst[7 + lit] = c.u;
+            c.f = v.tex1[1], dst[8 + lit] = c.u;
+        }
+    }
+    if (nv)
+        (void)dst[-1];                  /* (the CPU's writes out before the chip reads them) */
+    return 1;
+}
+
+/* ---- X3b: buffer objects' vertices kept in video memory ---------------------------------------------------------
+ * A draw from the arrays whose every enabled array is in a buffer object made GL_STATIC_DRAW: its vertices, from 0 to
+ * its highest index, converted once into video memory as the engine takes them, and drawn from there (indices only)
+ * while nothing they came from changed: the buffers' generations, the arrays' layout, the current values that stand
+ * for disabled arrays, the texture matrices applied while converting, the vertex's format. Echoes' settled terrain
+ * and any GL 1.5 game's world; a buffer changed (glBufferData, glBufferSubData, a write through glMapBuffer) is
+ * converted again at its next draw. DGL_TNL_VBO=0 converts every draw as before. */
+#define VC_SLOTS 64
+#define VC_BYTES (4u << 20)
+typedef struct {
+    struct { const void *b, *ptr; unsigned serial, gen; GLsizei stride; GLenum type; GLint size, en; } a[5];
+    float cur[13], m0[16], m1[16];
+    int dwords, stride, pairs, lit, swap, has_m0, has_m1, texr_used;
+} vkey;
+static struct { vkey k; uint32_t off, nv; int live; } vc[VC_SLOTS];
+static uint32_t vc_block, vc_used;
+static int vc_mode = -1, vc_next;
+static unsigned long vc_hits, vc_made;
+
+static int vc_arr(vkey *k, int n, const dgl_array *a, int needed)
+{
+    if (!a->enabled || !needed)
+        return 1;
+    if (!a->buf || a->buf->usage != GL_STATIC_DRAW_ARB || a->buf->mapped)
+        return 0;
+    k->a[n].b = a->buf, k->a[n].ptr = a->ptr, k->a[n].serial = a->buf->serial, k->a[n].gen = a->buf->gen;
+    k->a[n].stride = a->stride, k->a[n].type = a->type, k->a[n].size = a->size, k->a[n].en = 1;
+    return 1;
+}
+
+/* The draw's key, or 0: not one to keep (immediate mode, a client array, a buffer not static). */
+static int vc_key(vkey *k, int dwords, int stride, int pairs, int lit, const float *m0, const float *m1)
+{
+    if (vc_mode < 0) {
+        const char *e = getenv("DGL_TNL_VBO");
+        vc_mode = !(e && *e == '0');
+    }
+    if (!vc_mode || !dgl_draw_from_arrays() || !dgl_gl.va.enabled || !dgl_gl.va.buf)
+        return 0;
+    memset(k, 0, sizeof *k);
+    if (!vc_arr(k, 0, &dgl_gl.va, 1) || !vc_arr(k, 1, &dgl_gl.ca, 1) || !vc_arr(k, 2, &dgl_gl.ta, pairs > 0) ||
+        !vc_arr(k, 3, &dgl_gl.ta1, pairs > 0) || !vc_arr(k, 4, &dgl_gl.na, lit))
+        return 0;
+    memcpy(k->cur, dgl_gl.cur_color, 4 * sizeof(float));
+    memcpy(k->cur + 4, dgl_gl.cur_tex, 2 * sizeof(float));
+    memcpy(k->cur + 6, dgl_gl.cur_tex1, 2 * sizeof(float));
+    memcpy(k->cur + 8, dgl_gl.cur_normal, 3 * sizeof(float));
+    memcpy(k->cur + 11, dgl_gl.cur_texr, 2 * sizeof(float));
+    if (m0)
+        memcpy(k->m0, m0, sizeof k->m0), k->has_m0 = 1;
+    if (m1)
+        memcpy(k->m1, m1, sizeof k->m1), k->has_m1 = 1;
+    k->dwords = dwords, k->stride = stride, k->pairs = pairs, k->lit = lit, k->swap = swap_st;
+    k->texr_used = dgl_gl.texr_used;
+    return 1;
+}
+
+/* The video memory address (the chip's space) of the draw's vertices 0..vmax, made if they aren't there yet; 0 if
+ * they can't be (no room, a vertex the engine can't take). */
+static uint32_t vc_get(const vkey *k, GLint vmax, int stride, int pairs, int lit, const float *m0, const float *m1)
+{
+    uint32_t nv = (uint32_t)vmax + 1u, bytes = nv * (uint32_t)stride * 4u, off;
+    float lo[3], hi[3];
+    int i, w1 = 1, slot = -1;
+    for (i = 0; i < VC_SLOTS; i++)
+        if (vc[i].live && vc[i].nv >= nv && !memcmp(&vc[i].k, k, sizeof *k)) {
+            vc_hits++;
+            return radeon.fb_location + vc[i].off;
+        }
+    if (bytes > VC_BYTES / 4u)
+        return 0;
+    if (!vc_block && room(VC_BYTES + 32u, &vc_block, NULL) != 0) {
+        vc_block = 0, vc_mode = 0;
+        return 0;
+    }
+    for (i = 0; i < VC_SLOTS && slot < 0; i++)  /* (the same arrays kept for fewer vertices: replaced) */
+        if (vc[i].live && !memcmp(&vc[i].k, k, sizeof *k))
+            slot = i;
+    vc_used = (vc_used + 31u) & ~31u;
+    if (vc_used + bytes > VC_BYTES || (slot < 0 && vc[vc_next].live && vc_next == 0 && vc_used)) {
+        /* (full: everything kept goes, once the engine has drawn from it) */
+        if (radeon_sync(1000000) != 0)
+            return 0;
+        memset(vc, 0, sizeof vc);
+        vc_used = 0, vc_next = 0, slot = -1;
+    }
+    if (slot < 0)
+        slot = vc_next, vc_next = (vc_next + 1) % VC_SLOTS;
+    off = ((vc_block + 31u) & ~31u) + vc_used;
+    lo[0] = lo[1] = lo[2] = 1e30f, hi[0] = hi[1] = hi[2] = -1e30f;
+    if (!tnl_pack((volatile uint32_t *)(radeon.fb + off), 0, NULL, (int)nv, stride, pairs, m0, m1, lo, hi, &w1, lit)) {
+        vc[slot].live = 0;
+        return 0;
+    }
+    vc_used += bytes;
+    vc[slot].k = *k, vc[slot].off = off, vc[slot].nv = nv, vc[slot].live = 1;
+    vc_made++;
+    return radeon.fb_location + off;
+}
+
 static int rb_tnl(GLenum mode, GLsizei count, const GLint *idx, GLint first)
 {
     if (!tnl_mode || !(radeon.flags & RADEON_HAS_TCL))
@@ -1495,16 +1808,20 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
     /* (the coordinates: GL's unit 0's s and t, then unit 1's where the chip's second unit draws or the first draws GL's
      * unit 1, swap_st; the engine's outputs take the chip's units from them) */
     int units = cur_tx[1] ? 2 : cur_tx[0] ? 1 : 0, pairs = units == 2 || (units && swap_st) ? 2 : units;
-    int dwords = 5 + 2 * pairs, stride, flat = dgl_gl.shade_model == GL_FLAT;
+    int lit = dgl_gl.lighting ? 3 : 0;  /* (X3b: a lit draw's normal, three words a vertex) */
+    int dwords = 5 + 2 * pairs + lit, stride, flat = dgl_gl.shade_model == GL_FLAT;
     GLint vmin, vmax, i;
     int nv, ni = 0, k;
-    uint32_t prim = RADEON_PRIM_TRI_LIST, vfmt, bytes, addr, s, took;
-    volatile uint32_t *dst;
+    uint32_t prim = RADEON_PRIM_TRI_LIST, vfmt, bytes, addr, s, took, fmt, sel, ucp, lmc = 0;
+    vkey vk;
+    int cached;
+    volatile uint32_t *dst = NULL;
+    const float *mvp;
+    float vp[6];
     float lo[3] = { 1e30f, 1e30f, 1e30f }, hi[3] = { -1e30f, -1e30f, -1e30f };
     const uint16_t *map;
     int w1 = 1;                         /* (every vertex's w 1: the box below applies) */
     uint16_t *ix;
-    dgl_vin v;
     const float *m0, *m1;
     if (!dgl_radeon_tnl_active() || count < 3 || !tnl_state_ok(mode))
         return 0;
@@ -1530,7 +1847,10 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
     if (nv > 65536)
         return 0;
     map = NULL;
-    if (idx && nv > count) {            /* (fewer indices than vertices in the range: write only those named) */
+    cached = vmax < 65536 && vc_key(&vk, dwords, tnl_stride(dwords), pairs, lit, m0, m1);
+    if (cached)                         /* (kept in video memory: the indices as they are, from vertex 0) */
+        vmin = 0, nv = vmax + 1;
+    else if (idx && nv > count) {            /* (fewer indices than vertices in the range: write only those named) */
         int nu = 0;
         if (!++tnl_gen) {
             memset(tnl_stamp, 0, sizeof tnl_stamp);
@@ -1567,7 +1887,7 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
     case GL_TRIANGLE_STRIP:
     case GL_TRIANGLE_FAN:
     case GL_POLYGON:
-        if (count <= radeon_tcl_piece) {  /* (one packet: a strip or fan isn't split) */
+        if (count <= radeon_tcl_piece) {   /* (one packet: a strip or fan isn't split) */
             if (!(ix = idx_room(count)))
                 return 0;
             for (i = 0; i < count; i++)
@@ -1614,134 +1934,13 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
         return 1;
     stride = tnl_stride(dwords);
     bytes = (uint32_t)nv * (uint32_t)stride * 4u;
-    if (radeon_cp_varea) {
-        /* Room in the system-memory area: this half, else the other once its fence has passed. */
-        uint32_t half = radeon_cp_varea_bytes / 2u;
-        if (bytes > half)
-            return 0;
-        if (va_used + bytes > half) {
-            va_fence[va_half] = radeon_cp_fence();
-            trace_ring("fence-half", (unsigned long)va_fence[va_half], (unsigned long)va_half,
-                       (unsigned long)va_fence[va_half ^ 1], (unsigned long)radeon_rd(0x15E4));
-            va_half ^= 1;
-            va_used = 0;
-            static long fake = -1;          /* (DGL_TNL_FAKEMISS=n: the n-th wait taken as missed, to test what follows) */
-            if (fake < 0) {
-                const char *e = getenv("DGL_TNL_FAKEMISS");
-                fake = e && *e ? atol(e) : 0;
-            }
-            if (va_fence[va_half] && (radeon_cp_fence_wait(va_fence[va_half], 1000000u) != 0 || (fake > 0 && !--fake))) {
-                /* (the chip isn't getting through its commands: no more of them from here, the CPU's path for the
-                 * rest of the run, rather than writing over vertices it may still be fetching) */
-                tnl_hung("a fence not passed in a second",
-                         "the transform engine's vertex area: a fence not passed in a second; the engine reset and "
-                         "off for the rest of the run, drawing by register writes");
-                return 0;
-            }
-        }
-        addr = radeon_cp_varea_gart + (uint32_t)va_half * half + va_used;     /* (in the chip's space already) */
-        dst = (volatile uint32_t *)(radeon_cp_varea + (uint32_t)va_half * half + va_used);
-        took = (bytes + 31u) & ~31u;
-        va_used += took;
-    } else {
-        /* Room in the vertex area in video memory (made at the first draw; used again from its start after a sync
-         * once full). */
-        if (bytes > VB_BYTES)
-            return 0;
-        if (!vb_block && room(VB_BYTES + 32u, &vb_block, NULL) != 0) {
-            vb_block = 0;
-            tnl_mode = 0;
-            warn_once(8, "no video memory for the transform engine's vertices: transformed by the CPU");
-            return 0;
-        }
-        if (vb_used + bytes > VB_BYTES) {
-            trace_ring("vram-wrap", (unsigned long)vb_used, (unsigned long)bytes, 0, 0);
-            if (radeon_sync(1000000) != 0) {
-                /* (the chip not through its commands in a second: as at a missed fence, the engine reset) */
-                tnl_hung("the vertex area's sync not done in a second",
-                         "the transform engine's vertex area: a sync not done in a second; the engine reset and off "
-                         "for the rest of the run, drawing by register writes");
-                return 0;
-            }
-            vb_used = 0;
-        }
-        addr = ((vb_block + 31u) & ~31u) + vb_used;
-        took = (bytes + 31u) & ~31u;
-        vb_used += took;
-        dst = (volatile uint32_t *)(radeon.fb + addr);
-        addr += radeon.fb_location;             /* (the chip's space: video memory starts at its frame buffer's base) */
-    }
-    (void)tnl_box_on_first();
-    for (i = 0; i < nv; i++, dst += stride) {
-        union { float f; uint32_t u; } c;
-        dgl_vertex_of(vmin + (map ? tnl_order[i] : i), &v);
-        if (m0 && pairs)
-            tex_affine(m0, v.tex, dgl_gl.texr_used ? v.texr[0] : 0.0f);
-        if (m1 && pairs > 1)
-            tex_affine(m1, v.tex1, dgl_gl.texr_used ? v.texr[1] : 0.0f);
-        if (pairs && (v.tex[0] > 1024.0f || v.tex[0] < -1024.0f || v.tex[1] > 1024.0f || v.tex[1] < -1024.0f ||
-                      (pairs > 1 && (v.tex1[0] > 1024.0f || v.tex1[0] < -1024.0f || v.tex1[1] > 1024.0f ||
-                                     v.tex1[1] < -1024.0f))))
-            return 0;                   /* (coordinates past 1,024 lose their fraction in the chip's floats: the CPU's
-                                         * path takes whole periods off per triangle, conformance t14) */
-        if (!finite_f(v.pos[0]) || !finite_f(v.pos[1]) || !finite_f(v.pos[2]) || !finite_f(v.pos[3])) {
-            tnl_refuse_nonfinite();
-            return 0;
-        }
-        c.f = v.pos[0], dst[0] = c.u;
-        c.f = v.pos[1], dst[1] = c.u;
-        c.f = v.pos[2], dst[2] = c.u;
-        c.f = v.pos[3], dst[3] = c.u;
-        if (tnl_box_on) {
-            for (k = 0; k < 3; k++) {
-                if (v.pos[k] < lo[k]) lo[k] = v.pos[k];
-                if (v.pos[k] > hi[k]) hi[k] = v.pos[k];
-            }
-            w1 &= v.pos[3] == 1.0f;
-        }
-        dst[4] = ub(v.col[3]) << 24 | ub(v.col[0]) << 16 | ub(v.col[1]) << 8 | ub(v.col[2]);
-        if (pairs) {
-            c.f = v.tex[0], dst[5] = c.u;
-            c.f = v.tex[1], dst[6] = c.u;
-        }
-        if (pairs > 1) {
-            c.f = v.tex1[0], dst[7] = c.u;
-            c.f = v.tex1[1], dst[8] = c.u;
-        }
-    }
-    (void)dst[-1];                      /* (the CPU's writes out before the chip reads them) */
-    if ((tnl_box_on || tnl_box_on_first()) && w1 && tnl_too_small(lo, hi)) {
-        /* (the whole draw within a pixel or two: the CPU's path for it, the area's room given back) */
-        if (radeon_cp_varea)
-            va_used -= took;
-        else
-            vb_used -= took;
-        tnl_small++;
-        trace_ring("small", (unsigned long)count, (unsigned long)nv, 0, 0);
-        return 0;
-    }
-    /* The engine's state: on, the matrix and viewport where they changed, the outputs, shading and culling. */
-    radeon_tcl_on(1);
-    {
-        const dgl_mat4 *m = dgl_mvp();
-        float vp[6];
-        if (!tnl_mvp_ok || memcmp(tnl_mvp, m->m, sizeof tnl_mvp)) {
-            memcpy(tnl_mvp, m->m, sizeof tnl_mvp);
-            radeon_tcl_matrix(0, tnl_mvp);
-            if (!tnl_mvp_ok)
-                radeon_tcl_guard_band();
-            tnl_mvp_ok = 1;
-        }
-        vp[0] = vx_s, vp[1] = vx_o, vp[2] = vy_s, vp[3] = vy_o, vp[4] = vz_s, vp[5] = vz_o;
-        if (memcmp(vp, tnl_vp, sizeof vp)) {
-            memcpy(tnl_vp, vp, sizeof vp);
-            radeon_tcl_viewport(vp);
-        }
-    }
-    radeon_tcl.output_vtx_fmt = RADEON_TCL_VTX_Z0 | RADEON_TCL_VTX_W0 | RADEON_TCL_VTX_PK_DIFFUSE |
-                                (units ? RADEON_TCL_VTX_ST0 : 0u) | (units > 1 ? RADEON_TCL_VTX_ST1 : 0u);
-    radeon_tcl.output_vtx_sel = RADEON_TCL_COMPUTE_XYZW | (swap_st && units == 1 ? 1u : 0u) << RADEON_TCL_TEX_0_OUTPUT_SHIFT |
-                                1u << RADEON_TCL_TEX_1_OUTPUT_SHIFT;
+    /* The engine's state for the draw, in locals first: the setup word (shading, culling), its outputs, the cull
+     * words, the format, the matrix and the viewport. */
+    fmt = RADEON_TCL_VTX_Z0 | RADEON_TCL_VTX_W0 | RADEON_TCL_VTX_PK_DIFFUSE | (units ? RADEON_TCL_VTX_ST0 : 0u) |
+          (units > 1 ? RADEON_TCL_VTX_ST1 : 0u) | (dgl_gl.fog ? RADEON_TCL_VTX_PK_SPEC : 0u);
+    sel = RADEON_TCL_COMPUTE_XYZW | (swap_st && units == 1 ? 1u : 0u) << RADEON_TCL_TEX_0_OUTPUT_SHIFT |
+          1u << RADEON_TCL_TEX_1_OUTPUT_SHIFT | (lit ? RADEON_TCL_COMPUTE_DIFFUSE : 0u) |
+          (dgl_gl.fog ? RADEON_TCL_COMPUTE_SPECULAR : 0u);
     s = radeon_tcl_window_cntl() & ~(RADEON_FFACE_CULL_DIR_MASK | RADEON_BFACE_SOLID | RADEON_FFACE_SOLID | 3u << 6 |
                            RADEON_DIFFUSE_SHADE_MASK | RADEON_ALPHA_SHADE_MASK | RADEON_SPECULAR_SHADE_MASK);
     s |= RADEON_VPORT_XY_XFORM_ENABLE | RADEON_VPORT_Z_XFORM_ENABLE;
@@ -1758,25 +1957,163 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
         if (round8)
             s = (s & ~(3u << 28 | 3u << 30)) | RADEON_ROUND_MODE_TRUNC | RADEON_ROUND_PREC_8TH_PIX;
     }
-    radeon_tcl.ucp_vert_blend_ctl = RADEON_UCP_IN_CLIP_SPACE;
+    ucp = RADEON_UCP_IN_CLIP_SPACE;
+    if (dgl_gl.fog)
+        ucp |= dgl_gl.fog_mode == GL_LINEAR ? RADEON_TCL_FOG_LINEAR : dgl_gl.fog_mode == GL_EXP ? RADEON_TCL_FOG_EXP
+                                                                                              : RADEON_TCL_FOG_EXP2;
     if (dgl_gl.front_face == GL_CCW)
-        s |= RADEON_FFACE_CULL_CCW, radeon_tcl.ucp_vert_blend_ctl |= RADEON_CULL_FRONT_IS_CCW;
+        s |= RADEON_FFACE_CULL_CCW, ucp |= RADEON_CULL_FRONT_IS_CCW;
     s |= RADEON_FFACE_SOLID | RADEON_BFACE_SOLID;
     if (dgl_gl.cull_face) {
         if (dgl_gl.cull_mode == GL_FRONT || dgl_gl.cull_mode == GL_FRONT_AND_BACK)
-            s &= ~RADEON_FFACE_SOLID, radeon_tcl.ucp_vert_blend_ctl |= RADEON_CULL_FRONT;
+            s &= ~RADEON_FFACE_SOLID, ucp |= RADEON_CULL_FRONT;
         if (dgl_gl.cull_mode == GL_BACK || dgl_gl.cull_mode == GL_FRONT_AND_BACK)
-            s &= ~RADEON_BFACE_SOLID, radeon_tcl.ucp_vert_blend_ctl |= RADEON_CULL_BACK;
+            s &= ~RADEON_BFACE_SOLID, ucp |= RADEON_CULL_BACK;
     }
+    vfmt = RADEON_CP_VC_FRMT_Z | RADEON_CP_VC_FRMT_W0 | RADEON_CP_VC_FRMT_PKCOLOR |
+           (pairs ? RADEON_CP_VC_FRMT_ST0 : 0u) | (pairs > 1 ? RADEON_CP_VC_FRMT_ST1 : 0u) |
+           (lit ? RADEON_CP_VC_FRMT_N0 : 0u);
+    mvp = dgl_mvp()->m;
+    vp[0] = vx_s, vp[1] = vx_o, vp[2] = vy_s, vp[3] = vy_o, vp[4] = vz_s, vp[5] = vz_o;
+    (void)tnl_box_on_first();
+    if (lit) {                          /* (the lights and the material where they changed: the held draw first) */
+        tnl_light_build();
+        if (!lt_known || memcmp(&lt, &lt_sent, sizeof lt))
+            tnl_light_send();
+        lmc = lt.lmc;
+    } else if (dgl_gl.fog)
+        lmc = RADEON_LIGHTING_ENABLE | RADEON_SPECULAR_LIGHTS | RADEON_DIFFUSE_SPECULAR_COMBINE |
+              RADEON_LOCAL_LIGHT_VEC_GL | RADEON_LM_SOURCE_STATE_MULT << RADEON_EMISSIVE_SOURCE_SHIFT |
+              RADEON_LM_SOURCE_STATE_MULT << RADEON_AMBIENT_SOURCE_SHIFT |
+              RADEON_LM_SOURCE_STATE_MULT << RADEON_DIFFUSE_SOURCE_SHIFT |
+              RADEON_LM_SOURCE_STATE_MULT << RADEON_SPECULAR_SOURCE_SHIFT;    /* (no light on: the fog's specular) */
+    if (dgl_gl.fog) {
+        float f[4] = { 0, 0, 0, 0 };
+        if (dgl_gl.fog_mode == GL_LINEAR) {
+            if (dgl_gl.fog_end == dgl_gl.fog_start)
+                f[0] = f[1] = 1.0f;
+            else
+                f[0] = dgl_gl.fog_end / (dgl_gl.fog_end - dgl_gl.fog_start),
+                f[1] = -1.0f / (dgl_gl.fog_end - dgl_gl.fog_start);
+        } else
+            f[1] = dgl_gl.fog_mode == GL_EXP ? -dgl_gl.fog_density : -(dgl_gl.fog_density * dgl_gl.fog_density);
+        if (!fog_known || memcmp(f, fog_sent, sizeof f)) {
+            radeon_tcl_vectors(RADEON_TCL_VEC_FOG_PARAM, 1, f, 4);
+            memcpy(fog_sent, f, sizeof f);
+            fog_known = 1;
+        }
+    }
+    if (lit || dgl_gl.fog) {
+        const float *mvm = dgl_gl.mv.stack[dgl_gl.mv.depth - 1].m;
+        if (!mv_known || memcmp(mvm, mv_sent, sizeof mv_sent)) {
+            radeon_tcl_matrix(1, mvm);
+            memcpy(mv_sent, mvm, sizeof mv_sent);
+            mv_known = 1;
+        }
+    }
+    /* (a draw of buffer objects: its vertices in video memory already, or put there now, indices only) */
+    if (!cached || !(addr = vc_get(&vk, vmax, stride, pairs, lit, m0, m1))) {
+        if (radeon_cp_varea) {
+            /* Room in the system-memory area: this half, else the other once its fence has passed. */
+            uint32_t half = radeon_cp_varea_bytes / 2u;
+            if (bytes > half)
+                return 0;
+            va_used = (va_used + 31u) & ~31u;
+            if (va_used + bytes > half) {
+                va_fence[va_half] = radeon_cp_fence();
+                trace_ring("fence-half", (unsigned long)va_fence[va_half], (unsigned long)va_half,
+                           (unsigned long)va_fence[va_half ^ 1], (unsigned long)radeon_rd(0x15E4));
+                va_half ^= 1;
+                va_used = 0;
+                static long fake = -1;          /* (DGL_TNL_FAKEMISS=n: the n-th wait taken as missed, to test what follows) */
+                if (fake < 0) {
+                    const char *e = getenv("DGL_TNL_FAKEMISS");
+                    fake = e && *e ? atol(e) : 0;
+                }
+                if (va_fence[va_half] && (radeon_cp_fence_wait(va_fence[va_half], 1000000u) != 0 || (fake > 0 && !--fake))) {
+                    /* (the chip isn't getting through its commands: no more of them from here, the CPU's path for the
+                     * rest of the run, rather than writing over vertices it may still be fetching) */
+                    tnl_hung("a fence not passed in a second",
+                             "the transform engine's vertex area: a fence not passed in a second; the engine reset and "
+                             "off for the rest of the run, drawing by register writes");
+                    return 0;
+                }
+            }
+            addr = radeon_cp_varea_gart + (uint32_t)va_half * half + va_used;     /* (in the chip's space already) */
+            dst = (volatile uint32_t *)(radeon_cp_varea + (uint32_t)va_half * half + va_used);
+            va_used += bytes;               /* (exact: a draw that joins it follows straight on; rounded at the next start) */
+        } else {
+            /* Room in the vertex area in video memory (made at the first draw; used again from its start after a sync
+             * once full). */
+            if (bytes > VB_BYTES)
+                return 0;
+            if (!vb_block && room(VB_BYTES + 32u, &vb_block, NULL) != 0) {
+                vb_block = 0;
+                tnl_mode = 0;
+                warn_once(8, "no video memory for the transform engine's vertices: transformed by the CPU");
+                return 0;
+            }
+            vb_used = (vb_used + 31u) & ~31u;
+            if (vb_used + bytes > VB_BYTES) {
+                trace_ring("vram-wrap", (unsigned long)vb_used, (unsigned long)bytes, 0, 0);
+                if (radeon_sync(1000000) != 0) {
+                    /* (the chip not through its commands in a second: as at a missed fence, the engine reset) */
+                    tnl_hung("the vertex area's sync not done in a second",
+                             "the transform engine's vertex area: a sync not done in a second; the engine reset and off "
+                             "for the rest of the run, drawing by register writes");
+                    return 0;
+                }
+                vb_used = 0;
+            }
+            addr = ((vb_block + 31u) & ~31u) + vb_used;
+            vb_used += bytes;
+            dst = (volatile uint32_t *)(radeon.fb + addr);
+            addr += radeon.fb_location;             /* (the chip's space: video memory starts at its frame buffer's base) */
+        }
+        took = bytes;
+        if (!tnl_pack(dst, vmin, map, nv, stride, pairs, m0, m1, lo, hi, &w1, lit))
+            return 0;
+        if ((tnl_box_on || tnl_box_on_first()) && w1 && tnl_too_small(lo, hi)) {
+            /* (the whole draw within a pixel or two: the CPU's path for it, the area's room given back) */
+            if (radeon_cp_varea)
+                va_used -= took;
+            else
+                vb_used -= took;
+            tnl_small++;
+            trace_ring("small", (unsigned long)count, (unsigned long)nv, 0, 0);
+            return 0;
+        }
+    }
+    /* The engine's state: on, the matrix and viewport where they changed, the outputs, shading and culling. */
+    radeon_tcl_on(1);
+    if (!tnl_mvp_ok || memcmp(tnl_mvp, mvp, sizeof tnl_mvp)) {
+        memcpy(tnl_mvp, mvp, sizeof tnl_mvp);
+        radeon_tcl_matrix(0, tnl_mvp);
+        if (!tnl_mvp_ok)
+            radeon_tcl_guard_band();
+        tnl_mvp_ok = 1;
+    }
+    if (memcmp(vp, tnl_vp, sizeof vp)) {
+        memcpy(tnl_vp, vp, sizeof vp);
+        radeon_tcl_viewport(vp);
+    }
+    radeon_tcl.output_vtx_fmt = fmt;
+    radeon_tcl.output_vtx_sel = sel;
+    radeon_tcl.ucp_vert_blend_ctl = ucp;
+    radeon_tcl.light_model_ctl = lmc;
+    if (lit)
+        memcpy(radeon_tcl.per_light_ctl, lt.plc, sizeof lt.plc);
+    else                                /* (fog alone: no light's specular in its factor's colour) */
+        memset(radeon_tcl.per_light_ctl, 0, sizeof radeon_tcl.per_light_ctl);
     if (radeon_3d.se_cntl != s)
         radeon_3d.se_cntl = s, radeon_3d_dirty = 1;
-    vfmt = RADEON_CP_VC_FRMT_Z | RADEON_CP_VC_FRMT_W0 | RADEON_CP_VC_FRMT_PKCOLOR |
-           (pairs ? RADEON_CP_VC_FRMT_ST0 : 0u) | (pairs > 1 ? RADEON_CP_VC_FRMT_ST1 : 0u);
     if (!tnl_tris)
         DGL_WARN("DGL-RADEON the transform engine draws (DGL_TNL=0: the CPU transforms instead)");   /* (said once) */
-    s = radeon_cp_wptr();
-    radeon_tcl_draw_indexed_s(prim, vfmt, addr, dwords, stride, ix, ni);
-    tnl_note(mode, count, nv, ni, pairs, stride, vfmt, prim, addr, s);
+    {
+        uint32_t w0 = radeon_cp_wptr();
+        radeon_tcl_draw_indexed_s(prim, vfmt, addr, dwords, stride, ix, ni);
+        tnl_note(mode, count, nv, ni, pairs, stride, vfmt, prim, addr, w0);
+    }
     {   /* (experiment, DGL_TNL_LAZY=1: the ring's pointer to the chip only once 1,024 dwords are waiting) */
         static int lazy = -1;
         if (lazy < 0) {
@@ -1924,7 +2261,10 @@ static int tex_sub(dgl_texture *t, int level, int x, int y, int w, int h)
     return 1;
 }
 
-static void tex_free(dgl_texture *t) { tex_drop(t); }
+static void tex_free(dgl_texture *t)
+{
+    tex_drop(t);
+}
 
 static int tex_info(const dgl_texture *t, int rgba[4])
 {
@@ -1943,7 +2283,9 @@ static void tex_reset(uint32_t start, uint32_t end)
     int i, n = dgl_texture_count();
     dgl_texture *t;
     valid_ok = 0;
-    vb_block = 0, vb_used = 0, tnl_mvp_ok = 0;     /* (a new context: the vertex area and the engine's state anew) */
+    vb_block = 0, vb_used = 0, tnl_mvp_ok = 0, lt_known = 0, fog_known = 0, mv_known = 0;
+    vc_block = 0, vc_used = 0, vc_next = 0;
+    memset(vc, 0, sizeof vc);   /* (a new context: the vertex area and the engine's state anew) */
     va_used = 0, va_half = 0, va_fence[0] = va_fence[1] = 0;
     memset(tnl_vp, 0, sizeof tnl_vp);
     radeon_tcl_forget();

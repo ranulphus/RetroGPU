@@ -55,7 +55,10 @@ static dgl_buffer *create(GLuint name)
         bufs = nb;
         nbufs = cap;
     }
+    static unsigned serials;
     bufs[name] = (dgl_buffer *)calloc(1, sizeof **bufs);
+    if (bufs[name])
+        bufs[name]->serial = ++serials;
     if (!bufs[name]) { dgl_gl_error(GL_OUT_OF_MEMORY); return NULL; }
     bufs[name]->name = name;
     bufs[name]->usage = GL_STATIC_DRAW_ARB;
@@ -128,6 +131,7 @@ void APIENTRY glBufferDataARB(GLenum target, GLsizeiptrARB size, const GLvoid *d
     b->data = mem;
     b->size = size;
     b->usage = usage;
+    b->gen++;
 }
 
 void APIENTRY glBufferSubDataARB(GLenum target, GLintptrARB offset, GLsizeiptrARB size, const GLvoid *data)
@@ -139,6 +143,7 @@ void APIENTRY glBufferSubDataARB(GLenum target, GLintptrARB offset, GLsizeiptrAR
     if (offset < 0 || size < 0 || offset + size > b->size) { dgl_gl_error(GL_INVALID_VALUE); return; }
     if (size)
         memcpy((unsigned char *)b->data + offset, data, (size_t)size);
+    b->gen++;
 }
 
 void APIENTRY glGetBufferSubDataARB(GLenum target, GLintptrARB offset, GLsizeiptrARB size, GLvoid *data)
@@ -173,6 +178,8 @@ GLboolean APIENTRY glUnmapBufferARB(GLenum target)
     if (!slot)
         return GL_FALSE;
     if (!(b = *slot) || !b->mapped) { dgl_gl_error(GL_INVALID_OPERATION); return GL_FALSE; }
+    if (b->access != GL_READ_ONLY_ARB)
+        b->gen++;
     b->mapped = 0;
     return GL_TRUE;                         /* system memory is never lost */
 }

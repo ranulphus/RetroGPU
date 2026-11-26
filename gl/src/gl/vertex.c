@@ -263,8 +263,9 @@ static void plan_one(const dgl_array *a, int on, aplan *o)
 
 /* An immediate-mode primitive (glBegin to glEnd) for a back end's transform engine: only with DGL_TNL_IMM=n, n
  * vertices or more. Each is a draw of its own there (its state, its packet, the Radeon's wait after it): GLQuake's
- * thousands of small polygons ran 15% slower on the 7500's engine than on the P3's CPU, and still 5% slower when the
- * engine's side sent them back. Arrays and buffer objects (Echoes, Fifth Wheel, ClassiCube) are what it is for. */
+ * thousands of small polygons ran 15% slower on the 7500's engine than on the P3's CPU, and still 15% slower batched
+ * (X3b, 2026-11-26: 72.5 against 84.6 fps; its -mtex surfaces change a texture or its environment one by one, so
+ * few join). Arrays and buffer objects (Echoes, Fifth Wheel, ClassiCube) are what it is for. */
 static int imm_tnl_ok(int count)
 {
     static int min = -1;
@@ -519,6 +520,8 @@ MGA_HOT void dgl_tri_general(GLint a, GLint b, GLint c, GLint provoking)
  * dgl_poly_general: read directly, not through the arrays' general reader (fetch: a third of GLQuake's vertex time
  * on the P3 when the TNT2's polygons went this way). */
 static const dgl_vin *cur_imm;
+
+int dgl_draw_from_arrays(void) { return cur_imm == NULL; }
 
 void dgl_vertex_of(GLint i, dgl_vin *v)
 {

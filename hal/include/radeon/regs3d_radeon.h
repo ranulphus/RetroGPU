@@ -619,8 +619,32 @@
 #define     RADEON_TCL_TEX_0_OUTPUT_SHIFT     16      /* (each output's input: 0..3 a vertex's, 8..10 computed) */
 #define     RADEON_TCL_TEX_1_OUTPUT_SHIFT     20
 #define     RADEON_TCL_TEX_2_OUTPUT_SHIFT     24
+/* SE_TCL_LIGHT_MODEL_CTL (226Ch): the engine's lighting (X3b; X.org's radeon_reg.h) */
+#define RADEON_SE_TCL_LIGHT_MODEL_CTL          0x226c
+#define RADEON_TCL_VEC_FOG_PARAM               123u   /* (the vector memory: c, d, 0, 0) */
+#define     RADEON_LIGHTING_ENABLE              (1u << 0)
+#define     RADEON_LIGHT_IN_MODELSPACE          (1u << 1)
+#define     RADEON_LOCAL_VIEWER                 (1u << 2)
+#define     RADEON_NORMALIZE_NORMALS            (1u << 3)
+#define     RADEON_RESCALE_NORMALS              (1u << 4)
+#define     RADEON_SPECULAR_LIGHTS              (1u << 5)
+#define     RADEON_DIFFUSE_SPECULAR_COMBINE     (1u << 6)
+#define     RADEON_LIGHT_ALPHA                  (1u << 7)
+#define     RADEON_LOCAL_LIGHT_VEC_GL           (1u << 8)
+#define     RADEON_LIGHT_NO_NORMAL_AMBIENT_ONLY (1u << 9)
+#define     RADEON_LM_SOURCE_STATE_PREMULT      0u
+#define     RADEON_LM_SOURCE_STATE_MULT         1u
+#define     RADEON_LM_SOURCE_VERTEX_DIFFUSE     2u
+#define     RADEON_LM_SOURCE_VERTEX_SPECULAR    3u
+#define     RADEON_EMISSIVE_SOURCE_SHIFT        16
+#define     RADEON_AMBIENT_SOURCE_SHIFT         18
+#define     RADEON_DIFFUSE_SOURCE_SHIFT         20
+#define     RADEON_SPECULAR_SOURCE_SHIFT        22
 #define     RADEON_UCP_IN_CLIP_SPACE          (1u << 0)
 #define     RADEON_UCP_ENABLE_0               (1u << 2)
+#define     RADEON_TCL_FOG_EXP                (1u << 8)
+#define     RADEON_TCL_FOG_EXP2               (2u << 8)
+#define     RADEON_TCL_FOG_MASK               (3u << 8)
 #define     RADEON_TCL_FOG_LINEAR             (3u << 8)
 #define     RADEON_LIGHT_TWOSIDE              (1u << 11)
 #define     RADEON_CULL_FRONT_IS_CCW          (1u << 28)

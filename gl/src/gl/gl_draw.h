@@ -42,6 +42,7 @@ extern dgl_sinks dgl_sink;
 
 void dgl_transform(const dgl_vin *in, dgl_cvtx *out);
 void dgl_vertex_of(GLint i, dgl_vin *v);   /* the draw being assembled's vertex i (immediate or from the arrays) */
+int dgl_draw_from_arrays(void);             /* (X3b) the draw being assembled comes from the arrays, not glBegin's */
 /* The arrays resolved for the current draw (vertex.c, once a draw): each
  * one's first element, stride, type and size, and whether it is on. */
 typedef struct { const unsigned char *p; size_t stride; GLenum type; int size, on, uniform; } dgl_aplan;
