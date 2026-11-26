@@ -330,11 +330,13 @@ def config_text(a, serial, cimg, bootimg, extra_hdd, tail=""):
 
 def cd_config(img):
     """--cdrom: an ATAPI CD-ROM drive on the second IDE channel's slave (1:1; --scratch-hdd has its master), the
-    image (ISO 9660, or CUE/BIN) in it; its audio on, as on a PC with the drive's cable to the sound card."""
+    image (ISO 9660, or CUE/BIN) in it; its audio on, as on a PC with the drive's cable to the sound card. The
+    template has it at the end of fdd_02_type's line: its lines begin with a newline, and without --cdrom nothing
+    is there at all (the configs cfgcheck.py compares are as they were)."""
     if not img:
         return ""
-    return ("cdrom_01_parameters = 1, atapi\ncdrom_01_ide_channel = 1:1\ncdrom_01_speed = 24\n"
-            "cdrom_01_image_path = %s\n" % os.path.abspath(img))
+    return ("\ncdrom_01_parameters = 1, atapi\ncdrom_01_ide_channel = 1:1\ncdrom_01_speed = 24"
+            "\ncdrom_01_image_path = %s" % os.path.abspath(img))
 
 
 def run_bat_lines(a, exe_name, game):
