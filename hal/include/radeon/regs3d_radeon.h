@@ -619,9 +619,17 @@
 #define     RADEON_TCL_TEX_0_OUTPUT_SHIFT     16      /* (each output's input: 0..3 a vertex's, 8..10 computed) */
 #define     RADEON_TCL_TEX_1_OUTPUT_SHIFT     20
 #define     RADEON_TCL_TEX_2_OUTPUT_SHIFT     24
+#define     RADEON_TCL_TEX_COMPUTED_TEX_0     8u      /* (an output's input: what TEXMAT_n computed; n added) */
+/* SE_TCL_TEXTURE_PROC_CTL (2268h): texture-coordinate generation and the texture matrices (X3b; X.org's radeon_reg.h) */
+#define     RADEON_TEXGEN_TEXMAT_0_ENABLE     (1u << 0)       /* (unit n: shifted by n) */
+#define     RADEON_TEXMAT_0_ENABLE            (1u << 4)
+#define     RADEON_TEXGEN_INPUT_OBJ           4u
+#define     RADEON_TEXGEN_INPUT_EYE           5u
+#define     RADEON_TEXGEN_0_INPUT_SHIFT       16              /* (unit n: 16 + 4n) */
+#define RADEON_TCL_VEC_UCP                    116u    /* (the user clip planes' vectors, 116..121, in clip space) */
 /* SE_TCL_LIGHT_MODEL_CTL (226Ch): the engine's lighting (X3b; X.org's radeon_reg.h) */
 #define RADEON_SE_TCL_LIGHT_MODEL_CTL          0x226c
-#define RADEON_TCL_VEC_FOG_PARAM               123u   /* (the vector memory: c, d, 0, 0) */
+#define RADEON_TCL_VEC_FOG_PARAM               123u   /* (the vector memory: the factors on eye x, y, z; backend.c) */
 #define     RADEON_LIGHTING_ENABLE              (1u << 0)
 #define     RADEON_LIGHT_IN_MODELSPACE          (1u << 1)
 #define     RADEON_LOCAL_VIEWER                 (1u << 2)

@@ -113,6 +113,14 @@ MGA_HOT int dgl_clip_user_begin(void)
     return 1;
 }
 
+/* (X3b) The enabled planes in clip coordinates, for an engine that clips by them itself: their bits. */
+unsigned dgl_clip_user_planes(float eq[6][4])
+{
+    (void)dgl_clip_user_begin();
+    memcpy(eq, clip_eq, sizeof clip_eq);
+    return clip_on;
+}
+
 static float udist(const dgl_cvtx *v, int i)
 {
     return clip_eq[i][0] * v->x + clip_eq[i][1] * v->y + clip_eq[i][2] * v->z + clip_eq[i][3] * v->w;
