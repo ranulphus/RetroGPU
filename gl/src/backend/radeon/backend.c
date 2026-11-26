@@ -1738,7 +1738,17 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
     s = radeon_cp_wptr();
     radeon_tcl_draw_indexed_s(prim, vfmt, addr, dwords, stride, ix, ni);
     tnl_note(mode, count, nv, ni, pairs, stride, vfmt, prim, addr, s);
-    radeon_cp_flush();
+    {   /* (experiment, DGL_TNL_LAZY=1: the ring's pointer to the chip only once 1,024 dwords are waiting) */
+        static int lazy = -1;
+        if (lazy < 0) {
+            const char *e = getenv("DGL_TNL_LAZY");
+            lazy = e && *e == '1';
+        }
+        if (lazy)
+            radeon_cp_flush_some(1024u);
+        else
+            radeon_cp_flush();
+    }
     tris += (uint32_t)(prim == RADEON_PRIM_TRI_LIST ? ni / 3 : ni - 2);
     tnl_tris += (uint32_t)(prim == RADEON_PRIM_TRI_LIST ? ni / 3 : ni - 2);
     dgl_prims.tris_in += prim == RADEON_PRIM_TRI_LIST ? (unsigned long)ni / 3 : (unsigned long)ni - 2;

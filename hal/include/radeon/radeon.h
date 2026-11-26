@@ -235,6 +235,7 @@ extern uint32_t radeon_cp_varea_gart, radeon_cp_varea_bytes;
 uint32_t radeon_cp_fence(void);
 int  radeon_cp_fence_wait(uint32_t f, uint32_t timeout_us);
 void radeon_cp_peek(uint32_t *rp, uint32_t *wp, const volatile uint32_t **base, uint32_t *dwords);
+void radeon_cp_flush_some(uint32_t n); /* (the ring's dwords to the chip once n or more are waiting) */
 uint32_t radeon_cp_wptr(void);          /* (diagnostics: the CPU's write index, no register read) */
 void radeon_out(uint32_t reg, uint32_t v);      /* a drawing-engine register, either way */
 /* (engine2d.c) Bytes into video memory through the command stream, ordered with the drawing around them: texture

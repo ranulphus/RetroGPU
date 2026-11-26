@@ -220,6 +220,14 @@ void radeon_cp_peek(uint32_t *rp, uint32_t *wp, const volatile uint32_t **base, 
 
 uint32_t radeon_cp_wptr(void) { return wptr; }
 
+/* The ring's new dwords to the chip only once at least n are waiting (the CPU's path leaves it to the ring's own
+ * refills, its waits and the swap; one uncached write a draw cost the engine's path in GLQuake) */
+void radeon_cp_flush_some(uint32_t n)
+{
+    if (running && ((wptr - wptr_given) & ring_mask) >= n)
+        radeon_cp_flush();
+}
+
 /* The ring's new dwords to the chip (the ring is ordinary memory: x86 keeps these stores before the uncached write
  * of the index; the read after it posts the write, as the DRM's COMMIT_RING). */
 MGA_HOT void radeon_cp_flush(void)
