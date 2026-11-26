@@ -120,6 +120,7 @@ static void draw_script(void)
 int main(int argc, char **argv)
 {
     const char *want = getenv("DGL_DEVICE");
+    int has_cursor;
     rg_mode modes[32];
     rg_open o;
     rg_opened op;
@@ -180,7 +181,14 @@ int main(int argc, char **argv)
     /* The cursor, where the device has one: an arrow at 100,100 (its image
      * in the memory left after the buffers, 1 KB aligned). */
     why[0] = 0;
-    if (d->cursor_load) {
+    {
+        rg_caps cc;
+        d->caps(&cc);
+        has_cursor = cc.cursor != 0;
+    }
+    if (d->cursor_load && !has_cursor)
+        hx_log("HX-STAT no cursor on this device (its caps): the cursor test skipped");
+    if (d->cursor_load && has_cursor) {
         static uint8_t and_mask[512], xor_mask[512];
         uint32_t at = (op.mem_start + 1023u) & ~1023u;
         int y, ok;

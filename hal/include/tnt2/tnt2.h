@@ -14,7 +14,9 @@ typedef struct {
     uint32_t boot0;             /* PMC_BOOT_0 */
     uint32_t fb_size;           /* bytes of video memory (from PFB_BOOT_0) */
     uint32_t fb_usable;         /* below the 128 KB the layer keeps at the top: the command ring (32 KB), then the
-                                   images' scratch (64 KB) */
+                                   images' scratch (64 KB); on the NV1x, below the instance memory too (PRAMIN lies
+                                   reversed over the top 512 KB there, NPRAMIN on bench E: docs/nv10.md) */
+    int      arch;              /* 4: the NV4 family (TNT, TNT2); 10: the NV1x (the NV11: GeForce2 MX, Quadro2 MXR) */
     const char *name;
 } tnt2_chip;
 
@@ -66,7 +68,8 @@ void tnt2_cursor_show(int on);
 void tnt2_cursor_move(int x, int y);
 int  tnt2_set_start(uint32_t byte_off);
 int  tnt2_vsync_wait(uint32_t timeout_us);
-void tnt2_set_pitch(int pitch_bytes);   /* the display's row length (CR13/CR19), when the BIOS's 4F06 won't */
+int  tnt2_set_pitch(int pitch_bytes);   /* the display's row length (CR13/CR19), when the BIOS's 4F06 won't; -1 on
+                                           * the NV1x, whose CRTC isn't written (CR1F/CR44 lock NV11s up) */
 void tnt2_set_ramp(const uint8_t ramp[256]);    /* the palette as a gamma ramp in direct colour (PRAMDAC 0x600) */
 void tnt2_ramp_off(void);                       /* ... and the RAMDAC as it was before (before text mode) */
 

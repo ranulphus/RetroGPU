@@ -30,7 +30,9 @@ static int trap_ok(const char *name)
     uint32_t a, d, i = tnt2_3d_trap(&a, &d);
     if (i)
         hx_test(name, 0, "PGRAPH_INTR %08lx: trapped method %08lx (subchannel %lu, method %03lx), data %08lx",
-                (unsigned long)i, (unsigned long)a, (unsigned long)((a >> 13) & 7), (unsigned long)(a & 0x1FFC),
+                (unsigned long)i, (unsigned long)a,
+                (unsigned long)(tnt2.arch == 10 ? (a >> 16) & 7 : (a >> 13) & 7),    /* (NV10: subchannel 18-16) */
+                (unsigned long)(a & 0x1FFC),
                 (unsigned long)d);
     return i == 0;
 }

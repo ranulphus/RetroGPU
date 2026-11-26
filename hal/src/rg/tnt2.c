@@ -71,7 +71,7 @@ static void caps(rg_caps *c)
     memset(c, 0, sizeof *c);
     c->vram_bytes = info.vram_bytes;
     c->max_color_bits = 32;
-    c->cursor = 1;
+    c->cursor = tnt2.arch != 10;       /* (the NV1x's cursor: not yet, docs/nv10.md) */
 }
 
 /* Whether double buffering and a depth buffer fit, with room for textures. */
@@ -233,8 +233,12 @@ static int open_screen(const rg_open *o, rg_opened *out)
     if (o->pitch_px > 0 && pitch_px != o->pitch_px) {
         /* (the BIOS kept its own: the CRTC's offset set directly; the surfaces below take the same pitch) */
         RG_INFO("DGL-TNT2 pitch %d px: the BIOS gave %d, the CRTC's offset set", o->pitch_px, pitch_px);
+        if (tnt2_set_pitch(o->pitch_px * bytes_of(bpp)) != 0) {
+            rg_set_error("the BIOS gave a pitch of %d px, not %d, and the %s's CRTC isn't written (docs/nv10.md)",
+                         pitch_px, o->pitch_px, tnt2.name);
+            return -1;
+        }
         pitch_px = o->pitch_px;
-        tnt2_set_pitch(pitch_px * bytes_of(bpp));
     }
     st.pitch_bytes = pitch_px * bytes_of(bpp);
     if (tnt2_accel_init() != 0) {
