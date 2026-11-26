@@ -553,7 +553,10 @@ def run(a):
             cmd = ["gdb", "-q", "-batch", "-ex", "handle SIGUSR1 SIGUSR2 SIGPIPE nostop noprint",
                    "-ex", "run", "-ex", "thread apply all bt 12", "--args"] + cmd
         nvr_cache = os.path.join(CACHE, "loopa", prof["nvr"])
-        if os.path.isdir(nvr_cache):
+        if a.nvr:                               # (the job's own CMOS: never the cache's, never kept as it)
+            os.makedirs(os.path.join(vm, "nvr"), exist_ok=True)
+            shutil.copyfile(a.nvr, os.path.join(vm, "nvr", os.path.basename(a.nvr)))
+        elif os.path.isdir(nvr_cache):
             shutil.copytree(nvr_cache, os.path.join(vm, "nvr"), dirs_exist_ok=True)
         errf = open(os.path.join(out, "stderr.log"), "wb")
         vm_slot()                               # (LOOPA_MAX_VMS: wait for room before the clocks start)
@@ -770,7 +773,7 @@ def run(a):
                     continue
                 png.write_png(os.path.join(out, fn[:-4].lower() + ".png"), w, h, rgb)
         vm_nvr = os.path.join(vm, "nvr")
-        if status == "PASS" and not a.hdd and not os.path.isdir(nvr_cache) and os.path.isdir(vm_nvr):
+        if status == "PASS" and not a.hdd and not a.nvr and not os.path.isdir(nvr_cache) and os.path.isdir(vm_nvr):
             shutil.copytree(vm_nvr, nvr_cache)
         result["f1_taps"] = f1_taps
         shots = os.path.join(vm, "screenshots")
@@ -814,6 +817,9 @@ def main():
     ap.add_argument("--pre", action="append", default=[], help="extra RUN.BAT lines before the test")
     ap.add_argument("--cdrom", metavar="IMG", help="an ATAPI CD-ROM drive on IDE 1:1 with this image in it (ISO 9660, "
                     "or a CUE sheet): GLOS's own CD-ROM driver and MSCDEX (docs/v1/native-dos.md, N4)")
+    ap.add_argument("--nvr", metavar="FILE", help="the machine's CMOS from FILE instead of the cache's, named as "
+                    "86Box names the machine's (bf6.nvr, hot433a_v451pg.nvr): a BIOS set up otherwise, such as "
+                    "a CD-ROM first in the boot order (GLOS's boot CD); the run's own CMOS is never kept for the cache")
     ap.add_argument("--keys", default="", help="comma list of SECONDS:SCANCODE[:down|up] after HX-BOOT, "
                     "or SECONDS:mouse:DX:DY[:BUTTONS] (mickeys; buttons bit 0 left, 1 right, 2 middle; needs --mouse), "
                     "or SECONDS:joy:axis|button:N:VALUE (see --joystick); "
