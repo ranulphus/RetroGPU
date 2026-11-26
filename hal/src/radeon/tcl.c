@@ -97,10 +97,13 @@ void radeon_tcl_emit(void)
     const uint32_t *now = (const uint32_t *)&radeon_tcl, *was = (const uint32_t *)&sent;
     int k, n = (int)(sizeof radeon_tcl / 4);
     if (radeon_3d_dirty)
-        radeon_3d_emit();
+        radeon_3d_emit();               /* (it settles first, 6) */
     for (k = 0; k < n; k++)                     /* (SE_TCL_OUTPUT_VTX_FMT on: the registers are consecutive) */
-        if (!known || now[k] != was[k])
+        if (!known || now[k] != was[k]) {
+            if (radeon_tcl_sync == 6)
+                radeon_tcl_settle();
             radeon_cp_reg(SE_TCL_OUTPUT_VTX_FMT + 4u * (uint32_t)k, now[k]);
+        }
     sent = radeon_tcl;
     known = 1;
 }
@@ -108,6 +111,8 @@ void radeon_tcl_emit(void)
 void radeon_tcl_viewport(const float v[6])
 {
     int i;
+    if (radeon_tcl_sync == 6)
+        radeon_tcl_settle();
     for (i = 0; i < 6; i++)
         radeon_cp_reg(SE_VPORT_XSCALE + 4u * (uint32_t)i, fbits(v[i]));
 }
@@ -207,7 +212,17 @@ int radeon_tcl_old_packets = 1;
  * (radeon_emit_packet3_cliprect). 0 none, 1 3D idle and clean before every draw packet, 2 before each draw, 3 between
  * pieces idle and clean, 4 between pieces idle. */
 int radeon_tcl_sync = 5;
-int radeon_tcl_piece = RADEON_TCL_PIECE;    /* (a multiple of 6; DOS-GL's DGL_TNL_PIECE, for tests) */
+int radeon_tcl_piece = RADEON_TCL_PIECE;
+int radeon_tcl_pending;                      /* (6: an engine draw sent, no wait since) */
+
+/* (6) Before state other than a matrix changes after an engine draw: the 3D engine waited for, once. */
+void radeon_tcl_settle(void)
+{
+    if (radeon_tcl_pending) {
+        radeon_tcl_pending = 0;
+        radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLE);
+    }
+}    /* (a multiple of 6; DOS-GL's DGL_TNL_PIECE, for tests) */
 
 /* (lists, of triangles, lines or points, in pieces of RADEON_TCL_PIECE indices: a multiple of 6, so a piece ends at
  * a primitive's end; a strip or fan must come in one piece) */
@@ -234,7 +249,7 @@ void radeon_tcl_draw_indexed_s(uint32_t prim, uint32_t vfmt, uint32_t addr, int 
             int k = n > radeon_tcl_piece ? radeon_tcl_piece : n, words = (k + 1) / 2;
             if (radeon_tcl_sync == 1 || (radeon_tcl_sync == 2 && first) || (radeon_tcl_sync == 3 && !first))
                 radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLECLEAN);
-            else if (radeon_tcl_sync == 4 && !first)
+            else if ((radeon_tcl_sync == 4 || radeon_tcl_sync == 6) && !first)
                 radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLE);
             first = 0;
             d = radeon_cp_reserve(5 + words);
@@ -252,6 +267,7 @@ void radeon_tcl_draw_indexed_s(uint32_t prim, uint32_t vfmt, uint32_t addr, int 
                 radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLE);
             idx += k, n -= k;
         }
+        radeon_tcl_pending = radeon_tcl_sync == 6;
         return;
     }
     if (radeon_tcl_sync == 1 || radeon_tcl_sync == 2)
@@ -268,7 +284,7 @@ void radeon_tcl_draw_indexed_s(uint32_t prim, uint32_t vfmt, uint32_t addr, int 
         int k = n > radeon_tcl_piece ? radeon_tcl_piece : n, words = (k + 1) / 2;
         if ((radeon_tcl_sync == 1 || radeon_tcl_sync == 3) && !first)
             radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLECLEAN);
-        else if (radeon_tcl_sync == 4 && !first)
+        else if ((radeon_tcl_sync == 4 || radeon_tcl_sync == 6) && !first)
             radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLE);
         first = 0;
         d = radeon_cp_reserve(3 + words);
@@ -284,4 +300,5 @@ void radeon_tcl_draw_indexed_s(uint32_t prim, uint32_t vfmt, uint32_t addr, int 
             radeon_cp_reg(RADEON_WAIT_UNTIL, RADEON_WAIT_3D_IDLE);
         idx += k, n -= k;
     }
+    radeon_tcl_pending = radeon_tcl_sync == 6;
 }

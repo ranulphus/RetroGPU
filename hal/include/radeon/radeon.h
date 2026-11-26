@@ -198,7 +198,9 @@ void radeon_tcl_draw_indexed(uint32_t prim, uint32_t vfmt, uint32_t addr, int dw
 void radeon_tcl_draw_indexed_s(uint32_t prim, uint32_t vfmt, uint32_t addr, int dwords, int stride, const uint16_t *idx,
                                int n);         /* (vertices stride dwords apart: LOAD_VBPNTR's stride field) */
 extern int radeon_tcl_sync;            /* 5 (default): the 3D engine idle after every draw packet; 0 none */
-extern int radeon_tcl_piece;           /* the indices a list's packet takes (RADEON_TCL_PIECE; tests only) */
+extern int radeon_tcl_piece;
+extern int radeon_tcl_pending;          /* (sync 6: an engine draw sent, no wait since) */
+void radeon_tcl_settle(void);           /* (sync 6: the 3D engine waited for if an engine draw is pending) */           /* the indices a list's packet takes (RADEON_TCL_PIECE; tests only) */
 extern int radeon_tcl_old_packets;      /* 1 (default): 3D_RNDR_GEN_INDX_PRIM, Mesa 7's; 0: LOAD_VBPNTR + DRAW_INDX */
 
 /* chip.c: a surface over the depth buffer at off (1 KB aligned), bytes long (a multiple of 1 KB), pitch_bytes a row,

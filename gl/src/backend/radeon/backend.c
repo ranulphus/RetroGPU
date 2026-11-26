@@ -1804,7 +1804,7 @@ static void install(void)
         /* (the 3D engine idle after every draw packet, by default (5); DGL_TNL_SYNC=0 none, 1-4 narrower waits for
          * tests: see radeon_tcl_sync) */
         e = getenv("DGL_TNL_SYNC");
-        radeon_tcl_sync = e && *e >= '0' && *e <= '5' ? *e - '0' : 5;
+        radeon_tcl_sync = e && *e >= '0' && *e <= '6' ? *e - '0' : 5;
         e = getenv("DGL_TNL_PIECE");    /* (tests: the indices a list's packet takes, a multiple of 6 up to 300) */
         radeon_tcl_piece = e && atoi(e) >= 6 && atoi(e) <= RADEON_TCL_PIECE ? atoi(e) / 6 * 6 : RADEON_TCL_PIECE;
     }

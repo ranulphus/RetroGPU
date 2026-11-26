@@ -109,6 +109,8 @@ MGA_HOT void radeon_3d_emit(void)
 #undef CUBE_OFF
     const radeon_ctx3d *c = &radeon_3d;
     int i, k;
+    if (radeon_tcl_pending)             /* (6: state after an engine draw meets an idle engine: tcl.c) */
+        radeon_tcl_settle();
     if (!mode3d) {
         /* (after 2D drawing: the queue held until the 2D engine is idle and its cache clean, RADEON_SWITCH_TO_3D) */
         out(RADEON_WAIT_UNTIL, RADEON_WAIT_2D_IDLECLEAN | RADEON_WAIT_3D_IDLECLEAN | RADEON_WAIT_HOST_IDLECLEAN);
