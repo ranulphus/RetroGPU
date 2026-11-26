@@ -1528,17 +1528,6 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
     nv = vmax - vmin + 1;
     if (nv > 65536)
         return 0;
-    {   /* (DGL_TNL_MINV=n: a draw of fewer than n vertices through the CPU's path: the engine's cost a draw (its
-         * state, the packet, the wait after it) outweighs what it saves on a few vertices; GLQuake's small batches
-         * ran 12% slower on the engine than on the P3's CPU) */
-        static int minv = -1;
-        if (minv < 0) {
-            const char *e = getenv("DGL_TNL_MINV");
-            minv = e && *e ? atoi(e) : 0;
-        }
-        if (nv < minv)
-            return 0;
-    }
     map = NULL;
     if (idx && nv > count) {            /* (fewer indices than vertices in the range: write only those named) */
         int nu = 0;
@@ -1553,6 +1542,17 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
         }
         map = tnl_remap;
         nv = nu;
+    }
+    {   /* (a draw of fewer than DGL_TNL_MINV vertices, 8 by default, through the CPU's path: the engine's cost a draw
+         * (its state, the packet) outweighs what it saves on a few: PrBoom-plus's wall and floor quads ran 5.8%
+         * slower on the 7500's engine than on the P3's CPU, level with this; 0: every draw to the engine) */
+        static int minv = -1;
+        if (minv < 0) {
+            const char *e = getenv("DGL_TNL_MINV");
+            minv = e && *e ? atoi(e) : 8;
+        }
+        if (nv < minv)
+            return 0;
     }
     /* The indices, as the chip's primitive (provoking vertex last, a polygon's first: SE_CNTL below). */
 #define IX(k) (map ? map[idx[k] - vmin] : (uint16_t)((idx ? idx[k] : first + (k)) - vmin))
