@@ -326,8 +326,12 @@ static int open_screen(const rg_open *o, rg_opened *out)
         const char *e = getenv("DGL_TEST_NOCHECK");     /* (tests only: 1 skips it, so GLOS's own guard is what's tried) */
         check = !(e && *e == '1');
 #endif
+        uint32_t st0 = check ? radeon_rd(RADEON_RBBM_STATUS) : 0;
         while (check && !radeon_idle() && sys_time_us() - t0 < 500000u)
             ;
+        if (check && sys_time_us() - t0 > 1000u)    /* (always said: a card not idle at the start is news) */
+            RG_WARN("DGL-RADEON the engine busy at the start (RBBM_STATUS %08lx), %lu us for it to be idle%s",
+                    (unsigned long)st0, (unsigned long)(sys_time_us() - t0), radeon_idle() ? "" : ": the recovery");
         if (check && !radeon_idle() && radeon_engine_recover() != 0) {
             rg_set_error("the card's engine is stuck, left so by an earlier program (RBBM_STATUS %08lx): reboot the "
                          "PC or switch it off and on", (unsigned long)radeon_recover_status);
