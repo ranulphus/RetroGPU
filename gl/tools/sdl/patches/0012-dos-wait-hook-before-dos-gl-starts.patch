@@ -1,0 +1,47 @@
+--- a/src/video/dos/SDL_dosopengl.c
++++ b/src/video/dos/SDL_dosopengl.c
+@@ -50,9 +50,18 @@
+     return false;
+ }
+ 
++#if defined(DGL_API_VERSION) && DGL_API_VERSION >= 0x0103
++static void DOSVESA_GL_WaitHook(void *arg);
++#endif
++
+ void DOSVESA_GL_AddDisplayModes(SDL_VideoDevice *device, SDL_VideoDisplay *display)
+ {
+     (void)device;
++#if defined(DGL_API_VERSION) && DGL_API_VERSION >= 0x0103
++    // The wait hook before DOS-GL's first BIOS calls: under GLOS each costs ~9 times a DOS call, and a start-up's
++    // mode list and mode set ran ~8 s with the audio thread never given a turn (GLOS's stream starved).
++    dglSetWaitHook(DOSVESA_GL_WaitHook, NULL);
++#endif
+     num_dosgl_modes = dglEnumModes(dosgl_modes, MAX_DOSGL_MODES);
+     if (num_dosgl_modes < 0) {
+         num_dosgl_modes = 0; // no DOS-GL card: OpenGL windows will fail to get a context
+@@ -247,6 +256,11 @@
+     cfg.depth_bits = device->gl_config.depth_size > 0 ? 16 : 0;
+     cfg.double_buffer = device->gl_config.double_buffer ? 1 : 0;
+     cfg.vsync = data->gl_swap_interval != 0;
++#if defined(DGL_API_VERSION) && DGL_API_VERSION >= 0x0103
++    // The wait hook before DOS-GL's first BIOS calls: under GLOS each costs ~9 times a DOS call, and a start-up's
++    // mode list and mode set ran ~8 s with the audio thread never given a turn (GLOS's stream starved).
++    dglSetWaitHook(DOSVESA_GL_WaitHook, NULL);
++#endif
+     if (dglInit(&cfg) != 0) {
+         SDL_SetError("DOS-GL: %s", dglGetErrorString());
+         return NULL;
+--- a/src/video/dos/SDL_glosvideo.c
++++ b/src/video/dos/SDL_glosvideo.c
+@@ -519,6 +519,11 @@
+         dglGlosHints(DGL_GLOS_FULL);
+     }
+ #endif
++#if defined(DGL_API_VERSION) && DGL_API_VERSION >= 0x0103
++    // The wait hook before DOS-GL's first BIOS calls: under GLOS each costs ~9 times a DOS call, and a start-up's
++    // mode list and mode set ran ~8 s with the audio thread never given a turn (GLOS's stream starved).
++    dglSetWaitHook(GLOS_GL_WaitHook, NULL);
++#endif
+     if (dglInit(&cfg) != 0) {
+         SDL_SetError("DOS-GL: %s", dglGetErrorString());
+         return NULL;

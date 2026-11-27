@@ -77,7 +77,10 @@ typedef struct {
     uint32_t lfb_phys;
     uint8_t  red_size, red_pos, green_size, green_pos, blue_size, blue_pos;
 } mga_vbe_mode;
-int  vbe_find_mode(int w, int h, int bpp, mga_vbe_mode *out);
+int  vbe_find_mode(int w, int h, int bpp, mga_vbe_mode *out);   /* (each mode's 4F01 asked once a program) */
+/* Run after each BIOS call vbe.c makes (NULL: none): DOS-GL's yield, so a program's other work (SDL's audio thread,
+ * which feeds GLOS's stream) goes on through a start-up's BIOS calls (gl/src/dgl/context.c, dglSetWaitHook). */
+extern void (*vbe_wait_hook)(void);
 int  vbe_enumerate(void (*cb)(const mga_vbe_mode *m, void *ctx), void *ctx);
 int  vbe_set_mode(const mga_vbe_mode *m, int pitch_px, int *actual_pitch_px);
 int  vbe_set_display_start(uint32_t byte_offset, int pitch_bytes, int bpp);

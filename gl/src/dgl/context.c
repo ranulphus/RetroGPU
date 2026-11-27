@@ -9,6 +9,7 @@
 #include "../gl/gl_tex.h"
 #include "../gl/gl_draw.h"
 #include "mga/sys.h"
+#include "mga/hal.h"                    /* (vbe_wait_hook: dglSetWaitHook) */
 #include "../backend/backend.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -480,10 +481,14 @@ static void prof_report(uint32_t tris)
 void dglSetPresentLag(int on) { present_lag = on != 0; }
 void dglGlosHints(unsigned int flags) { glos_hints = flags & (DGL_GLOS_HIDDEN | DGL_GLOS_BARE | DGL_GLOS_FULL); }
 
+static void vbe_yield(void) { dgl_yield_maybe(0); }
+
+/* (May be set before dglInit: its start-up's BIOS calls then yield too, vbe.c.) */
 void dglSetWaitHook(void (*fn)(void *arg), void *arg)
 {
     wait_hook = fn;
     wait_hook_arg = arg;
+    vbe_wait_hook = fn ? vbe_yield : NULL;
 }
 
 static void run_wait_hook(void)
