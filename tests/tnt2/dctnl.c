@@ -277,6 +277,42 @@ int main(int argc, char **argv)
         run_case("near", near_, col, 0);
         run_case("fog", tri, col, 1);
     }
+    {
+        /* Culling on the chip: GL_BACK culled, GL_CCW front (GL's window orientation, y up). A triangle counter-
+         * clockwise as GL sees it must be drawn, the same reversed must not; then FRONT_FACE CW, the other way. */
+        static const float ccw[3][3] = { { -2, -1.5f, 0 }, { 2, -1.5f, 0 }, { 0, 2, 0 } };
+        static const float cw[3][3] = { { -2, -1.5f, 0 }, { 0, 2, 0 }, { 2, -1.5f, 0 } };
+        static const char *const names[4] = { "cull-ccw-front", "cull-cw-back", "cull-front-cw: ccw", "cull-front-cw: cw" };
+        float vpm[16];
+        int k;
+        for (k = 0; k < 4; k++) {
+            const float (*o)[3] = (k & 1) ? cw : ccw;
+            cvert v[3];
+            int i, drawn = 0, want = k == 0 || k == 3;
+            clear();
+            setup_common();
+            mul(vpm, VPS, MVP);
+            send_matrix(0x500, vpm);
+            fog_on(0, 0);
+            formats(0);
+            m1(0x308, 1);                               /* CULL_FACE_ENABLE */
+            m1(0x39C, 0x405);                           /* CULL_FACE: GL_BACK */
+            m1(0x3A0, k < 2 ? 0x901u : 0x900u);         /* FRONT_FACE: GL_CCW, then GL_CW */
+            for (i = 0; i < 3; i++) {
+                v[i].x = o[i][0], v[i].y = o[i][1], v[i].z = o[i][2], v[i].w = 1;
+                v[i].col = 0xFF00FF00u, v[i].s = v[i].t = v[i].s1 = v[i].t1 = v[i].fog = 0;
+            }
+            draw(v, 3);
+            m1(0x308, 0);
+            if (!trap_ok(names[k]))
+                break;
+            grab(ref);
+            for (i = 0; i < W * H; i++)
+                drawn += ref[i] != 0x0841;
+            hx_test(names[k], want ? drawn > 1000 : drawn == 0, "%d pixels drawn (%s)", drawn,
+                    want ? "should be drawn" : "should be culled");
+        }
+    }
 out:
     tnt2_sync(1000000);
     vbe_set_text_mode();
