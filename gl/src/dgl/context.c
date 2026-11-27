@@ -156,8 +156,8 @@ static const dgl_backend *backend_for(const rg_device *d)
         return &dgl_mga_backend;
     if (d == dgl_soft_backend.dev || d == &rg_vbe_device)  /* (the software renderer: in memory, a GLOS window, VBE) */
         return &dgl_soft_backend;
-    if (d == dgl_tnt2_backend.dev)              /* (the Riva TNT2's: RetroGPU's docs/tnt2.md, T4) */
-        return &dgl_tnt2_backend;
+    if (d == dgl_tnt2_backend.dev)              /* (the Riva TNT2's: RetroGPU's docs/tnt2.md, T4; an NV1x's own: Celsius) */
+        return dgl_nv10_wanted() ? &dgl_nv10_backend : &dgl_tnt2_backend;
     if (d == dgl_r128_backend.dev)              /* (the ATI Rage 128's: RetroGPU's docs/rage128.md, R4) */
         return &dgl_r128_backend;
     if (d == dgl_radeon_backend.dev)            /* (the ATI Radeon's, R100 family: RetroGPU's docs/radeon.md, RD5) */

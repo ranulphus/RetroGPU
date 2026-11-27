@@ -67,7 +67,9 @@ typedef struct dgl_backend {
     void (*prof_micro)(void);       /* DGL_STATS=3 in PROF=1 builds: single operations' costs (or NULL) */
 } dgl_backend;
 
-extern const dgl_backend dgl_mga_backend, dgl_soft_backend, dgl_tnt2_backend, dgl_r128_backend, dgl_radeon_backend;
+extern const dgl_backend dgl_mga_backend, dgl_soft_backend, dgl_tnt2_backend, dgl_r128_backend, dgl_radeon_backend,
+                         dgl_nv10_backend;
+int dgl_nv10_wanted(void);           /* the TNT2 device found an NV1x: Celsius's back end (DGL_NV_CLASS=95: not) */
 extern const dgl_backend *dgl_be;   /* the one in use (the Matrox one until a context opens on another device) */
 
 #endif
