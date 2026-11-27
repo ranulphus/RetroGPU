@@ -28,7 +28,10 @@ shipped with --file gets its DOS extender, and the job passes when every
 program reports HX-DONE 0.
 
 PCs and their serial ports, SSH addresses, capture devices and reset hooks
-come from tools/bench/bench.toml and bench.local.toml. Results:
+come from tools/bench/bench.toml and bench.local.toml. A PC's `drive` (default
+C) holds TEST and OUT: where C: isn't ours (bench G, GLOS native beside the
+owner's Windows 98 on C:), drive = "D" moves them, and a job naming C:
+anywhere else is refused. Results:
 out/bench/<pc>/<job>/ (serial.log, files/ = the PC's C:\\OUT, *.png,
 capture-*.png, result.json; over ssh also stdout.txt, what the job printed).
 
@@ -133,9 +136,42 @@ def with_sersay(pc, run):
     return [("C:\\TEST\\SERSAY.COM" + l[6:]) if l.startswith("SERSAY ") else l for l in run]
 
 
+DRIVE_PATH = re.compile(r"\bC:\\(TEST|OUT)\b", re.I)
+
+
+def drive_of(pc):
+    """The PC's drive for TEST and OUT: bench.toml's `drive`, C unless C: isn't ours there (bench G: since GLOS runs
+    natively, C: is the owner's Windows 98 partition, never to be written, and ours are D:\\TEST and D:\\OUT;
+    ROSS, 2026-11-27)."""
+    d = str(pc.get("drive", "C")).upper().rstrip(":")
+    if not re.fullmatch(r"[C-Z]", d):
+        sys.exit("bench: drive = %r in bench.toml is not a drive letter" % pc.get("drive"))
+    return d
+
+
+def on_drive(pc, run):
+    """RUN.BAT's lines with C:\\TEST, C:\\OUT and the bare "C:" moved to the PC's drive (callers' --cmd lines too, so
+    their scripts run unchanged); on a PC whose drive isn't C, a line that still names C: stops the job."""
+    d = drive_of(pc)
+    if d == "C":
+        return run
+    out = []
+    for line in run:
+        line = DRIVE_PATH.sub(lambda m: "%s:\\%s" % (d, m.group(1).upper()), line)
+        if line.strip().upper() == "C:":
+            line = d + ":"
+        if re.search(r"(?i)(^|[^A-Z0-9])C:", line):
+            sys.exit("bench: this PC's drive is %s: and nothing on C: is ours; RUN.BAT would name C: in: %s" % (d, line))
+        out.append(line)
+    return out
+
+
 def build_job(a, pc, cfg, job, token, jd, upload=True):
     """Write the job directory, RUN.BAT and (for the poller, which uploads by FTP) UP.TXT; return the file
     names."""
+    if upload and drive_of(pc) != "C":
+        sys.exit("bench: the poller's jobs use C:\\HX and C:\\TEST; a PC with drive = \"%s\" runs over ssh only"
+                 % drive_of(pc))
     shutil.rmtree(jd, ignore_errors=True)
     os.makedirs(jd)
     files = []
@@ -196,7 +232,7 @@ def build_job(a, pc, cfg, job, token, jd, upload=True):
         run += ["%s %s" % (add(a.exe), a.args)]
     if not upload:                              # (over ssh the host fetches C:\OUT itself)
         run += ["SERSAY HX-EXIT", "SERSAY HX-JOB-END"]
-        open(os.path.join(jd, "RUN.BAT"), "wb").write(dos_lines(with_sersay(pc, run)))
+        open(os.path.join(jd, "RUN.BAT"), "wb").write(dos_lines(on_drive(pc, with_sersay(pc, run))))
         return files + ["RUN.BAT"]
     run += ["SERSAY HX-EXIT",
             "COPY C:\\TEST\\UP.TXT C:\\HX\\UP.TXT > NUL",
@@ -269,15 +305,16 @@ def main():
     if glos:
         jd = os.path.join(pub, "job")
         names = build_job(a, pc, cfg, job, token, jd, upload=False)
-        rc, said = glos.put([(os.path.join(jd, n), n) for n in names])
+        drive = drive_of(pc)
+        rc, said = glos.put([(os.path.join(jd, n), n) for n in names], "/%s/TEST" % drive)
         if rc != 0:
             sys.exit("bench: sftp to %s failed: %s" % (pc["ssh"], said.strip()[-200:]))
         lines = glos.follow()
         if a.direct:
             # (glos run --direct posts the job and may return at once: the job's end from its HX lines alone)
-            direct_job = glos.start("glos run --direct C:\\TEST\\RUN.BAT")
+            direct_job = glos.start("glos run --direct %s:\\TEST\\RUN.BAT" % drive)
         else:
-            runner = glos.start("C:\\TEST\\RUN.BAT")
+            runner = glos.start("%s:\\TEST\\RUN.BAT" % drive)
         print("bench: started %s on %s (%s) over ssh (%s)" % (job, a.pc, pc["card"], pc["ssh"]), flush=True)
     else:
         names = build_job(a, pc, cfg, job, token, os.path.join(pub, "job"))
@@ -376,7 +413,7 @@ def main():
         open(os.path.join(out, "stdout.txt"), "wb").write(said)
         # (after a hang the PC may have gone down at the kill: fetching from a dead host waited out sftp's whole
         # time-out, and no result was written; Echoes, 2026-11-25)
-        received = [] if stuck or (status in ("HANG", "TIMEOUT") and not glos.up()) else glos.get_dir("/C/OUT", files)
+        received = [] if stuck or (status in ("HANG", "TIMEOUT") and not glos.up()) else glos.get_dir("/%s/OUT" % drive_of(pc), files)
         upload_end = upload_end or (not stuck and time.time())
         glos.close()
     if stuck and pc.get("reset"):
