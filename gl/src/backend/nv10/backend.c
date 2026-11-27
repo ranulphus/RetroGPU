@@ -1730,11 +1730,12 @@ static int tb_tnl(GLenum mode, GLsizei count, const GLint *idx, GLint first)
     } else
         vmin = first, vmax = first + count - 1;
     nv = vmax - vmin + 1;
-    {   /* (a few vertices: the CPU's path, as on the Radeon, DGL_TNL_MINV) */
+    {   /* (a draw of fewer than DGL_TNL_MINV vertices, 256 by default, through the CPU's path: on the Quadro2 the
+         * engine's cost a draw beats its transform below that; Echoes' scenes, docs/nv10.md Q5) */
         static int minv = -1;
         if (minv < 0) {
             const char *e = getenv("DGL_TNL_MINV");
-            minv = e && *e ? atoi(e) : 8;
+            minv = e && *e ? atoi(e) : 256;
         }
         if (nv < minv) {
             tnl_small_n++;
