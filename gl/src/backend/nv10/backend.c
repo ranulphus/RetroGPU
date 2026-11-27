@@ -238,9 +238,12 @@ static uint32_t chip_format(const dgl_level *l, int *cpp, int *family)
     return TF_A8R8G8B8;
 }
 
+static void flush(void);
+
 static void tex_drop(dgl_texture *t)
 {
     ctex *x = (ctex *)t->be;
+    flush();                                    /* (batched triangles may read it) */
     if (x == cur_t0) cur_t0 = NULL;
     if (x == cur_t1) cur_t1 = NULL;
     if (x) {
@@ -256,6 +259,7 @@ static void tex_drop(dgl_texture *t)
 
 static int room(uint32_t size, uint32_t *block, const dgl_texture *keep)
 {
+    flush();                                    /* (batched triangles may read what is freed below) */
     while (dgl_vram_alloc(size, block) != 0) {
         dgl_texture *old = NULL, *u;
         int i, n = dgl_texture_count();
@@ -427,7 +431,9 @@ static void flush(void)
         return;
     if (!va_formats)
         va_formats_send();
-    (void)tnt2_fb[va_off];                      /* (the CPU's writes out before the chip reads them) */
+    /* (before every draw: the chip's vertex fetch keeps video memory's lines, and a draw's first vertices often share
+     * a line with the last draw's end, fetched before the CPU wrote them: conformance t16/t18 drew triangles from
+     * stale vertices without it. DCPERF: a thousand of them cost 45 us) */
     m1(M_VTXBUF_VALIDATE, 0);
     m1(M_BEGIN_END, 5);                         /* GL_TRIANGLES + 1 */
     while (n) {
@@ -438,7 +444,14 @@ static void flush(void)
     m1(M_BEGIN_END, 0);
     va_first = va_n;
     va_mark[(va_n ? va_n - 1u : 0u) * VSIZE / VA_PART] = tnt2_mark();
-    tnt2_kick();
+    {
+        /* (the textures these triangles read: a rectangle written into one waits for the chip to pass here) */
+        uint32_t m = tnt2_mark();
+        if (cur_t0) cur_t0->mark = m;
+        if (cur_t1) cur_t1->mark = m;
+    }
+    tnt2_kick_soon();                           /* (every wait kicks first; the CPU's vertex writes reach video memory
+                                                   before the chip reads them: a kick reads video memory first) */
 }
 
 /* Room for k more vertices: past the area's end, back to its start; into a quarter, once the chip is done with it. */
@@ -463,6 +476,8 @@ static int va_room(uint32_t k)
 
 static int fogging;
 static int valid_ok;
+static int target_ok;                           /* the render target sent (a change costs six no-ops and the chip's
+                                                   pipeline: only when GL's target changes, not when state does) */
 static const dgl_texture *valid_tex, *valid_tex1;
 static int shift_s[2], shift_t[2];
 static int nothing;                             /* the scissor leaves no pixels */
@@ -805,8 +820,10 @@ static void validate(void)
         !(dgl_gl.dirty & (DGL_DIRTY_RASTER | DGL_DIRTY_TARGET | DGL_DIRTY_TEXTURE | DGL_DIRTY_FOG | DGL_DIRTY_CLIP)))
         return;
     flush();
-    if (!valid_ok || (dgl_gl.dirty & DGL_DIRTY_TARGET))
+    if (!target_ok || (dgl_gl.dirty & DGL_DIRTY_TARGET)) {
         target_state();
+        target_ok = 1;
+    }
     scissor(1, c);
     nothing = c[2] <= c[0] || c[3] <= c[1];
     if (!nothing) {
@@ -894,13 +911,11 @@ static int tb_begin(void)
     return !nothing;
 }
 
+/* A draw's end: its triangles to the chip. (Kept until the next state change instead, GLQuake was no faster on
+ * bench E: its draws change a texture almost every time. DCPERF: a thousand draws cost what one does.) */
 static void tb_end(void)
 {
-    uint32_t m;
     flush();
-    m = tnt2_mark();
-    if (cur_t0) cur_t0->mark = m;
-    if (cur_t1) cur_t1->mark = m;
 }
 
 /* A vertex's two outcodes (bit set: outside that plane): the view volume's (returned: wholly outside one means
@@ -1127,7 +1142,7 @@ static int tb_fast(GLenum mode, GLsizei count, const GLint *idx, GLint first)
 
 static void install(void)
 {
-    valid_ok = 0;
+    valid_ok = target_ok = 0;
     memset(sh_ok, 0, sizeof sh_ok);
     va_formats = 0;
     col_set = 0;
@@ -1236,7 +1251,7 @@ static void tex_reset(uint32_t start, uint32_t end)
 {
     int i, n = dgl_texture_count();
     dgl_texture *t;
-    valid_ok = 0;
+    valid_ok = target_ok = 0;
     for (i = 0; i < n; i++)
         if ((t = dgl_texture_nth(i)) && t->be) {
             free(t->be);

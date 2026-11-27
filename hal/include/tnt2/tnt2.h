@@ -34,6 +34,7 @@ int  tnt2_accel_init(void);
 int  tnt2_sync(uint32_t timeout_us);    /* every command done: 0, or -1 on time-out */
 int  tnt2_idle(void);                   /* 1: every command written so far is done (no wait) */
 void tnt2_kick(void);                   /* the ring's written commands to the chip now */
+void tnt2_kick_soon(void);              /* ... once 4 KB of them wait (every wait kicks first) */
 void tnt2_ring_dump(int before, int after, void (*out)(const char *line));  /* (diagnostic: round the chip's GET) */
 void tnt2_set_diag(void (*out)(const char *line));   /* where a trap's first report goes (NULL: nowhere) */
 unsigned tnt2_traps(void);                  /* traps acknowledged since the layer started */

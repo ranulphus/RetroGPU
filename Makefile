@@ -144,6 +144,12 @@ DJ_SRC_DCEL1 := tests/tnt2/dcel1.c build/djgpp/libtnt2.a
 DJ_SRC_DCFOG := tests/tnt2/dcfog.c build/djgpp/libtnt2.a
 # DCGUARD (the NV1x's Q4: how far off the screen Celsius draws a vertex right: its guard band).
 DJ_SRC_DCGUARD := tests/tnt2/dcguard.c build/djgpp/libtnt2.a
+# DCPERF (the NV1x's Q4: what Celsius's draws, state changes and fill cost).
+DJ_SRC_DCPERF := tests/tnt2/dcperf.c build/djgpp/libtnt2.a
+# DCFILL (the NV1x's Q4: what Celsius's pixels cost, state by state).
+DJ_SRC_DCFILL := tests/tnt2/dcfill.c build/djgpp/libtnt2.a
+# DCTEXC (the NV1x's Q4: Celsius's texture cache against texels the CPU rewrites).
+DJ_SRC_DCTEXC := tests/tnt2/dctexc.c build/djgpp/libtnt2.a
 # NTWOD (T1: the first 2D, fills and copies, against sw2d.c).
 DJ_SRC_NTWOD := tests/tnt2/ntwod.c tests/hal/sw2d.c build/djgpp/libtnt2.a
 # NTRI0 (T2's bring-up: the 3D objects and one Gouraud triangle).
@@ -217,6 +223,9 @@ build/djgpp/DCEL0.EXE: tests/tnt2/dcel0.c build/djgpp/libtnt2.a
 build/djgpp/DCEL1.EXE: tests/tnt2/dcel1.c build/djgpp/libtnt2.a
 build/djgpp/DCFOG.EXE: tests/tnt2/dcfog.c build/djgpp/libtnt2.a
 build/djgpp/DCGUARD.EXE: tests/tnt2/dcguard.c build/djgpp/libtnt2.a
+build/djgpp/DCPERF.EXE: tests/tnt2/dcperf.c build/djgpp/libtnt2.a
+build/djgpp/DCFILL.EXE: tests/tnt2/dcfill.c build/djgpp/libtnt2.a
+build/djgpp/DCTEXC.EXE: tests/tnt2/dctexc.c build/djgpp/libtnt2.a
 build/djgpp/NTWOD.EXE: tests/tnt2/ntwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libtnt2.a
 build/djgpp/NTWOD.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/NTRI0.EXE: tests/tnt2/ntri0.c build/djgpp/libtnt2.a

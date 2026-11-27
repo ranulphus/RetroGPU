@@ -275,6 +275,8 @@ int tnt2_mark_wait(uint32_t mark, uint32_t timeout_us)
     return 0;
 }
 
+void tnt2_kick_soon(void) { kick_soon(); }
+
 void tnt2_kick(void)
 {
     if (ring_cur != ring_put) {
@@ -1578,7 +1580,11 @@ int tnt2_accel_init(void)
         PGRAPH[0x0710 / 4] &= 0x0007FF00;
         PGRAPH[0x0710 / 4] |= 0x00020100;
         PGRAPH[0x0084 / 4] = 0x00118700;
-        PGRAPH[0x0088 / 4] = 0x24E00810;
+        /* DEBUG_2 as nouveau's nv10_gr_init (MIT) sets it, not xf86-video-nv's 0x24E00810: with that, the NV11 filled
+         * at a third of its rate untextured and a fifth to a ninth with depth or blending (DCFILL on bench E: flat
+         * 120 -> 346 Mpixels/s, the depth test LESS 19 -> 169, blending 28 -> 184; GLQuake fill-bound). nouveau's
+         * DEBUG_3 (0xF5DE0830) is not taken: it traps the layer's 2D rectangle object. */
+        PGRAPH[0x0088 / 4] = 0x25F92AD9;
         PGRAPH[0x008C / 4] = 0x55DE0030;
         for (i = 0; i < 32; i++)
             PGRAPH[0x0B00 / 4 + i] = PFB[0x0240 / 4 + i];
