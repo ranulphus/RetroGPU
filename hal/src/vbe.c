@@ -8,6 +8,21 @@
 static uint8_t *vbe_buf;
 static uint16_t vbe_seg;
 static int vbe_ver;
+void (*vbe_wait_hook)(void);            /* (after each of the BIOS's calls here: DOS-GL's yield, see hal.h) */
+
+/* Each mode's information (4F01) kept once the BIOS has given it: its first 0x2C bytes, all the parsers below read.
+ * Under GLOS a BIOS call runs in V86 at ~9 times a plain DOS call's cost, and DOS-GL asked for every mode's several
+ * times at its start (the device's modes, dglEnumModes, the mode it opens): ~8 s on 86Box's G450 and G200, SDL's
+ * GLOS audio stream starved all that while (GLOS's gate 69, PrBoom-plus). */
+#define VBE_KEEP 0x2C
+static struct { uint16_t mode; uint8_t ok; uint8_t b[VBE_KEEP]; } vinfo[128];
+static int vinfo_n;
+
+static void vbe_waited(void)
+{
+    if (vbe_wait_hook)
+        vbe_wait_hook();
+}
 
 static int vbe_call(sys_rmregs *r)
 {
@@ -33,7 +48,33 @@ static int vbe_init(void)
     if (vbe_call(&r) < 0 || memcmp(vbe_buf, "VESA", 4) != 0)
         return -1;
     vbe_ver = vbe_buf[4] | (vbe_buf[5] << 8);
+    vbe_waited();
     return 0;
+}
+
+/* The mode's information block, asked for once (NULL: the BIOS refused it). */
+static const uint8_t *mode_block(uint16_t mode)
+{
+    sys_rmregs r;
+    int i, ok;
+    for (i = 0; i < vinfo_n; i++)
+        if (vinfo[i].mode == mode)
+            return vinfo[i].ok ? vinfo[i].b : NULL;
+    memset(vbe_buf + 512, 0, 256);
+    memset(&r, 0, sizeof r);
+    r.eax = 0x4F01;
+    r.ecx = mode;
+    r.es = vbe_seg;
+    r.edi = 512;
+    ok = vbe_call(&r) == 0;
+    if (vinfo_n == (int)(sizeof vinfo / sizeof vinfo[0]))
+        return ok ? vbe_buf + 512 : NULL;       /* (more modes than kept: the block as it is, not kept) */
+    vinfo[vinfo_n].mode = mode;
+    vinfo[vinfo_n].ok = (uint8_t)ok;
+    memcpy(vinfo[vinfo_n].b, vbe_buf + 512, VBE_KEEP);
+    vinfo_n++;
+    vbe_waited();
+    return ok ? vinfo[vinfo_n - 1].b : NULL;
 }
 
 int vbe_version(void) { return vbe_init() == 0 ? vbe_ver : 0; }
@@ -49,15 +90,8 @@ uint32_t vbe_total_memory(void)
 
 static int mode_info(uint16_t mode, mga_vbe_mode *m)
 {
-    sys_rmregs r;
-    uint8_t *b = vbe_buf + 512;
-    memset(b, 0, 256);
-    memset(&r, 0, sizeof r);
-    r.eax = 0x4F01;
-    r.ecx = mode;
-    r.es = vbe_seg;
-    r.edi = 512;
-    if (vbe_call(&r) < 0)
+    const uint8_t *b = mode_block(mode);
+    if (!b)
         return -1;
     memset(m, 0, sizeof *m);
     m->mode = mode;
@@ -122,15 +156,8 @@ int vbe_find_mode(int w, int h, int bpp, mga_vbe_mode *out)
    with a linear framebuffer or a window A that can be written. 1: not usable. */
 static int mode_info_any(uint16_t mode, vbe_any_mode *m)
 {
-    sys_rmregs r;
-    uint8_t *b = vbe_buf + 512;
-    memset(b, 0, 256);
-    memset(&r, 0, sizeof r);
-    r.eax = 0x4F01;
-    r.ecx = mode;
-    r.es = vbe_seg;
-    r.edi = 512;
-    if (vbe_call(&r) < 0)
+    const uint8_t *b = mode_block(mode);
+    if (!b)
         return -1;
     memset(m, 0, sizeof *m);
     m->mode = mode;
@@ -191,14 +218,15 @@ int vbe_set_bank(unsigned bank)
     return vbe_call(&r);
 }
 
-int vbe_set_mode(const mga_vbe_mode *m, int pitch_px, int *actual_pitch_px)
+static int set_mode(const mga_vbe_mode *m, int pitch_px, int *actual_pitch_px, int keep)
 {
     sys_rmregs r;
     memset(&r, 0, sizeof r);
     r.eax = 0x4F02;
-    r.ebx = 0x4000u | m->mode;          /* linear framebuffer */
+    r.ebx = 0x4000u | m->mode | (keep ? 0x8000u : 0u);  /* linear framebuffer; D15: the memory not cleared */
     if (vbe_call(&r) < 0)
         return -1;
+    vbe_waited();
     *actual_pitch_px = m->pitch_bytes / (m->bpp / 8);
     if (pitch_px > 0) {
         memset(&r, 0, sizeof r);
@@ -209,6 +237,19 @@ int vbe_set_mode(const mga_vbe_mode *m, int pitch_px, int *actual_pitch_px)
             *actual_pitch_px = (int)((r.ebx & 0xFFFF) / (uint32_t)(m->bpp / 8));
     }
     return 0;
+}
+
+int vbe_set_mode(const mga_vbe_mode *m, int pitch_px, int *actual_pitch_px)
+{
+    return set_mode(m, pitch_px, actual_pitch_px, 0);
+}
+
+/* The mode set without the BIOS clearing the card's memory (4F02 D15): the caller clears what it shows. GLOS's gate
+ * 69: the emulated G450's BIOS cleared all 32 MB through the 64 KB window, bank by bank, ~8 s in one INT 10h under
+ * GLOS (its disassembly, 6185-619D), SDL's audio stream starved all that while. */
+int vbe_set_mode_keep(const mga_vbe_mode *m, int pitch_px, int *actual_pitch_px)
+{
+    return set_mode(m, pitch_px, actual_pitch_px, 1);
 }
 
 int vbe_set_display_start(uint32_t byte_offset, int pitch_bytes, int bpp)

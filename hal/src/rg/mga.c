@@ -583,7 +583,9 @@ static int open_screen(const rg_open *o, rg_opened *out)
         rig_base = e ? (uint32_t)strtoul(e, NULL, 10) * 1024u : 0;
     }
 #else
-    if (vbe_set_mode(&pl->disp, rg_mga.disp_pitch_px, &pitch) != 0 || pitch != rg_mga.disp_pitch_px) {
+    /* (the BIOS clears nothing: everything the context owns is cleared below; a G450's BIOS took ~8 s clearing its
+     * 32 MB bank by bank under GLOS) */
+    if (vbe_set_mode_keep(&pl->disp, rg_mga.disp_pitch_px, &pitch) != 0 || pitch != rg_mga.disp_pitch_px) {
         rg_set_error("VBE mode %03x with pitch %d failed (BIOS gave %d)", pl->disp.mode, rg_mga.disp_pitch_px,
                      pitch);
         return -1;                      /* (the caller closes: the screen goes back) */
