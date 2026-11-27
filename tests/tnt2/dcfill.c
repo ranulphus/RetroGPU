@@ -13,10 +13,12 @@
  *   blend   - tex blended (SRC_ALPHA, ONE_MINUS_SRC_ALPHA);
  *   twotex  - both textures fetched, the second not combined (one general combiner);
  *   twoef   - both combined by one general combiner and the final combiner's E x F;
- *   comb2   - one texture, the second general combiner on (passing spare0 through).
+ *   comb2   - one texture, the second general combiner on (passing spare0 through);
+ *   fblend  - untextured, blended (the colour read and written: 4 or 8 bytes a pixel);
+ *   fless   - untextured, the depth test LESS with writes (depth read and written, colour written).
  * Mpixels a second are on-screen pixels: 40 x 640 x 480 a case.
  *
- *   DCFILL [dbg]         (dbg: PGRAPH DEBUG_2 as nouveau sets it; the layer does since this probe)
+ *   DCFILL [dbg] [32]    (dbg: PGRAPH DEBUG_2 as nouveau sets it, as the layer does since; 32: 32 bits a pixel)
  *
  * HX-TEST lines: map, mode, accel, celsius, and one per case ("DCFILL case us=... mpix=..." lines too). */
 #include "hx.h"
@@ -34,7 +36,7 @@
 
 typedef struct { float x, y, z, w; uint32_t col; float s, t, s1, t1, fog; } cvert;
 
-static int pitch_px;
+static int pitch_px, bpp = 16;
 static uint32_t vb, zoff, t64[2], t256;
 
 static void m1(uint32_t mthd, uint32_t v) { tnt2_methods(S7, mthd, &v, 1); }
@@ -56,7 +58,7 @@ static void setup(void)
     static const uint32_t at[8] = { 0, 16, 0, 20, 28, 0, 0, 36 };
     uint32_t pm[16];
     int i;
-    tnt2_celsius_target(0, zoff, pitch_px * 2, W, H, 16);
+    tnt2_celsius_target(0, zoff, pitch_px * (bpp / 8), W, H, bpp);
     m1(0x6E8, fb(-2048.0f + W / 2.0f));
     m1(0x6EC, fb(-2048.0f + H / 2.0f));
     m1(0x6F0, fb(0.0f));
@@ -69,7 +71,7 @@ static void setup(void)
     pm[15] = fb(1.0f);
     tnt2_methods(S7, 0x500, pm, 16);
     m1(0x394, fb(0.0f));
-    m1(0x398, fb(65535.0f));
+    m1(0x398, fb(bpp == 32 ? 16777215.0f : 65535.0f));
     m1(0x2A4, 0);
     for (i = 0; i < 8; i++)
         m1(0xD04 + 8u * (uint32_t)i, fmt[i]);
@@ -79,7 +81,8 @@ static void setup(void)
     m1(0xCF0, 0);
 }
 
-enum { F_FLAT, F_TEX, F_DEPTH, F_LESS, F_TWO, F_MIN, F_MIP, F_PERSP, F_BLEND, F_TWOTEX, F_TWOEF, F_COMB2, F_N };
+enum { F_FLAT, F_TEX, F_DEPTH, F_LESS, F_TWO, F_MIN, F_MIP, F_PERSP, F_BLEND, F_TWOTEX, F_TWOEF, F_COMB2, F_FBLEND,
+       F_FLESS, F_N };
 
 /* The state, and the vertices (their texture coordinates and w), for a case. */
 static void state(int c)
@@ -92,7 +95,7 @@ static void state(int c)
         for (j = 0; j < 3; j++) {
             cvert *p = &v[i * 3 + j];
             float w = c == F_PERSP ? (j == 1 ? 4.0f : 1.0f) : 1.0f;
-            p->x = bx[j] * w, p->y = by[j] * w, p->z = (c == F_LESS ? 60000.0f - (float)i * 1000.0f : 30000.0f) * w;
+            p->x = bx[j] * w, p->y = by[j] * w, p->z = (c == F_LESS || c == F_FLESS ? 60000.0f - (float)i * 1000.0f : 30000.0f) * w * (bpp == 32 ? 256.0f : 1.0f);
             p->w = w;
             p->col = 0x80FFFFFFu - (uint32_t)i * 0x00030303u;
             p->s = bx[j] * scale, p->t = by[j] * scale, p->s1 = bx[j] / 64.0f, p->t1 = by[j] / 64.0f, p->fog = 0;
@@ -101,17 +104,17 @@ static void state(int c)
     (void)tnt2_fb[vb];
     m1(0xCF0, 0);
     /* depth */
-    m1(0x30C, c == F_DEPTH || c == F_LESS);
-    m1(0x354, c == F_LESS ? 0x201u : 0x207u);
-    m1(0x35C, c == F_DEPTH || c == F_LESS);
+    m1(0x30C, c == F_DEPTH || c == F_LESS || c == F_FLESS);
+    m1(0x354, c == F_LESS || c == F_FLESS ? 0x201u : 0x207u);
+    m1(0x35C, c == F_DEPTH || c == F_LESS || c == F_FLESS);
     /* blending */
-    m1(0x304, c == F_BLEND);
+    m1(0x304, c == F_BLEND || c == F_FBLEND);
     m1(0x344, 0x302); m1(0x348, 0x303); m1(0x350, 0x8006);
     /* textures and combiners */
     m1(0x228, 0); m1(0x22C, 0);
     m1(0x260, 0); m1(0x264, 0); m1(0x268, 0); m1(0x26C, 0); m1(0x278, 0); m1(0x27C, 0); m1(0x280, 0);
     m1(0x284, 0x18000000);
-    if (c == F_FLAT) {
+    if (c == F_FLAT || c == F_FBLEND || c == F_FLESS) {
         m1(0x288, 0x20042000); m1(0x28C, 0x20001400);
         return;
     }
@@ -147,8 +150,8 @@ static void state(int c)
 static uint32_t run(void)
 {
     uint32_t t0, first = 0, n = NB * 3;
-    tnt2_set_target(zoff, pitch_px * 2, 16);
-    tnt2_fill(0, 0, W, H, 0xFFFF);
+    tnt2_set_target(zoff, pitch_px * (bpp / 8), bpp);
+    tnt2_fill(0, 0, W, H, 0xFFFFFFFFu);
     tnt2_sync(1000000);
     t0 = sys_time_us();
     m1(0x13FC, 5);
@@ -171,18 +174,21 @@ static int cmp(const void *a, const void *b)
 int main(int argc, char **argv)
 {
     static const char *const names[F_N] = { "flat", "tex", "depth", "less", "two", "min", "mip", "persp", "blend",
-                                            "twotex", "twoef", "comb2" };
+                                            "twotex", "twoef", "comb2", "fblend", "fless" };
     static uint8_t lv[9][256 * 256 * 4];
     const uint8_t *lp[9];
     mga_vbe_mode m;
     int c, k, i, l;
     hx_init(1, argv, "dcfill");
+    for (i = 1; i < argc; i++)
+        if (!strcmp(argv[i], "32"))
+            bpp = 32;                           /* (X8R8G8B8 with Z24S8: the bus's width shows in what reads memory) */
     if (tnt2_find() != 0 || tnt2_map() != 0 || tnt2.arch != 10) {
         hx_test("map", 0, "no NV1x chip");
         hx_done(1);
     }
     hx_test("map", 1, "%s, %lu MB", tnt2.name, (unsigned long)(tnt2.fb_size >> 20));
-    if (vbe_find_mode(W, H, 16, &m) != 0 || vbe_set_mode(&m, 0, &pitch_px) != 0) {
+    if (vbe_find_mode(W, H, bpp, &m) != 0 || vbe_set_mode(&m, 0, &pitch_px) != 0) {
         hx_test("mode", 0, "no 640x480x16 mode");
         hx_done(1);
     }
@@ -193,12 +199,12 @@ int main(int argc, char **argv)
         hx_done(1);
     }
     hx_test("accel", 1, "the ring started");
-    zoff = ((uint32_t)pitch_px * 2u * H + 4095u) & ~4095u;
-    t64[0] = (zoff + (uint32_t)pitch_px * 2u * H + 4095u) & ~4095u;
+    zoff = ((uint32_t)pitch_px * (uint32_t)(bpp / 8) * H + 4095u) & ~4095u;
+    t64[0] = (zoff + (uint32_t)pitch_px * (uint32_t)(bpp / 8) * H + 4095u) & ~4095u;
     t64[1] = t64[0] + 16384u;
     t256 = t64[1] + 16384u;
     vb = t256 + 512u * 1024u;
-    tnt2_set_target(0, pitch_px * 2, 16);
+    tnt2_set_target(0, pitch_px * (bpp / 8), bpp);
     tnt2_set_clip(0, 0, W, H);
     tnt2_fill(0, 0, W, H, 0);
     tnt2_sync(1000000);
