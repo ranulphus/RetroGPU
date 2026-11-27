@@ -1,7 +1,9 @@
 /* t44: fog on a T&L engine: t10's three floors (LINEAR, EXP, EXP2), drawn from arrays in depth bands across which
  * the factor changes by 0.08 at most, each band a draw of its own: what a transform engine's per-vertex fog draws as
  * the CPU's path does (gl/docs/dx7.md, X3b; the factor is interpolated across the screen, so one long draw drifts even
- * in linear fog). On a card without the engine the CPU's path draws the same. */
+ * in linear fog). t44_1: each floor one draw of a fine grid (rows half a unit deep): its whole depth range too much
+ * for the draw's box, each triangle's own little enough (the engine's per-triangle rule, Fifth Wheel's chunks). On a
+ * card without the engine the CPU's path draws the same. */
 #include <math.h>
 #include "ct.h"
 
@@ -33,6 +35,27 @@ static void band(float x0, float x1, float d0, float d1)
         for (k = 0; k < 6; k++, n++) {
             pos[n][0] = q[k][0], pos[n][1] = -1, pos[n][2] = -q[k][1];
             col[n][0] = 230, col[n][1] = 153, col[n][2] = 51, col[n][3] = 255;
+        }
+    }
+    glDrawArrays(GL_TRIANGLES, 0, n);
+}
+
+/* A floor from depth d0 to d1 as one draw: a grid of COLS columns and rows h deep. */
+static void grid(float x0, float x1, float d0, float d1, float h)
+{
+    int n = 0;
+    float d;
+    for (d = d0; d < d1 - 1e-4f; d += h) {
+        float e = d + h > d1 ? d1 : d + h;
+        int i;
+        for (i = 0; i < COLS && n + 6 <= MAXV; i++) {
+            float a = x0 + (x1 - x0) * i / COLS, b = x0 + (x1 - x0) * (i + 1) / COLS;
+            const float q[6][2] = { { a, d }, { b, d }, { b, e }, { a, d }, { b, e }, { a, e } };
+            int k;
+            for (k = 0; k < 6; k++, n++) {
+                pos[n][0] = q[k][0], pos[n][1] = -1, pos[n][2] = -q[k][1];
+                col[n][0] = 230, col[n][1] = 153, col[n][2] = 51, col[n][3] = 255;
+            }
         }
     }
     glDrawArrays(GL_TRIANGLES, 0, n);
@@ -79,8 +102,18 @@ void ct_run(void)
     glFogi(GL_FOG_MODE, GL_EXP2);
     glFogf(GL_FOG_DENSITY, 0.12f);
     banded(GL_EXP2, 0.12f, 1.1f, 3.0f, 1.5f, 20.0f);
+    ct_frame("t44_0");
+    glClear(GL_COLOR_BUFFER_BIT);
+    glFogi(GL_FOG_MODE, GL_LINEAR);
+    grid(-3.0f, -1.1f, 2.0f, 15.0f, 0.5f);
+    glFogi(GL_FOG_MODE, GL_EXP);
+    glFogf(GL_FOG_DENSITY, 0.15f);
+    grid(-0.9f, 0.9f, 1.5f, 20.0f, 0.5f);
+    glFogi(GL_FOG_MODE, GL_EXP2);
+    glFogf(GL_FOG_DENSITY, 0.12f);
+    grid(1.1f, 3.0f, 1.5f, 20.0f, 0.5f);
     glDisable(GL_FOG);
     glDisableClientState(GL_COLOR_ARRAY);
     glDisableClientState(GL_VERTEX_ARRAY);
-    ct_frame("t44_0");
+    ct_frame("t44_1");
 }

@@ -37,6 +37,9 @@ typedef struct {
     uint32_t tris_offloaded;        /* ... and by the card's own setup (the WARP) */
     uint32_t tris_tnl;              /* of those, transformed by the card too (the Radeons' engine, X3) */
     uint32_t mem_used;              /* texture memory in use (bytes) */
+    /* (X3b, DGL-TNLSTAT: the engine's draws so far; those fogged; those given back to the CPU's path for fog or for
+     * being small; a buffer object's vertices found in video memory, and converted there) */
+    uint32_t tnl_draws, tnl_fogged, tnl_fog_cpu, tnl_small_cpu, tnl_vbo_hits, tnl_vbo_made;
 } dgl_be_stats;
 
 typedef struct dgl_backend {

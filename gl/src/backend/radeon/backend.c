@@ -1497,7 +1497,7 @@ static int tnl_box_on_first(void)       /* (the first draw: DGL_TNL_MINPX read o
  * way (off by default): the CPU's path draws it. (An experiment of the 7500's hang hunt: a sub-pixel mesh of Echoes'
  * was the first suspect; it was only queued behind the draw the engine was stuck in.) A corner at or behind the eye:
  * not small. */
-static unsigned long tnl_small, tnl_fogcpu;   /* (draws given back to the CPU's path: too small, fog per vertex not enough) */
+static unsigned long tnl_small, tnl_fogcpu, tnl_draws, tnl_fogged;   /* (draws given back to the CPU's path: too small, fog per vertex not enough) */
 static int tnl_too_small(const float lo[3], const float hi[3])
 {
     static float minpx = -1;
@@ -1760,16 +1760,27 @@ static int tnl_pack(volatile uint32_t *dst, GLint vmin, const uint16_t *map, int
  * for disabled arrays, the texture matrices applied while converting, the vertex's format. Echoes' settled terrain
  * and any GL 1.5 game's world; a buffer changed (glBufferData, glBufferSubData, a write through glMapBuffer) is
  * converted again at its next draw. DGL_TNL_VBO=0 converts every draw as before. */
-#define VC_SLOTS 64
-#define VC_BYTES (4u << 20)
+#define VC_SLOTS 1024                   /* (Fifth Wheel's HIGH draws ~80 static chunks a frame from 4,096: 64 thrashed) */
+#define VC_HASH 2048                    /* (the entries' chains, by their arrays; a power of two) */
 typedef struct {
     struct { const void *b, *ptr; unsigned serial, gen; GLsizei stride; GLenum type; GLint size, en; } a[5];
     float cur[13], m0[16], m1[16];
     int dwords, stride, pairs, lit, swap, has_m0, has_m1, texr_used;
 } vkey;
-static struct { vkey k; uint32_t off, nv; int live, w1; float lo[3], hi[3]; } vc[VC_SLOTS];
-static uint32_t vc_block, vc_used;
-static int vc_mode = -1, vc_next;
+static struct { vkey k; uint32_t off, nv; int live, w1, next; float lo[3], hi[3]; } vc[VC_SLOTS];
+static int vc_head[VC_HASH];            /* each chain's first entry + 1 (0: none) */
+static uint32_t vc_block, vc_used, vc_bytes, heap_bytes;  /* (vc_bytes: the area's size, by the heap's, at its making) */
+static int vc_mode = -1, vc_count;      /* (entries made since the area was last emptied) */
+
+static unsigned vc_hash(const vkey *k)  /* (FNV-1a over the arrays: buffers, offsets, generations, layout) */
+{
+    const unsigned char *p = (const unsigned char *)k->a;
+    uint32_t h = 2166136261u;
+    size_t i;
+    for (i = 0; i < sizeof k->a; i++)
+        h = (h ^ p[i]) * 16777619u;
+    return (h ^ (uint32_t)k->dwords * 31u ^ (uint32_t)k->lit) & (VC_HASH - 1);
+}
 static unsigned long vc_hits, vc_made;
 
 static int vc_arr(vkey *k, int n, const dgl_array *a, int needed)
@@ -1816,43 +1827,53 @@ static uint32_t vc_get(const vkey *k, GLint vmax, int stride, int pairs, int lit
                        float lo[3], float hi[3], int *w1)
 {
     uint32_t nv = (uint32_t)vmax + 1u, bytes = nv * (uint32_t)stride * 4u, off;
-    int i, slot = -1, keep = tnl_box_want;
-    for (i = 0; i < VC_SLOTS; i++)
-        if (vc[i].live && vc[i].nv >= nv && !memcmp(&vc[i].k, k, sizeof *k)) {
-            vc_hits++;
-            memcpy(lo, vc[i].lo, sizeof vc[i].lo), memcpy(hi, vc[i].hi, sizeof vc[i].hi), *w1 = vc[i].w1;
-            return radeon.fb_location + vc[i].off;
+    unsigned h = vc_hash(k);
+    int i, slot, keep = tnl_box_want;
+    for (i = vc_head[h] - 1; i >= 0; i = vc[i].next - 1)
+        if (vc[i].live && !memcmp(&vc[i].k, k, sizeof *k)) {
+            if (vc[i].nv >= nv) {
+                vc_hits++;
+                memcpy(lo, vc[i].lo, sizeof vc[i].lo), memcpy(hi, vc[i].hi, sizeof vc[i].hi), *w1 = vc[i].w1;
+                return radeon.fb_location + vc[i].off;
+            }
+            vc[i].live = 0;             /* (the same arrays kept for fewer vertices: made again, bigger) */
+            break;
         }
-    if (bytes > VC_BYTES / 4u)
-        return 0;
-    if (!vc_block && room(VC_BYTES + 32u, &vc_block, NULL) != 0) {
-        vc_block = 0, vc_mode = 0;
-        return 0;
+    if (!vc_block) {
+        /* (the area: 16 MB where the heap has 48 MB or more, 8 from 24, else 4, as the 7500's first X3b had; the
+         * bigger sizes only where free now, the last by giving textures up as before) */
+        uint32_t want = heap_bytes >= (48u << 20) ? 16u << 20 : heap_bytes >= (24u << 20) ? 8u << 20 : 4u << 20;
+        for (vc_bytes = want; vc_bytes > (4u << 20); vc_bytes >>= 1)
+            if (dgl_vram_alloc(vc_bytes + 32u, &vc_block) == 0)
+                break;
+        if (vc_bytes == (4u << 20) && room(vc_bytes + 32u, &vc_block, NULL) != 0) {
+            vc_block = 0, vc_mode = 0;
+            return 0;
+        }
     }
-    for (i = 0; i < VC_SLOTS && slot < 0; i++)  /* (the same arrays kept for fewer vertices: replaced) */
-        if (vc[i].live && !memcmp(&vc[i].k, k, sizeof *k))
-            slot = i;
+    if (bytes > vc_bytes / 4u)
+        return 0;
     vc_used = (vc_used + 31u) & ~31u;
-    if (vc_used + bytes > VC_BYTES || (slot < 0 && vc[vc_next].live && vc_next == 0 && vc_used)) {
+    if (vc_used + bytes > vc_bytes || vc_count == VC_SLOTS) {
         /* (full: everything kept goes, once the engine has drawn from it) */
         if (radeon_sync(1000000) != 0)
             return 0;
-        memset(vc, 0, sizeof vc);
-        vc_used = 0, vc_next = 0, slot = -1;
+        memset(vc_head, 0, sizeof vc_head);
+        vc_used = 0, vc_count = 0;
     }
-    if (slot < 0)
-        slot = vc_next, vc_next = (vc_next + 1) % VC_SLOTS;
+    slot = vc_count++;
     off = ((vc_block + 31u) & ~31u) + vc_used;
     lo[0] = lo[1] = lo[2] = 1e30f, hi[0] = hi[1] = hi[2] = -1e30f, *w1 = 1;
     tnl_box_want = 1;                   /* (kept with the vertices: a later fogged draw of them needs it) */
     i = tnl_pack((volatile uint32_t *)(radeon.fb + off), 0, NULL, (int)nv, stride, pairs, m0, m1, lo, hi, w1, lit);
     tnl_box_want = keep;
     if (!i) {
-        vc[slot].live = 0;
+        vc_count--;                     /* (not linked yet: the entry unused) */
         return 0;
     }
     vc_used += bytes;
     vc[slot].k = *k, vc[slot].off = off, vc[slot].nv = nv, vc[slot].live = 1;
+    vc[slot].next = vc_head[h], vc_head[h] = slot + 1;
     memcpy(vc[slot].lo, lo, sizeof vc[slot].lo), memcpy(vc[slot].hi, hi, sizeof vc[slot].hi), vc[slot].w1 = *w1;
     vc_made++;
     return radeon.fb_location + off;
@@ -1865,12 +1886,109 @@ static int rb_tnl(GLenum mode, GLsizei count, const GLint *idx, GLint first)
     return rb_tnl_draw(mode, count, idx, first);
 }
 
+/* The fog factor's steepest slope (its change a unit of eye depth) over depths dlo..dhi. */
+static float fog_slope_max(float dlo, float dhi)
+{
+    float r = dgl_gl.fog_density;
+    if (dgl_gl.fog_mode == GL_LINEAR) {
+        float s0 = dgl_gl.fog_start, e0 = dgl_gl.fog_end;
+        if (s0 == e0)
+            return 0.0f;
+        if (s0 > e0) {
+            float t = s0;
+            s0 = e0, e0 = t;
+        }
+        return dhi < s0 || dlo > e0 ? 0.0f : 1.0f / (e0 - s0);    /* (outside start..end: clamped, flat) */
+    }
+    if (dgl_gl.fog_mode == GL_EXP)
+        return fabsf(r) * expf(-fabsf(r) * dlo);                    /* (steepest at the nearest) */
+    {   /* exp2: 2 r^2 d exp(-(r d)^2), its peak at d = 1 / (r sqrt 2) */
+        float ds = r != 0.0f ? 0.70710678f / fabsf(r) : 0.0f, a, b;
+        if (ds >= dlo && ds <= dhi)
+            return 2.0f * r * r * ds * expf(-0.5f);
+        a = 2.0f * r * r * dlo * expf(-(r * dlo) * (r * dlo));
+        b = 2.0f * r * r * dhi * expf(-(r * dhi) * (r * dhi));
+        return a > b ? a : b;
+    }
+}
+
+/* An array position's eye depth (z through the modelview's third row), or 0 with *ok cleared: a type this doesn't
+ * read (floats and shorts, two or three of them; w 1). */
+static float eye_z_of(const float *m, const unsigned char *base, GLsizei stride, GLint size, GLenum type, GLint i,
+                      int *ok)
+{
+    float x, y, z = 0.0f;
+    if (type == GL_FLOAT) {
+        const float *v = (const float *)(base + (size_t)i * (size_t)stride);
+        x = v[0], y = v[1], z = size > 2 ? v[2] : 0.0f;
+    } else if (type == GL_SHORT) {
+        const short *v = (const short *)(base + (size_t)i * (size_t)stride);
+        x = v[0], y = v[1], z = size > 2 ? v[2] : 0.0f;
+    } else {
+        *ok = 0;
+        return 0.0f;
+    }
+    return m[2] * x + m[6] * y + m[10] * z + m[14];
+}
+
+/* A fogged draw from the arrays whose box the rule below refuses may still suit the engine: what matters is each
+ * triangle's own span in depth (the CPU's path splits by triangle). Each triangle's largest difference in eye depth
+ * times the factor's steepest slope over the draw's depths, a tenth at most: the engine draws it as the CPU's path
+ * would (Fifth Wheel's 64 m chunks of ~8 m triangles under 300 m of fog). Read from the arrays' positions only when
+ * the box has refused. */
+static int tnl_fog_tris_fit(GLenum mode, GLsizei count, const GLint *idx, GLint first, float dlo, float dhi)
+{
+    const float *m = dgl_gl.mv.stack[dgl_gl.mv.depth - 1].m;
+    const dgl_array *a = &dgl_gl.va;
+    const unsigned char *base;
+    float slope = fog_slope_max(dlo, dhi), most;
+    GLsizei stride, k;
+    int ok = 1, step, n;
+    if (slope <= 0.0f)
+        return 1;
+    if (!dgl_draw_from_arrays() || !a->enabled || a->size > 3 || (a->type != GL_FLOAT && a->type != GL_SHORT))
+        return 0;
+    base = (const unsigned char *)(a->buf ? dgl_buffer_address(a->buf, a->ptr) : a->ptr);
+    stride = a->stride ? a->stride : a->size * (a->type == GL_FLOAT ? 4 : 2);
+    if (!base)
+        return 0;
+    most = 0.1f / slope;
+    switch (mode) {
+    case GL_TRIANGLES:      step = 3, n = 3; break;
+    case GL_TRIANGLE_STRIP: step = 1, n = 3; break;
+    case GL_QUADS:          step = 4, n = 4; break;
+    case GL_QUAD_STRIP:     step = 2, n = 4; break;
+    case GL_TRIANGLE_FAN:
+    case GL_POLYGON:        step = 1, n = 2; break;   /* (with the first vertex: below) */
+    default:                return 0;
+    }
+#define VZ(kk) eye_z_of(m, base, stride, a->size, a->type, idx ? idx[kk] : first + (kk), &ok)
+    {
+        float z0 = n == 2 ? VZ(0) : 0.0f;
+        for (k = n == 2 ? 1 : 0; k + n <= count; k += step) {
+            float lo = n == 2 ? z0 : 1e30f, hi = n == 2 ? z0 : -1e30f;
+            int j;
+            for (j = 0; j < n; j++) {
+                float z = VZ(k + j);
+                if (z < lo) lo = z;
+                if (z > hi) hi = z;
+            }
+            if (!ok || !finite_f(lo) || !finite_f(hi) || hi - lo > most)
+                return 0;
+        }
+    }
+#undef VZ
+    return ok;
+}
+
 /* Fog on the engine is a factor at each vertex, clamped there, then interpolated across the screen (not in
  * perspective: linear fog over one long triangle drifts too, conformance t44 on the P3); the CPU's path splits a
  * triangle whose factor changes by more than a tenth across it (fog_split). So a fogged draw goes to the engine only
  * where that gives the CPU's picture: the factor changing by a tenth at most over its depths (the box's corners
- * through the modelview). Others (t10's long floor quads) take the CPU's path. */
-static int tnl_fog_fits(const float lo[3], const float hi[3], int w1)
+ * through the modelview), or over each of its triangles (tnl_fog_tris_fit). Others (t10's long floor quads) take the
+ * CPU's path. */
+static int tnl_fog_fits(const float lo[3], const float hi[3], int w1, GLenum mode, GLsizei count, const GLint *idx,
+                        GLint first)
 {
     const float *m = dgl_gl.mv.stack[dgl_gl.mv.depth - 1].m;
     float zlo = 1e30f, zhi = -1e30f, dlo, dhi;
@@ -1894,7 +2012,9 @@ static int tnl_fog_fits(const float lo[3], const float hi[3], int w1)
             dlo = dhi, dhi = t;
         }
     }
-    return fabsf(fog_factor(dlo) - fog_factor(dhi)) <= 0.1f;
+    if (fabsf(fog_factor(dlo) - fog_factor(dhi)) <= 0.1f)
+        return 1;
+    return tnl_fog_tris_fit(mode, count, idx, first, dlo, dhi);
 }
 
 static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first)
@@ -1967,8 +2087,10 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
             const char *e = getenv("DGL_TNL_MINV");
             minv = e && *e ? atoi(e) : 8;
         }
-        if (nv < minv)
+        if (nv < minv) {
+            tnl_small++;                /* (DGL-TNLSTAT's small_to_cpu: these and DGL_TNL_MINPX's) */
             return 0;
+        }
     }
     /* The indices, as the chip's primitive (provoking vertex last, a polygon's first: SE_CNTL below). */
 #define IX(k) (map ? map[idx[k] - vmin] : (uint16_t)((idx ? idx[k] : first + (k)) - vmin))
@@ -2209,7 +2331,7 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
             trace_ring("small", (unsigned long)count, (unsigned long)nv, 0, 0);
             return 0;
         }
-        if (dgl_gl.fog && !tnl_fog_fits(lo, hi, w1)) {
+        if (dgl_gl.fog && !tnl_fog_fits(lo, hi, w1, mode, count, idx, first)) {
             if (radeon_cp_varea)        /* (as above: the CPU's path, which splits it, the room given back) */
                 va_used -= took;
             else
@@ -2217,7 +2339,7 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
             tnl_fogcpu++;
             return 0;
         }
-    } else if (dgl_gl.fog && !tnl_fog_fits(lo, hi, w1)) {
+    } else if (dgl_gl.fog && !tnl_fog_fits(lo, hi, w1, mode, count, idx, first)) {
         tnl_fogcpu++;                   /* (kept in video memory, but drawn by the CPU's path this time) */
         return 0;
     }
@@ -2265,6 +2387,7 @@ static int rb_tnl_draw(GLenum mode, GLsizei count, const GLint *idx, GLint first
     }
     tris += (uint32_t)(prim == RADEON_PRIM_TRI_LIST ? ni / 3 : ni - 2);
     tnl_tris += (uint32_t)(prim == RADEON_PRIM_TRI_LIST ? ni / 3 : ni - 2);
+    tnl_draws++, tnl_fogged += dgl_gl.fog != 0;
     dgl_prims.tris_in += prim == RADEON_PRIM_TRI_LIST ? (unsigned long)ni / 3 : (unsigned long)ni - 2;
     (void)k;
     return 1;
@@ -2423,8 +2546,8 @@ static void tex_reset(uint32_t start, uint32_t end)
     valid_ok = 0;
     vb_block = 0, vb_used = 0, tnl_mvp_ok = 0, lt_known = 0, fog_known = 0, mv_known = 0;
     tg_known[0] = tg_known[1] = 0, ucp_known = 0;
-    vc_block = 0, vc_used = 0, vc_next = 0;
-    memset(vc, 0, sizeof vc);   /* (a new context: the vertex area and the engine's state anew) */
+    vc_block = 0, vc_used = 0, vc_count = 0, vc_bytes = 0;
+    memset(vc_head, 0, sizeof vc_head);   /* (a new context: the vertex area and the engine's state anew) */
     va_used = 0, va_half = 0, va_fence[0] = va_fence[1] = 0;
     memset(tnl_vp, 0, sizeof tnl_vp);
     radeon_tcl_forget();
@@ -2436,6 +2559,7 @@ static void tex_reset(uint32_t start, uint32_t end)
             t->be = NULL;
         }
     dgl_vram_init(start, end);
+    heap_bytes = end > start ? end - start : 0;
 }
 
 static void stats(dgl_be_stats *s)
@@ -2443,6 +2567,8 @@ static void stats(dgl_be_stats *s)
     memset(s, 0, sizeof *s);
     s->tris_offloaded = tris;                   /* (every triangle: the chip sets them up) */
     s->tris_tnl = tnl_tris;
+    s->tnl_draws = (uint32_t)tnl_draws, s->tnl_fogged = (uint32_t)tnl_fogged, s->tnl_fog_cpu = (uint32_t)tnl_fogcpu;
+    s->tnl_small_cpu = (uint32_t)tnl_small, s->tnl_vbo_hits = (uint32_t)vc_hits, s->tnl_vbo_made = (uint32_t)vc_made;
     s->mem_used = dgl_vram_used();
 }
 

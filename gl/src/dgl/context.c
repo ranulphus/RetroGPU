@@ -568,6 +568,15 @@ static void swap_buffers(void)
                     (unsigned long)rs.lag_max_us);    /* (present_lag: a swap's time until its flip, mean/longest) */
             lag0_us = rs.lag_us;
             lag0_n = rs.lag_n;
+            {
+                dgl_be_stats bs;
+                dgl_be->stats(&bs);
+                if (bs.tnl_draws | bs.tnl_fog_cpu | bs.tnl_small_cpu)
+                    DGL_ERR("DGL-TNLSTAT draws=%lu fogged=%lu fog_to_cpu=%lu small_to_cpu=%lu vbo_hits=%lu "
+                            "vbo_made=%lu", (unsigned long)bs.tnl_draws, (unsigned long)bs.tnl_fogged,
+                            (unsigned long)bs.tnl_fog_cpu, (unsigned long)bs.tnl_small_cpu,
+                            (unsigned long)bs.tnl_vbo_hits, (unsigned long)bs.tnl_vbo_made);   /* (totals so far) */
+            }
             drain_us = 0;
             present0_us = stats.present_us;
 #ifdef MGA_PROF
