@@ -19,6 +19,9 @@ static void caps(dgl_caps *c)
 
 static void stats(dgl_be_stats *s)
 {
+    /* (zeroed as the other back ends' are: the T&L counters were the caller's stack, printed as DGL-STAT's tnl/s and
+     * a DGL-TNLSTAT line on a G450, bench C 2026-11-27) */
+    memset(s, 0, sizeof *s);
     s->tris = setup_stats.tris;
     s->tris_offloaded = warp_tris;
     s->mem_used = dgl_vram_used();

@@ -47,6 +47,10 @@
    "radeon": {
     "gate": false,
     "why": "W-buffering in Z16 (a linear 1/w, as the TNT2's): Glide's aux buffer is 16-bit"
+   },
+   "nv11": {
+    "gate": false,
+    "why": "W-buffering in Z16 (a linear 1/w, as the TNT2's): Glide's aux buffer is 16-bit"
    }
   }
  },
@@ -88,6 +92,10 @@
    "virge": {
     "gate": false,
     "why": "gamma not applied: the ViRGE/DX's DAC in 15-bit (86Box's model has no ramp there; bench C to settle)"
+   },
+   "nv11": {
+    "gate": false,
+    "why": "gamma not applied on the NV1x: its safety rules forbid writing the DAC (docs/nv10.md)"
    }
   }
  },
