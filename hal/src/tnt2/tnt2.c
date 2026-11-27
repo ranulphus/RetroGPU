@@ -56,6 +56,10 @@ static const char *chip_name(uint16_t id)
     case 0x002C: return "Vanta";
     case 0x002D: return "Riva TNT2 M64";
     case 0x00A0: return "Aladdin TNT2";
+    case 0x0110: return "GeForce2 MX";          /* (the NV11, docs/nv10.md: proven on bench E's Quadro2 MXR) */
+    case 0x0111: return "GeForce2 MX 100/200";
+    case 0x0112: return "GeForce2 Go";
+    case 0x0113: return "Quadro2 MXR";
     default:     return NULL;
     }
 }
@@ -75,6 +79,7 @@ int tnt2_find(void)
             tnt2.bar0 = mga_pci_read32(bus, dev, 0, 0x10) & ~0xFu;
             tnt2.bar1 = mga_pci_read32(bus, dev, 0, 0x14) & ~0xFu;
             tnt2.name = chip_name(tnt2.device);
+            tnt2.arch = (tnt2.device & 0x0FF0) == 0x0110 ? 10 : 4;
             return 0;
         }
     return -1;
@@ -87,6 +92,14 @@ int tnt2_map(void)
     if (!tnt2_regs)
         return -1;
     tnt2.boot0 = PMC[0];
+    if (tnt2.arch == 10) {
+        /* The NV1x: its size in MB at PFB 0x10020C (nv_setup.c); the instance memory reversed over the top 512 KB
+         * (NPRAMIN: instance offset X at size - 16 - X), so the layer's 128 KB goes below it. */
+        tnt2.fb_size = PFB[0x020C / 4] & 0xFFF00000u;
+        tnt2.fb_usable = tnt2.fb_size - (640u << 10);
+        tnt2_fb = (volatile uint8_t *)sys_map_phys(tnt2.bar1, tnt2.fb_size);
+        return tnt2_fb ? 0 : -1;
+    }
     /* The memory's size as nv_setup.c reads an NV4's PFB_BOOT_0 (confirmed on the P3's M64: 32 MB, docs/tnt2.md). */
     boot = PFB[0];
     if (boot & 0x100)
@@ -261,6 +274,8 @@ int tnt2_mark_wait(uint32_t mark, uint32_t timeout_us)
             return -1;
     return 0;
 }
+
+void tnt2_kick_soon(void) { kick_soon(); }
 
 void tnt2_kick(void)
 {
@@ -534,12 +549,15 @@ static uint8_t crtc_r(int i) { PCIO8[0x3D4] = (uint8_t)i; return PCIO8[0x3D5]; }
 
 /* The rows' length the display shows, in bytes (a multiple of 8): the CRTC's offset in 8-byte units, its low 8
  * bits in CR13 and bits 10-8 in CR19's bits 7-5 (nv_hw.c's), the rest of CR19 kept. */
-void tnt2_set_pitch(int pitch_bytes)
+int tnt2_set_pitch(int pitch_bytes)
 {
     unsigned u = (unsigned)pitch_bytes >> 3;
+    if (tnt2.arch == 10)
+        return -1;                      /* (the NV11's CRTC: not written until it's proven safe, docs/nv10.md) */
     crtc_w(0x1F, 0x57);
     crtc_w(0x13, (uint8_t)(u & 0xFF));
     crtc_w(0x19, (uint8_t)((crtc_r(0x19) & 0x1F) | ((u >> 8) & 7) << 5));
+    return 0;
 }
 
 /* 32 x 32 pixels of A1R5G5B5 in instance memory at dword 0x1E00 (nv_setup.c's NV4 CURSOR; CR30, CR31 and CR2F
@@ -573,6 +591,8 @@ static void cursor_build(void)
 int tnt2_cursor_load(const uint8_t and_mask[512], const uint8_t xor_mask[512])
 {
     int i;
+    if (tnt2.arch == 10)
+        return -1;                      /* (the NV1x's cursor needs CR30/CR31/CR2F behind CR1F: not yet, docs/nv10.md) */
     for (i = 0; i < 512; i++)
         cursor_and[i] = and_mask[i], cursor_xor[i] = xor_mask[i];
     cursor_build();
@@ -585,6 +605,8 @@ int tnt2_cursor_load(const uint8_t and_mask[512], const uint8_t xor_mask[512])
 
 void tnt2_cursor_colours(uint32_t c0, uint32_t c1)
 {
+    if (tnt2.arch == 10)
+        return;
     cursor_c0 = to1555(c0);
     cursor_c1 = to1555(c1);
     cursor_build();
@@ -592,6 +614,8 @@ void tnt2_cursor_colours(uint32_t c0, uint32_t c1)
 
 void tnt2_cursor_show(int on)
 {
+    if (tnt2.arch == 10)
+        return;
     crtc_w(0x1F, 0x57);
     crtc_w(0x31, (uint8_t)((crtc_r(0x31) & 0xFE) | (on ? 1 : 0)));
 }
@@ -632,6 +656,8 @@ void tnt2_ramp_off(void)
 /* (PRAMDAC 0x300 keeps 12 bits of each coordinate, signed: the P3's M64 read -5 back as 0xFFB.) */
 void tnt2_cursor_move(int x, int y)
 {
+    if (tnt2.arch == 10)
+        return;
     tnt2_regs[0x680300 / 4] = ((uint32_t)x & 0xFFFFu) | (((uint32_t)y & 0xFFFFu) << 16);
 }
 
@@ -675,6 +701,7 @@ static void forget_3d(void);                    /* (the words cached as sent: th
 #define H_SURF3D 0x80000018u                    /* (RAMHT slots 8 and 9: the X driver's handles hash 0x80000010+i to i) */
 #define H_TTRI   0x80000019u
 #define H_MTRI   0x8000001Au                    /* (RAMHT slot 10) */
+#define H_DMAVRAM 0x8000001Bu                   /* (RAMHT slot 11: the video memory's DMA object, the NV1x's 0x93) */
 #define DUMMY_TEX_OFF (tnt2.fb_usable + RING_DWORDS * 4u + SCRATCH_BYTES)   /* 1x1 A8R8G8B8 white, 128-byte aligned */
 
 uint32_t tnt2_tex_dummy_off(void) { return DUMMY_TEX_OFF; }
@@ -694,21 +721,172 @@ uint32_t tnt2_3d_trap(uint32_t *addr, uint32_t *data)
     return PGRAPH[0x0100 / 4];                  /* PGRAPH_INTR */
 }
 
+
+/* ---- Celsius: the NV1x's own 3D class (0x96; docs/nv10.md, the Quadro2 plan's Q3) ------------------------------
+ * Set up as Mesa's NV11 driver set it up on bench E's Quadro2 under nouveau (captured 2026-11-27: the method/value
+ * pairs below are its init and default state, in its order, MIT driver, facts only), with every DMA handle on the
+ * video memory's DMA object (class 0x3D): DOS has no GART, so vertex buffers live in video memory too. */
+#define H_CELSIUS 0x8000001Cu                   /* (RAMHT slot 12, instance 0x120D) */
+static const struct { uint16_t m; uint32_t v; } celsius_init[] = {
+    { 0x0100, 0x00000000 }, { 0x0200, 0x00000000 }, { 0x0204, 0x00000000 }, { 0x02C0, 0x07FF0800 }, { 0x02E0, 0x07FF0800 }, { 0x02C4, 0x00000000 },
+    { 0x02E4, 0x00000000 }, { 0x02C8, 0x00000000 }, { 0x02E8, 0x00000000 }, { 0x02CC, 0x00000000 }, { 0x02EC, 0x00000000 }, { 0x02D0, 0x00000000 },
+    { 0x02F0, 0x00000000 }, { 0x02D4, 0x00000000 }, { 0x02F4, 0x00000000 }, { 0x02D8, 0x00000000 }, { 0x02F8, 0x00000000 }, { 0x02DC, 0x00000000 },
+    { 0x02FC, 0x00000000 }, { 0x0290, 0x00100001 }, { 0x03F4, 0x00000000 }, { 0x0100, 0x00000000 }, { 0x0120, 0x00000000 }, { 0x0124, 0x00000001 },
+    { 0x0128, 0x00000002 }, { 0x0100, 0x00000000 }, { 0x0100, 0x00000000 }, { 0x02A4, 0x00000000 }, { 0x0300, 0x00000000 }, { 0x033C, 0x00000207 },
+    { 0x0340, 0x00000000 }, { 0x0228, 0x00000000 }, { 0x022C, 0x00000000 }, { 0x0304, 0x00000000 }, { 0x0310, 0x00000001 }, { 0x0314, 0x00000000 },
+    { 0x0320, 0x00000000 }, { 0x0328, 0x00000000 }, { 0x032C, 0x00000000 }, { 0x0344, 0x00000001 }, { 0x0348, 0x00000000 }, { 0x034C, 0x00000000 },
+    { 0x0350, 0x00008006 }, { 0x0360, 0x000000FF }, { 0x0364, 0x00000207 }, { 0x0368, 0x00000000 }, { 0x036C, 0x000000FF }, { 0x0370, 0x00001E00 },
+    { 0x0374, 0x00001E00 }, { 0x0378, 0x00001E00 }, { 0x037C, 0x00001D01 }, { 0x03A4, 0x00000000 }, { 0x02A4, 0x00000000 }, { 0x02A8, 0x00000000 },
+    { 0x0294, 0x00000000 }, { 0x03B8, 0x00000000 }, { 0x03BC, 0x00000000 }, { 0x0330, 0x00000000 }, { 0x0334, 0x00000000 }, { 0x0338, 0x00000000 },
+    { 0x0354, 0x00000201 }, { 0x035C, 0x00000000 }, { 0x030C, 0x00000000 }, { 0x0384, 0x00000000 }, { 0x0388, 0x00000000 }, { 0x03EC, 0x00000008 },
+    { 0x0318, 0x00000000 }, { 0x031C, 0x00000000 }, { 0x0380, 0x00000008 }, { 0x0320, 0x00000000 }, { 0x038C, 0x00001B02 }, { 0x0390, 0x00001B02 },
+    { 0x039C, 0x00000405 }, { 0x03A0, 0x00000901 }, { 0x0324, 0x00000000 }, { 0x0308, 0x00000000 }, { 0x03C0, 0x00000000 }, { 0x03C4, 0x00000000 },
+    { 0x03C8, 0x00000000 }, { 0x03CC, 0x00000000 }, { 0x03D0, 0x00000000 }, { 0x03D4, 0x00000000 }, { 0x03D8, 0x00000000 }, { 0x03DC, 0x00000000 },
+    { 0x03E0, 0x00000000 }, { 0x03E4, 0x00000000 }, { 0x0680, 0x3FC00000 }, { 0x0684, 0xBDB8AA0A }, { 0x0688, 0x00000000 }, { 0x0100, 0x00000000 },
+    { 0x029C, 0x00000802 }, { 0x02A0, 0x00000002 }, { 0x03E8, 0x00000006 }, { 0x0358, 0x01010101 }, { 0x0C50, 0x3F800000 }, { 0x0C54, 0x00000000 },
+    { 0x0C58, 0x00000000 }, { 0x0C5C, 0x3F800000 }, { 0x0C80, 0x00000000 }, { 0x0C84, 0x00000000 }, { 0x0C88, 0x00000000 }, { 0x0C30, 0x00000000 },
+    { 0x0C34, 0x00000000 }, { 0x0C38, 0x3F800000 }, { 0x0CA0, 0x00000000 }, { 0x0CA4, 0x00000000 }, { 0x0CA8, 0x00000000 }, { 0x0CAC, 0x3F800000 },
+    { 0x0CC8, 0x00000000 }, { 0x0CCC, 0x00000000 }, { 0x0CD0, 0x00000000 }, { 0x0CD4, 0x3F800000 }, { 0x0CE0, 0x00000000 }, { 0x0CEC, 0x00000001 },
+    { 0x0394, 0x00000000 }, { 0x0398, 0x4B800000 }, { 0x0300, 0x00000000 }, { 0x033C, 0x00000207 }, { 0x0340, 0x00000000 }, { 0x034C, 0x00000000 },
+    { 0x0304, 0x00000000 }, { 0x0350, 0x00008006 }, { 0x0344, 0x00000001 }, { 0x0348, 0x00000000 }, { 0x0358, 0x01010101 }, { 0x0298, 0x00000000 },
+    { 0x0308, 0x00000000 }, { 0x039C, 0x00000405 }, { 0x03A0, 0x00000901 }, { 0x030C, 0x00000000 }, { 0x035C, 0x00000001 }, { 0x0354, 0x00000201 },
+    { 0x0310, 0x00000001 }, { 0x0288, 0x20042000 }, { 0x028C, 0x20001400 }, { 0x0100, 0x00000000 }, { 0x0100, 0x00000000 }, { 0x0100, 0x00000000 },
+    { 0x0100, 0x00000000 }, { 0x0100, 0x00000000 }, { 0x0100, 0x00000000 }, { 0x030C, 0x00000000 }, { 0x035C, 0x00000001 }, { 0x0354, 0x00000201 },
+    { 0x029C, 0x00000800 }, { 0x02A0, 0x00000003 }, { 0x02A4, 0x00000000 }, { 0x02A8, 0x00000000 }, { 0x0680, 0x3FC00000 }, { 0x0684, 0xBDB851EC },
+    { 0x0688, 0x00000000 }, { 0x0288, 0x20042000 }, { 0x028C, 0x20001400 }, { 0x03BC, 0x00000000 }, { 0x0314, 0x00000000 }, { 0x03A4, 0x00000000 },
+    { 0x03B8, 0x00000000 }, { 0x0294, 0x00000000 }, { 0x0834, 0x00000000 }, { 0x0838, 0x00000000 }, { 0x083C, 0x00000000 }, { 0x0828, 0x00000000 },
+    { 0x082C, 0x00000000 }, { 0x0830, 0x00000000 }, { 0x08B4, 0x00000000 }, { 0x08B8, 0x00000000 }, { 0x08BC, 0x00000000 }, { 0x08A8, 0x00000000 },
+    { 0x08AC, 0x00000000 }, { 0x08B0, 0x00000000 }, { 0x0934, 0x00000000 }, { 0x0938, 0x00000000 }, { 0x093C, 0x00000000 }, { 0x0928, 0x00000000 },
+    { 0x092C, 0x00000000 }, { 0x0930, 0x00000000 }, { 0x09B4, 0x00000000 }, { 0x09B8, 0x00000000 }, { 0x09BC, 0x00000000 }, { 0x09A8, 0x00000000 },
+    { 0x09AC, 0x00000000 }, { 0x09B0, 0x00000000 }, { 0x0A34, 0x00000000 }, { 0x0A38, 0x00000000 }, { 0x0A3C, 0x00000000 }, { 0x0A28, 0x00000000 },
+    { 0x0A2C, 0x00000000 }, { 0x0A30, 0x00000000 }, { 0x0AB4, 0x00000000 }, { 0x0AB8, 0x00000000 }, { 0x0ABC, 0x00000000 }, { 0x0AA8, 0x00000000 },
+    { 0x0AAC, 0x00000000 }, { 0x0AB0, 0x00000000 }, { 0x0B34, 0x00000000 }, { 0x0B38, 0x00000000 }, { 0x0B3C, 0x00000000 }, { 0x0B28, 0x00000000 },
+    { 0x0B2C, 0x00000000 }, { 0x0B30, 0x00000000 }, { 0x0BB4, 0x00000000 }, { 0x0BB8, 0x00000000 }, { 0x0BBC, 0x00000000 }, { 0x0BA8, 0x00000000 },
+    { 0x0BAC, 0x00000000 }, { 0x0BB0, 0x00000000 }, { 0x0380, 0x00000008 }, { 0x0320, 0x00000000 }, { 0x0D40, 0x00000000 }, { 0x0D44, 0x00001503 },
+    { 0x06C4, 0x00000000 }, { 0x06C8, 0x00000000 }, { 0x06CC, 0x00000000 }, { 0x03B4, 0x3F800000 }, { 0x06A0, 0x00000000 }, { 0x06A4, 0x3F800000 },
+    { 0x06A8, 0x00000000 }, { 0x06AC, 0x00000000 }, { 0x06B0, 0x3F800000 }, { 0x06B4, 0x00000000 }, { 0x03EC, 0x00000008 }, { 0x031C, 0x00000000 },
+    { 0x038C, 0x00001B02 }, { 0x0390, 0x00001B02 }, { 0x0324, 0x00000000 }, { 0x0330, 0x00000000 }, { 0x0334, 0x00000000 }, { 0x0338, 0x00000000 },
+    { 0x0384, 0x00000000 }, { 0x0388, 0x00000000 }, { 0x0200, 0x02800000 }, { 0x0204, 0x01E00000 }, { 0x037C, 0x00001D01 }, { 0x032C, 0x00000000 },
+    { 0x0364, 0x00000207 }, { 0x0368, 0x00000000 }, { 0x036C, 0x000000FF }, { 0x0360, 0x000000FF }, { 0x0370, 0x00001E00 }, { 0x0374, 0x00001E00 },
+    { 0x0378, 0x00001E00 }, { 0x0260, 0x00000000 }, { 0x0268, 0x00000000 }, { 0x0270, 0x00000000 }, { 0x0278, 0x00000000 }, { 0x0280, 0x00000000 },
+    { 0x0288, 0x20042000 }, { 0x028C, 0x20001400 }, { 0x0264, 0x00000000 }, { 0x026C, 0x00000000 }, { 0x0274, 0x00000000 }, { 0x027C, 0x00000000 },
+    { 0x0284, 0x18000000 }, { 0x0288, 0x20042000 }, { 0x028C, 0x20001400 }, { 0x03C0, 0x00000000 }, { 0x03C4, 0x00000000 }, { 0x03C8, 0x00000000 },
+    { 0x03CC, 0x00000000 }, { 0x03D0, 0x00000000 }, { 0x03D4, 0x00000000 }, { 0x03D8, 0x00000000 }, { 0x03DC, 0x00000000 }, { 0x03E0, 0x00000000 },
+    { 0x03E4, 0x00000000 }, { 0x0228, 0x00000000 }, { 0x022C, 0x00000000 }, { 0x02C0, 0x0A7F0800 }, { 0x02E0, 0x09DF0800 }, { 0x0394, 0x00000000 },
+    { 0x0398, 0x4A000000 }, { 0x02C0, 0x0A7F0800 }, { 0x02E0, 0x09DF0800 },
+};
+
+void tnt2_methods(int sub, uint32_t mthd, const uint32_t *v, int n)
+{
+    int i;
+    ring_start(SUBCH(sub, mthd), n);
+    for (i = 0; i < n; i++)
+        NEXT(v[i]);
+}
+
+static void cel1(uint32_t mthd, uint32_t v)
+{
+    ring_start(SUBCH(TRI, mthd), 1);
+    NEXT(v);
+}
+
+int tnt2_celsius_init(void)
+{
+    static const uint32_t h3[3] = { H_DMAVRAM, H_DMAVRAM, H_DMAVRAM };
+    unsigned i;
+    if (tnt2.arch != 10)
+        return -1;
+    /* (word 0 bit 22, the NV11's "new" object: without it the render target's depth may only be Z24S8, envytools'
+     * hwtest MthdSurf3DFormat; DCEL0's Z16 with R5G6B5 trapped there, PGRAPH_INTR bit 20, on bench E) */
+    PRAMIN[0x0834] = 0x01400096; PRAMIN[0x0835] = 0; PRAMIN[0x0836] = 0x12001200; PRAMIN[0x0837] = 0;
+    PRAMIN[22] = H_DMAVRAM, PRAMIN[23] = 0x80011200;
+    PRAMIN[24] = H_CELSIUS, PRAMIN[25] = 0x8001120D;
+    cel1(0, H_CELSIUS);                                 /* (subchannel 7: the 0x94/0x95 objects' until now) */
+    tri_obj = 0x96;
+    cel1(0x180, H_DMAVRAM);                             /* DMA_NOTIFY */
+    tnt2_methods(TRI, 0x184, h3, 3);                    /* DMA_TEXTURE0, DMA_TEXTURE1, DMA_VTXBUF */
+    tnt2_methods(TRI, 0x194, h3, 2);                    /* DMA_COLOR, DMA_ZETA */
+    for (i = 0; i < sizeof celsius_init / sizeof celsius_init[0]; i++)
+        cel1(celsius_init[i].m, celsius_init[i].v);
+    tnt2_kick();
+    return tnt2_sync(1000000);
+}
+
+/* The render target: colour and depth offsets, the format (16 bits: R5G6B5 with Z16; 32: X8R8G8B8 with Z24S8),
+ * the pitches, the window, and the viewport's translation into Celsius's 2048-offset space (Mesa's nv10_state_fb.c:
+ * 6 no-ops before a target change on the NV11, "nv11 seems to get sad"). */
+void tnt2_celsius_target(uint32_t colour, uint32_t zeta, int pitch_bytes, int w, int h, int bpp)
+{
+    int i;
+    for (i = 0; i < 6; i++)
+        cel1(0x100, 0);
+    cel1(0x210, colour);
+    cel1(0x214, zeta);
+    cel1(0x208, bpp == 32 ? 0x105u : 0x113u);         /* TYPE linear | DEPTH Z24S8 0 / Z16 1 | COLOR X8R8G8B8 5 / R5G6B5 3 */
+    cel1(0x20C, (uint32_t)pitch_bytes << 16 | (uint32_t)pitch_bytes);
+    cel1(0x200, (uint32_t)w << 16);
+    cel1(0x204, (uint32_t)h << 16);
+}
+
+/* (DCEL0's draw) n vertices of {r, g, b, x, y} floats at video memory offset vb, as GL_TRIANGLES: Mesa's software-
+ * transform path's way (window coordinates, the projection the viewport's undoing, a batch from vertex 0). */
+void tnt2_celsius_tris(uint32_t vb, int n, int w, int h)
+{
+    union { float f; uint32_t u; } c;
+    uint32_t pm[16], fmt[8];
+    int i;
+    c.f = -2048.0f + w / 2.0f; cel1(0x6E8, c.u);
+    c.f = -2048.0f + h / 2.0f; cel1(0x6EC, c.u);
+    c.f = 32767.5f;            cel1(0x6F0, c.u);
+    cel1(0x6F4, 0);
+    for (i = 0; i < 16; i++)
+        pm[i] = 0;
+    c.f = 1.0f;                 pm[0] = c.u, pm[15] = c.u;
+    c.f = -w / 2.0f;            pm[3] = c.u;
+    c.f = -1.0f;                pm[5] = c.u;
+    c.f = h / 2.0f;             pm[7] = c.u;
+    c.f = -32767.5f;            pm[10] = c.u;
+    tnt2_methods(TRI, 0x500, pm, 16);                   /* PROJECTION_MATRIX, row-major */
+    fmt[0] = 0x1422;                                    /* position: stride 20, x and y, floats */
+    fmt[1] = 0x1432;                                    /* colour: stride 20, r g b, floats */
+    for (i = 2; i < 8; i++)
+        fmt[i] = 0x0002;                                /* (the rest unused) */
+    for (i = 0; i < 8; i++)
+        cel1(0xD04 + 8u * (uint32_t)i, fmt[i]);
+    cel1(0xD00, vb + 12);                               /* VTXBUF_OFFSET(0): the position after the colour */
+    cel1(0xD08, vb);                                    /* VTXBUF_OFFSET(1): the colour */
+    cel1(0xCF0, 0);                                     /* VTXBUF_VALIDATE */
+    cel1(0x13FC, 5);                                    /* BEGIN: GL_TRIANGLES + 1 */
+    cel1(0x1400, (uint32_t)(n - 1) << 24);              /* a batch: n vertices from 0 */
+    cel1(0x13FC, 0);                                    /* END */
+    tnt2_kick();
+}
+
 int tnt2_3d_init(void)
 {
     clip_now[0] = ~0u;                                  /* (the engine was set up again: PGRAPH's clip unknown) */
     forget_3d();
     /* The objects: 0x53 at instance 0x120A (PRAMIN dwords 0x828-0x82B), 0x54 at 0x120B (0x82C-0x82F). */
-    PRAMIN[0x0828] = 0x01000053; PRAMIN[0x0829] = 0; PRAMIN[0x082A] = 0x12001200; PRAMIN[0x082B] = 0;
-    PRAMIN[0x082C] = 0x01000054; PRAMIN[0x082D] = 0; PRAMIN[0x082E] = 0x12001200; PRAMIN[0x082F] = 0;
-    PRAMIN[0x0830] = 0x01000055; PRAMIN[0x0831] = 0; PRAMIN[0x0832] = 0x12001200; PRAMIN[0x0833] = 0;
+    {   /* (the NV1x's same classes, method for method, at 0x93/0x94/0x95: emulated on its Celsius pipeline) */
+        uint32_t nv10 = tnt2.arch == 10 ? 0x40u : 0u;
+        PRAMIN[0x0828] = 0x01000053 + nv10; PRAMIN[0x0829] = 0; PRAMIN[0x082A] = 0x12001200; PRAMIN[0x082B] = 0;
+        PRAMIN[0x082C] = 0x01000054 + nv10; PRAMIN[0x082D] = 0; PRAMIN[0x082E] = 0x12001200; PRAMIN[0x082F] = 0;
+        PRAMIN[0x0830] = 0x01000055 + nv10; PRAMIN[0x0831] = 0; PRAMIN[0x0832] = 0x12001200; PRAMIN[0x0833] = 0;
+    }
     PRAMIN[16] = H_SURF3D; PRAMIN[17] = 0x8001120A;
     PRAMIN[18] = H_TTRI;   PRAMIN[19] = 0x8001120B;
     PRAMIN[20] = H_MTRI;   PRAMIN[21] = 0x8001120C;
+    if (tnt2.arch == 10)
+        PRAMIN[22] = H_DMAVRAM, PRAMIN[23] = 0x80011200;
     tnt2_fb[DUMMY_TEX_OFF + 0] = 0xFF; tnt2_fb[DUMMY_TEX_OFF + 1] = 0xFF;
     tnt2_fb[DUMMY_TEX_OFF + 2] = 0xFF; tnt2_fb[DUMMY_TEX_OFF + 3] = 0xFF;
     three_d = 1;
     ring_start(SUBCH(S3D, 0), 1); NEXT(H_SURF3D);
+    if (tnt2.arch == 10) {                              /* (the NV1x's 0x93: its colour and depth memory by method) */
+        ring_start(SUBCH(S3D, 0x184), 2);
+        NEXT(H_DMAVRAM);
+        NEXT(H_DMAVRAM);
+    }
     ring_start(SUBCH(TRI, 0), 1); NEXT(H_MTRI);         /* the multitexture object's SURFACES first */
     ring_start(SUBCH(TRI, 0x18C), 1); NEXT(H_SURF3D);
     ring_start(SUBCH(TRI, 0), 1); NEXT(H_TTRI);
@@ -813,6 +991,15 @@ void tnt2_3d_clip(int x0, int y0, int x1, int y1)
     c[0] = (uint32_t)x0 & 0x3FFFF, c[1] = (uint32_t)y0 & 0x3FFFF, c[2] = (uint32_t)x1 & 0x3FFFF, c[3] = (uint32_t)y1 & 0x3FFFF;
     if (!memcmp(c, clip_now, sizeof c))
         return;
+    if (tnt2.arch == 10) {
+        /* (the NV1x's emulated 0x93 takes its clip by method, in hardware: nouveau has no software methods there;
+         * PGRAPH's 2D clip registers aren't what clips its Celsius pipeline) */
+        ring_start(SUBCH(S3D, 0x2F8), 2);
+        NEXT((uint32_t)(x1 - x0) << 16 | ((uint32_t)x0 & 0xFFFFu));
+        NEXT((uint32_t)(y1 - y0) << 16 | ((uint32_t)y0 & 0xFFFFu));
+        memcpy(clip_now, c, sizeof c);
+        return;
+    }
     tnt2_sync(1000000);
     PGRAPH[0x053C / 4] = c[0];
     PGRAPH[0x0540 / 4] = c[1];
@@ -1253,6 +1440,75 @@ void tnt2_tex_sub_rgba8(uint32_t off, int fmt, int log2w, int log2h, int x0, int
 
 /* ---- the set-up (nv_hw.c's NVLoadStateExt for NV_ARCH_04, no display state) ---- */
 
+/* The NV1x's transform pipe (its Celsius pipeline, under the emulated 0x94/0x95 too) loaded with nouveau's defaults
+ * (gr/nv10.c's nv10_gr_load_pipe with nv10_gr_create_pipe's contents, MIT): PGRAPH 0x400F50 the pipe's address,
+ * 0x400F54 its data, auto-incrementing; the transform modes 0x400F40/44 bypassed while the first part goes in. Without
+ * it the bypass path's scale and offset rows are whatever the pipe held: NTRI0 drew nothing on bench E (no trap). And
+ * the per-channel defaults nouveau writes into a new context (nv10.c's nv10_gr_context_new). */
+static void pgraph_idle(void)
+{
+    uint32_t t0 = sys_time_us();
+    while (PGRAPH[0x0700 / 4] != 0 && sys_time_us() - t0 < 100000u)
+        ;
+}
+
+static void pipe_words(uint32_t addr, const uint32_t *w, int n)
+{
+    int i;
+    PGRAPH[0x0F50 / 4] = addr;
+    for (i = 0; i < n; i++)
+        PGRAPH[0x0F54 / 4] = w ? w[i] : 0u;
+}
+
+static void nv10_pipe_init(void)
+{
+    static const uint32_t one4zero4[8] = { 0x3F800000, 0x3F800000, 0x3F800000, 0x3F800000, 0, 0, 0, 0 };
+    static const uint32_t one3[3] = { 0x3F800000, 0x3F800000, 0x3F800000 };
+    static const uint32_t eight = 0x00000008;
+    static const uint32_t tail6400[25] = {          /* (0x6400's last 25 of 236; the first 211 are 0) */
+        0x3F800000, 0x40000000, 0x40000000, 0x40000000, 0x40000000, 0, 0, 0x3F800000, 0, 0x3F000000, 0x3F000000,
+        0, 0, 0, 0, 0x3F800000, 0, 0, 0, 0, 0, 0x3F800000, 0x3F800000, 0x3F800000, 0x3F800000 };
+    static const uint32_t b6c00[12] = { 0, 0, 0, 0, 0xBF800000, 0, 0, 0, 0, 0, 0, 0 };
+    uint32_t b7000[76], b6800[188], xf0, xf1;
+    int i;
+    PGRAPH[0x0E88 / 4] = 0x08000000;                /* (the context defaults: CELSIUS_RASTER and the rest) */
+    PGRAPH[0x0E9C / 4] = 0x4B7FFFFF;
+    PGRAPH[0x0514 / 4] = 0x0001FFFF;                /* XY_LOGIC_MISC0 */
+    PGRAPH[0x0E10 / 4] = 0x00001000;
+    PGRAPH[0x0E14 / 4] = 0x00001000;
+    PGRAPH[0x0E30 / 4] = 0x00080008;
+    PGRAPH[0x0E34 / 4] = 0x00080008;
+    PGRAPH[0x0148 / 4] = 0;                         /* CTX_USER: channel 0 */
+    for (i = 0; i < 76; i++)                        /* (0x7000: 12 zeros, then 0x7149F2CA every fourth word 8 times) */
+        b7000[i] = i >= 12 && i <= 40 && (i - 12) % 4 == 0 ? 0x7149F2CAu : 0u;
+    for (i = 0; i < 188; i++)
+        b6800[i] = i == 162 ? 0x3F800000u : 0u;
+    pgraph_idle();
+    xf0 = PGRAPH[0x0F40 / 4], xf1 = PGRAPH[0x0F44 / 4];
+    PGRAPH[0x0F40 / 4] = 0x10000000;                /* (bypass while the first part goes in) */
+    PGRAPH[0x0F44 / 4] = 0x00000000;
+    pipe_words(0x64C0, one4zero4, 8);
+    pipe_words(0x6AB0, one3, 3);
+    pipe_words(0x6A80, NULL, 3);
+    pipe_words(0x0040, &eight, 1);
+    pipe_words(0x0200, NULL, 48);
+    pgraph_idle();
+    PGRAPH[0x0F40 / 4] = xf0;
+    PGRAPH[0x0F44 / 4] = xf1;
+    PGRAPH[0x0F50 / 4] = 0x6400;
+    for (i = 0; i < 236; i++)
+        PGRAPH[0x0F54 / 4] = i < 211 ? 0u : tail6400[i - 211];
+    pipe_words(0x6800, b6800, 188);
+    pipe_words(0x6C00, b6c00, 12);
+    pipe_words(0x7000, b7000, 76);
+    pipe_words(0x7400, NULL, 48);
+    pipe_words(0x7800, NULL, 48);
+    pipe_words(0x4400, NULL, 32);
+    pipe_words(0x0000, NULL, 16);
+    pipe_words(0x0040, NULL, 4);
+    pgraph_idle();
+}
+
 int tnt2_accel_init(void)
 {
     static const uint32_t ramht[16] = {        /* the hash table: 8 handles, each to its object's instance */
@@ -1279,13 +1535,16 @@ int tnt2_accel_init(void)
 
     for (i = 0; i < 16; i++)
         PRAMIN[i] = ramht[i];
-    PRAMIN[0x0800] = 0x00003000;
+    /* (the DMA object for video memory: class 0 on the NV4, as the X driver's; class 0x3D on the NV1x, whose emulated
+     * 3D classes check it: textures 0x02 or 0x3D, the 3D surfaces 0x3D only, envytools' hardware tests) */
+    PRAMIN[0x0800] = tnt2.arch == 10 ? 0x0000303D : 0x00003000;
     PRAMIN[0x0801] = tnt2.fb_size - 1;
     PRAMIN[0x0802] = 0x00000002;
     PRAMIN[0x0803] = 0x00000002;
     for (i = 0; i < 0x28 - 0x04; i++)
         obj[i] = 0;
-    obj[0x04 - 4] = 0x01008042; obj[0x06 - 4] = 0x12001200;               /* 2D surfaces (NV4: 0x42) */
+    obj[0x04 - 4] = tnt2.arch == 10 ? 0x01008062 : 0x01008042;           /* 2D surfaces (NV4: 0x42, NV10: 0x62) */
+    obj[0x06 - 4] = 0x12001200;
     obj[0x08 - 4] = 0x01008043;                                           /* ROP */
     obj[0x0C - 4] = 0x01008044; obj[0x0D - 4] = 0x00000002;               /* pattern */
     obj[0x10 - 4] = 0x01008019;                                           /* clip */
@@ -1302,6 +1561,41 @@ int tnt2_accel_init(void)
         PRAMIN[0x0826] += tnt2.bar1;
     }
 
+    if (tnt2.arch == 10) {
+        /* PFB's tile regions off (nv_hw.c's NVLoadStateExt before NV40), then PGRAPH as nv_hw.c sets an NV_ARCH_10's:
+         * the context control at 0x400144 (not the NV4's 0x400170, which is something else here), the state at
+         * 0x400714, the surface register kept but for its own fields, the debug words, the tile regions copied, the
+         * limits the memory's size. */
+        for (i = 0; i < 8; i++) {
+            PFB[(0x0240 + i * 0x10) / 4] = 0;
+            PFB[(0x0244 + i * 0x10) / 4] = tnt2.fb_size - 1;
+        }
+        PGRAPH[0x0080 / 4] = 0xFFFFFFFF;
+        PGRAPH[0x0080 / 4] = 0x00000000;
+        PGRAPH[0x0140 / 4] = 0x00000000;
+        PGRAPH[0x0100 / 4] = 0xFFFFFFFF;
+        PGRAPH[0x0144 / 4] = 0x10010100;
+        PGRAPH[0x0714 / 4] = 0xFFFFFFFF;
+        PGRAPH[0x0720 / 4] = 0x00000001;
+        PGRAPH[0x0710 / 4] &= 0x0007FF00;
+        PGRAPH[0x0710 / 4] |= 0x00020100;
+        PGRAPH[0x0084 / 4] = 0x00118700;
+        /* DEBUG_2 as nouveau's nv10_gr_init (MIT) sets it, not xf86-video-nv's 0x24E00810: with that, the NV11 filled
+         * at a third of its rate untextured and a fifth to a ninth with depth or blending (DCFILL on bench E: flat
+         * 120 -> 346 Mpixels/s, the depth test LESS 19 -> 169, blending 28 -> 184; GLQuake fill-bound). nouveau's
+         * DEBUG_3 (0xF5DE0830) is not taken: it traps the layer's 2D rectangle object. */
+        PGRAPH[0x0088 / 4] = 0x25F92AD9;
+        PGRAPH[0x008C / 4] = 0x55DE0030;
+        for (i = 0; i < 32; i++)
+            PGRAPH[0x0B00 / 4 + i] = PFB[0x0240 / 4 + i];
+        PGRAPH[0x0640 / 4] = 0;
+        PGRAPH[0x0644 / 4] = 0;
+        PGRAPH[0x0684 / 4] = tnt2.fb_size - 1;
+        PGRAPH[0x0688 / 4] = tnt2.fb_size - 1;
+        PGRAPH[0x0810 / 4] = 0x00000000;
+        PGRAPH[0x0608 / 4] = 0xFFFFFFFF;
+        nv10_pipe_init();
+    } else {
     /* PGRAPH, before NV10. */
     PGRAPH[0x0080 / 4] = 0x000001FF;
     PGRAPH[0x0080 / 4] = 0x1230C000;
@@ -1316,6 +1610,7 @@ int tnt2_accel_init(void)
     PGRAPH[0x0720 / 4] = 0x00000001;
     PGRAPH[0x0810 / 4] = 0x00000000;
     PGRAPH[0x0608 / 4] = 0xFFFFFFFF;
+    }
     PGRAPH[0x053C / 4] = 0;
     PGRAPH[0x0540 / 4] = 0;
     PGRAPH[0x0544 / 4] = 0x00007FFF;

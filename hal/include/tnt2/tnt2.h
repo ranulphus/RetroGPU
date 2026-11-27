@@ -14,7 +14,9 @@ typedef struct {
     uint32_t boot0;             /* PMC_BOOT_0 */
     uint32_t fb_size;           /* bytes of video memory (from PFB_BOOT_0) */
     uint32_t fb_usable;         /* below the 128 KB the layer keeps at the top: the command ring (32 KB), then the
-                                   images' scratch (64 KB) */
+                                   images' scratch (64 KB); on the NV1x, below the instance memory too (PRAMIN lies
+                                   reversed over the top 512 KB there, NPRAMIN on bench E: docs/nv10.md) */
+    int      arch;              /* 4: the NV4 family (TNT, TNT2); 10: the NV1x (the NV11: GeForce2 MX, Quadro2 MXR) */
     const char *name;
 } tnt2_chip;
 
@@ -32,6 +34,7 @@ int  tnt2_accel_init(void);
 int  tnt2_sync(uint32_t timeout_us);    /* every command done: 0, or -1 on time-out */
 int  tnt2_idle(void);                   /* 1: every command written so far is done (no wait) */
 void tnt2_kick(void);                   /* the ring's written commands to the chip now */
+void tnt2_kick_soon(void);              /* ... once 4 KB of them wait (every wait kicks first) */
 void tnt2_ring_dump(int before, int after, void (*out)(const char *line));  /* (diagnostic: round the chip's GET) */
 void tnt2_set_diag(void (*out)(const char *line));   /* where a trap's first report goes (NULL: nowhere) */
 unsigned tnt2_traps(void);                  /* traps acknowledged since the layer started */
@@ -66,7 +69,13 @@ void tnt2_cursor_show(int on);
 void tnt2_cursor_move(int x, int y);
 int  tnt2_set_start(uint32_t byte_off);
 int  tnt2_vsync_wait(uint32_t timeout_us);
-void tnt2_set_pitch(int pitch_bytes);   /* the display's row length (CR13/CR19), when the BIOS's 4F06 won't */
+/* Celsius, the NV1x's own 3D class (docs/nv10.md, Q3): set up after tnt2_3d_init (subchannel 7 then holds it) */
+int  tnt2_celsius_init(void);
+void tnt2_celsius_target(uint32_t colour, uint32_t zeta, int pitch_bytes, int w, int h, int bpp);
+void tnt2_celsius_tris(uint32_t vb, int n, int w, int h);   /* (DCEL0) {r,g,b,x,y} floats at vb, GL_TRIANGLES */
+void tnt2_methods(int sub, uint32_t mthd, const uint32_t *v, int n);
+int  tnt2_set_pitch(int pitch_bytes);   /* the display's row length (CR13/CR19), when the BIOS's 4F06 won't; -1 on
+                                           * the NV1x, whose CRTC isn't written (CR1F/CR44 lock NV11s up) */
 void tnt2_set_ramp(const uint8_t ramp[256]);    /* the palette as a gamma ramp in direct colour (PRAMDAC 0x600) */
 void tnt2_ramp_off(void);                       /* ... and the RAMDAC as it was before (before text mode) */
 

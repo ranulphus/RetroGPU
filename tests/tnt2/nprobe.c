@@ -6,7 +6,11 @@
  *
  * Lines: NPROBE-PCI, NPROBE-REG, NPROBE-MEM, NPROBE-CLK, NPROBE-VBE, NPROBE-MODE; tests "pci", "id", "vbe".
  * Register offsets are the NV4/NV5's (envytools' rnndb; X.org's xf86-video-nv, riva_hw.c); the memory size and
- * bus width are decoded as riva_hw.c reads them, and printed raw beside, for T0 to confirm. */
+ * bus width are decoded as riva_hw.c reads them, and printed raw beside, for T0 to confirm.
+ * The NV1x family (the GeForce 256, GeForce2 MX and Quadro2 MXR: docs/nv10.md, Q1): NPROBE-NV10 adds the NV10's
+ * memory size (PFB 0x10020C), bus width (0x100200), the VGA owner (CR44) and the extended registers' lock (CR1F) as
+ * they read now (the CRTC index is put back; nothing is written to CR44 or CR1F, which lock NV11s up), the cursor's
+ * and the head's configuration (0x600810, 0x600860) and the second head's PLL (0x680520). */
 #include "hx.h"
 #include "mga/hal.h"
 #include "mga/sys.h"
@@ -24,7 +28,14 @@ static const char *nv_name(uint16_t id)
     case 0x002C: return "Vanta (NV5)";
     case 0x002D: return "Riva TNT2 M64 (NV5)";
     case 0x00A0: return "Aladdin TNT2 (NV5, integrated)";
-    default:     return "not a TNT/TNT2";
+    case 0x0100: return "GeForce 256 (NV10)";
+    case 0x0101: return "GeForce 256 DDR (NV10)";
+    case 0x0103: return "Quadro (NV10)";
+    case 0x0110: return "GeForce2 MX/MX400 (NV11)";
+    case 0x0111: return "GeForce2 MX100/200 (NV11)";
+    case 0x0112: return "GeForce2 Go (NV11)";
+    case 0x0113: return "Quadro2 MXR/EX/Go (NV11)";
+    default:     return "not a TNT/TNT2 or NV1x";
     }
 }
 
@@ -108,6 +119,23 @@ int main(int argc, char **argv)
         static const unsigned mb[4] = { 32, 4, 8, 16 };
         hx_log("NPROBE-MEM amount=%u MB (pfb_boot0 bits 1-0 = %lu) bus=%u bits (bit 2 = %lu)", mb[pfb0 & 3],
                (unsigned long)(pfb0 & 3), (pfb0 & 4) ? 128u : 64u, (unsigned long)((pfb0 >> 2) & 1));
+    }
+    if ((did & 0x0FF0) == 0x0100 || (did & 0x0FF0) == 0x0110) {
+        /* NV1x: the memory size in MB at PFB 0x10020C (bits 31-20, xf86-video-nv's nv_setup.c), the bus width in
+         * PFB_CFG0 bits 5-4 (envytools' nv10_pfb.xml), printed raw. CR44 and CR1F read through the VGA ports with
+         * the index register put back. */
+        uint32_t amt = r32[0x10020C / 4], cfg0 = r32[0x100200 / 4];
+        uint8_t idx = (uint8_t)sys_inb(0x3D4), cr44, cr1f;
+        sys_outb(0x3D4, 0x44);
+        cr44 = (uint8_t)sys_inb(0x3D5);
+        sys_outb(0x3D4, 0x1F);
+        cr1f = (uint8_t)sys_inb(0x3D5);
+        sys_outb(0x3D4, idx);
+        hx_log("NPROBE-NV10 arch=%s mem_amount=%08lx (%lu MB) pfb_cfg0=%08lx (bus field %lu) cr44=%02x cr1f=%02x "
+               "pcrtc_cursor_config=%08lx pcrtc_860=%08lx vpll2=%08lx", (did & 0x0FF0) == 0x0110 ? "NV11" : "NV10",
+               (unsigned long)amt, (unsigned long)(amt >> 20), (unsigned long)cfg0, (unsigned long)((cfg0 >> 4) & 3),
+               cr44, cr1f, (unsigned long)r32[0x600810 / 4], (unsigned long)r32[0x600860 / 4],
+               (unsigned long)r32[0x680520 / 4]);
     }
     xtal = (straps & 0x40) ? 14318 : 13500;     /* (the strap's crystal: 14.318 or 13.5 MHz) */
     hx_log("NPROBE-CLK xtal=%lu kHz nvpll=%08lx (%u kHz) mpll=%08lx (%u kHz) vpll=%08lx (%u kHz)", (unsigned long)xtal,

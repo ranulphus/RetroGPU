@@ -4,7 +4,7 @@
  * byte for byte. Coordinates stay inside the surface (the methods' x and y are 16 bits each); clipping is tested
  * through the clip object.
  *
- *   NTWOD [16] [8] [ops=N]
+ *   NTWOD [16] [8] [32] [ops=N]      (32: asked for only; the NV1x's, docs/nv10.md)
  *
  * Then copies from the off-screen surface to the screen, colour expansion (opaque and transparent, in random clips,
  * starting anywhere) and images from the CPU, against the same model; and, as the P3 has no screen capture, the
@@ -248,6 +248,11 @@ static void cursor_and_start(void)
     int i, bad = -1, x, y;
     uint8_t cr31;
     uint32_t pos, start0 = tnt2_regs[0x600800 / 4];
+    if (tnt2.arch == 10) {
+        /* (the NV1x: no cursor yet, its CRTC not written: docs/nv10.md; the start register still checked) */
+        hx_log("NTWOD cursor skipped on the %s (arch NV10: the layer refuses it)", tnt2.name);
+        goto start_only;
+    }
     for (i = 0; i < 512; i++)
         and_m[i] = (uint8_t)rnd(256), xor_m[i] = (uint8_t)rnd(256);
     tnt2_cursor_load(and_m, xor_m);
@@ -273,6 +278,7 @@ static void cursor_and_start(void)
     cr31 = pcio[0x3D5];
     if (cr31 & 1)
         hx_test("cursor-hide", 0, "CR31 %02x after hiding", cr31);
+start_only:
     {
         uint32_t want = 640u * 2u * 8u, got;
         int r = tnt2_set_start(want);
@@ -286,14 +292,15 @@ static void cursor_and_start(void)
 
 int main(int argc, char **argv)
 {
-    int i, want16 = 0, want8 = 0;
+    int i, want16 = 0, want8 = 0, want32 = 0;
     hx_init(1, argv, "ntwod");                  /* (its own arguments only) */
     for (i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "16")) want16 = 1;
         else if (!strcmp(argv[i], "8")) want8 = 1;
+        else if (!strcmp(argv[i], "32")) want32 = 1;
         else if (!strncmp(argv[i], "ops=", 4)) nops = atoi(argv[i] + 4);
     }
-    if (!want16 && !want8)
+    if (!want16 && !want8 && !want32)
         want16 = want8 = 1;
     if (tnt2_find() != 0 || tnt2_map() != 0) {
         hx_test("map", 0, "no NV4-family chip");
@@ -321,6 +328,8 @@ int main(int argc, char **argv)
         depth(16);
     if (want8)
         depth(8);
+    if (want32)
+        depth(32);
     cursor_and_start();
     tnt2_sync(1000000);
     vbe_set_text_mode();
