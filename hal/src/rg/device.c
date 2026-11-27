@@ -3,6 +3,7 @@
  * into Glide's Open Watcom build (which takes its device itself; the log and
  * the errors are log.c's). */
 #include "rg/device.h"
+#include "mga/hal.h"                    /* (vbe_wait_hook) */
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -65,4 +66,9 @@ const rg_device *rg_window_device(void)
         if (devices[i]->window_ok && devices[i]->window_ok())
             return devices[i];
     return NULL;
+}
+
+void rg_set_wait_hook(void (*fn)(void))
+{
+    vbe_wait_hook = fn;
 }

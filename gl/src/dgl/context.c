@@ -9,7 +9,6 @@
 #include "../gl/gl_tex.h"
 #include "../gl/gl_draw.h"
 #include "mga/sys.h"
-#include "mga/hal.h"                    /* (vbe_wait_hook: dglSetWaitHook) */
 #include "../backend/backend.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -488,7 +487,7 @@ void dglSetWaitHook(void (*fn)(void *arg), void *arg)
 {
     wait_hook = fn;
     wait_hook_arg = arg;
-    vbe_wait_hook = fn ? vbe_yield : NULL;
+    rg_set_wait_hook(fn ? vbe_yield : NULL);
 }
 
 static void run_wait_hook(void)

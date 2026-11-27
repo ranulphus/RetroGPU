@@ -204,6 +204,9 @@ void rg_set_error(const char *fmt, ...) RG_PRINTF(1, 2);
 /* The log: lines a device prints (its DGL- lines today) go to the program's
  * logger, set by the GL layer at its start; none until then. */
 void rg_set_log(void (*fn)(const char *line));
+/* Run after each of the video BIOS's calls the HAL makes (vbe.c; NULL: none): DOS-GL's yield, so a program's other
+ * work (SDL's audio thread, which feeds GLOS's stream) goes on through a start-up's BIOS calls. */
+void rg_set_wait_hook(void (*fn)(void));
 void rg_logf(const char *fmt, ...) RG_PRINTF(1, 2);
 void rg_log_line(const char *line);                 /* one line, as it is */
 /* The formatter the log and the errors use (log.c): the C library's vsnprintf, but in Glide's Open Watcom runtime
