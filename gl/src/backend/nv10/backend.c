@@ -138,6 +138,8 @@ typedef struct {
 #define VA_SIZE (256u * 1024u)                  /* the vertex area */
 #define VA_PARTS 4                              /* fenced a quarter at a time */
 #define VA_PART (VA_SIZE / VA_PARTS)
+#define NSIZE 12u                               /* a lit draw's normal (x y z floats), in an array of its own */
+#define NA_SIZE ((VA_SIZE / VSIZE + 1u) * NSIZE)
 
 /* A texture's copy in VRAM. */
 typedef struct {
@@ -190,6 +192,8 @@ static uint32_t fbits(float f) { union { float f; uint32_t u; } c; c.f = f; retu
 /* A vector method (the fog's coefficients, the projection, the viewport's translation) sent whole when any of it
  * changed: the chip takes such a vector when its last word is written (t10 on bench E: exp's coefficients after
  * linear's, k2 = 0 both times and so skipped, were never taken). */
+static void mcv(uint32_t mthd, const uint32_t *v, int n);
+static void mcf_one(uint32_t mthd, float f) { mcv(mthd, (const uint32_t[]){ fbits(f) }, 1); }
 static void mcv(uint32_t mthd, const uint32_t *v, int n)
 {
     uint32_t i0 = mthd >> 2;
@@ -397,16 +401,19 @@ static uint32_t va_first;                       /* the first vertex not yet draw
 static uint32_t va_mark[VA_PARTS];              /* the stream after the last draw from each quarter */
 static int va_formats;                          /* VTXBUF_FMT sent */
 static uint32_t offs_base;                      /* where VTXBUF_OFFSET points: the vertex area, or a kept draw's */
+static uint32_t na_off;                         /* the vertex area's normals (vertex i's at na_off + 12 i) */
+static uint32_t offs_nbase;                     /* where slot 5 (normals) points, 0: off */
 
 static int va_get(void)
 {
     if (va_off)
         return 0;
-    if (room(VA_SIZE + 256u, &va_block, NULL) != 0) {
+    if (room(VA_SIZE + NA_SIZE + 512u, &va_block, NULL) != 0) {
         warn_once(2, "no room for the vertex area: nothing drawn");
         return -1;
     }
     va_off = (va_block + 255u) & ~255u;
+    na_off = va_off + ((VA_SIZE + 255u) & ~255u);
     va_n = va_first = 0;
     memset(va_mark, 0, sizeof va_mark);
     va_formats = 0;
@@ -427,24 +434,33 @@ static void va_formats_send(void)
     for (i = 0; i < 8; i++)
         m1(M_VTXBUF_FMT(i), fmt[i]);
     va_formats = 1;
-    offs_base = 0;
+    offs_base = 0, offs_nbase = 0;
 }
 
-/* VTXBUF_OFFSET at a block of the 40-byte vertices (the vertex area's, or a kept draw's), where it isn't already. */
-static void set_base(uint32_t base)
+/* VTXBUF_OFFSET at a block of the 40-byte vertices (the vertex area's, or a kept draw's), where it isn't already;
+ * nbase: a lit draw's normals (slot 5, 12 bytes a vertex), 0: none. */
+static void set_base2(uint32_t base, uint32_t nbase)
 {
     static const uint32_t at[8] = { 0, 16, 0, 20, 28, 0, 0, 36 };
     static const unsigned char used[8] = { 1, 1, 0, 1, 1, 0, 0, 1 };
     int i;
     if (!va_formats)
         va_formats_send();
-    if (offs_base == base)
-        return;
-    for (i = 0; i < 8; i++)
-        if (used[i])
-            m1(M_VTXBUF_OFFSET(i), base + at[i]);
-    offs_base = base;
+    if (offs_base != base) {
+        for (i = 0; i < 8; i++)
+            if (used[i])
+                m1(M_VTXBUF_OFFSET(i), base + at[i]);
+        offs_base = base;
+    }
+    if (offs_nbase != nbase) {
+        m1(M_VTXBUF_FMT(5), nbase ? NSIZE << 8 | 3u << 4 | 2u : 0x0002u);
+        if (nbase)
+            m1(M_VTXBUF_OFFSET(5), nbase);
+        offs_nbase = nbase;
+    }
 }
+
+static void set_base(uint32_t base) { set_base2(base, 0); }
 
 /* The vertices written since the last flush drawn: one triangle list. */
 static void flush(void)
@@ -709,6 +725,7 @@ static void combiner(const comb *c, int alpha, int hw, uint32_t *in, uint32_t *o
     *in = IN(A, B, C, D);
     *out = o;
 }
+
 
 /* The combiners for the chip's units in use, and the final combiner (with fog). */
 static void combiners(const ctex *x[2], const dgl_texenv *env[2])
@@ -1195,12 +1212,302 @@ static void tex_affine(const float *m, float st[2], float r)
     st[1] = (m[1] * s0 + m[5] * t0 + m[9] * r + m[13]) * iq;
 }
 
+/* ---- Lighting on the chip (Mesa's nv10_state_tnl.c, MIT: Francisco Jerez) ------------------------------------
+ * The lights' colours as products with the material (the colour material's part from the vertex instead), the
+ * scene's ambient and emission, positions (eye space, as GL keeps them) or directions with their half vectors,
+ * attenuation, the spot's and the shininess's coefficients (Mesa's fits to the chip's curves: compared with the
+ * CPU's lighting before trusting them), MODELVIEW and its inverse's first three columns for the normals.
+ * DGL_TNL_LIGHT=0: lit draws the CPU's path. */
+#define M_LIGHT_MODEL     0x294
+#define M_COLOR_MATERIAL  0x298
+#define M_NORMALIZE       0x3A4
+#define M_MATERIAL_FACTOR 0x3A8
+#define M_MATERIAL_ALPHA  0x3B4
+#define M_SEP_SPECULAR    0x3B8
+#define M_ENABLED_LIGHTS  0x3BC
+#define M_INVERSE_MV      0x480
+#define M_SHININESS       0x6A0
+#define M_SCENE_AMBIENT   0x6C4
+#define M_LIGHT(i, o)     (0x800u + 0x80u * (uint32_t)(i) + (o))
+#define L_AMBIENT 0x00
+#define L_DIFFUSE 0x0C
+#define L_SPECULAR 0x18
+#define L_HALF 0x28
+#define L_DIRECTION 0x34
+#define L_SPOT 0x40
+#define L_POSITION 0x5C
+#define L_ATTEN 0x68
+
+static int light_ok(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("DGL_TNL_LIGHT");
+        on = !(e && *e == '0');
+    }
+    return on;
+}
+
+static float get_shine(const float p[], float x)
+{
+    const int n = 15;
+    const float *y = &p[1];
+    float f = (n - 1) * (1 - 1 / (1 + p[0] * x)) / (1 - 1 / (1 + p[0] * 1024));
+    int i = (int)f;
+    if (x == 0)
+        return y[0];
+    else if (i > n - 2)
+        return y[n - 1];
+    return y[i] + (y[i + 1] - y[i]) * (f - (float)i);
+}
+
+static const float spot_params[2][16] = {
+    { 0.02f, -3.80e-05f, -1.77f, -2.41f, -2.71f, -2.88f, -2.98f, -3.06f, -3.11f, -3.17f, -3.23f, -3.28f, -3.37f,
+      -3.47f, -3.83f, -5.11f },
+    { 0.02f, -0.01f, 1.77f, 2.39f, 2.70f, 2.87f, 2.98f, 3.06f, 3.10f, 3.16f, 3.23f, 3.27f, 3.37f, 3.47f, 3.83f, 5.11f },
+};
+
+static const float shininess_params[6][16] = {
+    { 0.70f, 0.00f, 0.06f, 0.06f, 0.05f, 0.04f, 0.02f, 0.00f, -0.06f, -0.13f, -0.24f, -0.36f, -0.51f, -0.66f, -0.82f,
+      -1.00f },
+    { 0.01f, 1.00f, -2.29f, -2.77f, -2.96f, -3.06f, -3.12f, -3.18f, -3.24f, -3.29f, -3.36f, -3.43f, -3.51f, -3.75f,
+      -4.33f, -5.11f },
+    { 0.02f, 0.00f, 2.28f, 2.75f, 2.94f, 3.04f, 3.1f, 3.15f, 3.18f, 3.22f, 3.27f, 3.32f, 3.39f, 3.48f, 3.84f, 5.11f },
+    { 0.70f, 0.00f, 0.05f, 0.06f, 0.06f, 0.06f, 0.05f, 0.04f, 0.02f, 0.01f, -0.03f, -0.12f, -0.25f, -0.43f, -0.68f,
+      -0.99f },
+    { 0.01f, 1.00f, -1.61f, -2.35f, -2.67f, -2.84f, -2.96f, -3.05f, -3.08f, -3.14f, -3.2f, -3.26f, -3.32f, -3.42f,
+      -3.54f, -4.21f },
+    { 0.01f, 0.00f, 2.25f, 2.73f, 2.92f, 3.03f, 3.09f, 3.15f, 3.16f, 3.21f, 3.25f, 3.29f, 3.35f, 3.43f, 3.56f, 4.22f },
+};
+
+static void norm3(const float *a, float *r)
+{
+    float l = sqrtf(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+    l = l > 0 ? 1.0f / l : 0.0f;
+    r[0] = a[0] * l, r[1] = a[1] * l, r[2] = a[2] * l;
+}
+
+static void spot_coeff(const dgl_light *l, float k[7])
+{
+    float e = l->spot_exp, a0, b0, a1, a2, b2, a3, d[3];
+    float cosc = cosf(l->spot_cutoff * 3.14159265358979f / 180.0f);
+    norm3(l->spot_dir, d);
+    a0 = e > 0 ? -1 - 5.36e-3f / sqrtf(e) : -1;
+    b0 = 1 / (1 + 0.273f * e);
+    a1 = get_shine(spot_params[0], e);
+    a2 = get_shine(spot_params[1], e);
+    b2 = 1 / (1 + 0.273f * e);
+    a3 = 0.9f + 0.278f * e;
+    {
+        float cutoff = 1 / (1 - cosc);
+        if (cutoff < a3)
+            cutoff = a3;
+        k[0] = a0 + b0 * cutoff > 0 ? a0 + b0 * cutoff : 0;
+        k[1] = a1;
+        k[2] = a2 + b2 * cutoff;
+        k[3] = -cutoff * d[0], k[4] = -cutoff * d[1], k[5] = -cutoff * d[2];
+        k[6] = 1 - cutoff;
+    }
+}
+
+static void fv(uint32_t mthd, const float *f, int n)
+{
+    uint32_t w[16];
+    int i;
+    for (i = 0; i < n; i++)
+        w[i] = fbits(f[i]);
+    mcv(mthd, w, n);
+}
+
+/* LIGHT_HALF_VECTOR and LIGHT_ATTENUATION write the same word of the chip's light (envytools' hwtest: both its
+ * vector 3), a directional light's and a positional light's: sent each time, never from the cache (t40: a light made
+ * positional and then directional again kept the attenuation as its half vector, and lost its highlight). */
+static void fv_alias(uint32_t mthd, const float *f)
+{
+    uint32_t w[3], i0;
+    int i, l;
+    for (i = 0; i < 3; i++)
+        w[i] = fbits(f[i]);
+    tnt2_methods(S7, mthd, w, 3);
+    l = (int)((mthd - 0x800u) / 0x80u);
+    for (i0 = M_LIGHT(l, L_HALF) >> 2, i = 0; i < 3; i++)
+        sh_ok[i0 + (uint32_t)i] = 0;
+    for (i0 = M_LIGHT(l, L_ATTEN) >> 2, i = 0; i < 3; i++)
+        sh_ok[i0 + (uint32_t)i] = 0;
+}
+
+static void inverse_mv_state(void);
+
+static void light_state(void)
+{
+    const dgl_material *m = &dgl_gl.material[0];
+    int cm = dgl_gl.color_material && dgl_gl.color_material_face != GL_BACK;
+    GLenum cmode = dgl_gl.color_material_mode;
+    int cm_em = cm && cmode == GL_EMISSION, cm_am = cm && (cmode == GL_AMBIENT || cmode == GL_AMBIENT_AND_DIFFUSE);
+    int cm_di = cm && (cmode == GL_DIFFUSE || cmode == GL_AMBIENT_AND_DIFFUSE), cm_sp = cm && cmode == GL_SPECULAR;
+    uint32_t en = 0;
+    float scene[3], factor[3] = { 0, 0, 0 }, k[7];
+    int i, c;
+    mc(M_LIGHTING_ENABLE, 1);
+    mc(M_NORMALIZE, (uint32_t)(dgl_gl.normalize || dgl_gl.rescale_normal));
+    mc(M_LIGHT_MODEL, dgl_gl.light_local_viewer ? 0x10000u : 0u);
+    mc(M_SEP_SPECULAR, 0);
+    mc(M_COLOR_MATERIAL, (uint32_t)(cm_em ? 1 : 0) | (cm_am ? 2u : 0u) | (cm_di ? 4u : 0u) | (cm_sp ? 8u : 0u));
+    /* The scene's colour: emission + material ambient x the model's ambient (the colour material's part per vertex,
+     * MATERIAL_FACTOR the rest); Mesa's nv10_emit_material_ambient. */
+    for (c = 0; c < 3; c++) {
+        if (cm_am)
+            scene[c] = dgl_gl.light_model_ambient[c], factor[c] = m->emission[c];
+        else if (cm_em)
+            scene[c] = m->ambient[c] * dgl_gl.light_model_ambient[c];
+        else
+            scene[c] = m->emission[c] + m->ambient[c] * dgl_gl.light_model_ambient[c];
+    }
+    fv(M_SCENE_AMBIENT, scene, 3);
+    if (cm)
+        fv(M_MATERIAL_FACTOR, factor, 3);
+    mcf_one(M_MATERIAL_ALPHA, m->diffuse[3]);
+    {
+        float sh[6], x = m->shininess < 0 ? 0 : m->shininess > 1024 ? 1024 : m->shininess;
+        for (i = 0; i < 6; i++)
+            sh[i] = get_shine(shininess_params[i], x);
+        fv(M_SHININESS, sh, 6);
+    }
+    for (i = 0; i < 8; i++) {
+        const dgl_light *l = &dgl_gl.light[i];
+        float a[3], d[3], sp[3];
+        if (!l->enabled)
+            continue;
+        for (c = 0; c < 3; c++) {
+            a[c] = cm_am ? l->ambient[c] : l->ambient[c] * m->ambient[c];
+            d[c] = cm_di ? l->diffuse[c] : l->diffuse[c] * m->diffuse[c];
+            sp[c] = cm_sp ? l->specular[c] : l->specular[c] * m->specular[c];
+        }
+        fv(M_LIGHT(i, L_AMBIENT), a, 3);
+        fv(M_LIGHT(i, L_DIFFUSE), d, 3);
+        fv(M_LIGHT(i, L_SPECULAR), sp, 3);
+        if (l->position[3] == 0) {              /* (a direction towards the light, and the far viewer's half vector) */
+            float v[3], h[3];
+            norm3(l->position, v);
+            h[0] = v[0], h[1] = v[1], h[2] = v[2] + 1.0f;
+            norm3(h, h);
+            fv(M_LIGHT(i, L_DIRECTION), v, 3);
+            fv_alias(M_LIGHT(i, L_HALF), h);
+            en |= 1u << 2 * i;                  /* (NONPOSITIONAL) */
+        } else {
+            float iw = 1.0f / l->position[3], pos[3];
+            pos[0] = l->position[0] * iw, pos[1] = l->position[1] * iw, pos[2] = l->position[2] * iw;
+            fv(M_LIGHT(i, L_POSITION), pos, 3);
+            fv_alias(M_LIGHT(i, L_ATTEN), l->att);
+            if (l->spot_cutoff != 180.0f) {
+                spot_coeff(l, k);
+                fv(M_LIGHT(i, L_SPOT), k, 7);
+                en |= 3u << 2 * i;              /* (Mesa's "DIRECTIONAL": a spot) */
+            } else
+                en |= 2u << 2 * i;              /* (POSITIONAL) */
+        }
+    }
+    mc(M_ENABLED_LIGHTS, en);
+    inverse_mv_state();
+}
+
+/* ---- Texture coordinates generated by the chip (Mesa's nv10_emit_tex_gen, nv10_emit_tex_mat) -------------------
+ * A unit's s and t both generated, object or eye linear or a sphere map (r and q not): TEX_GEN_MODE and the planes
+ * (GL keeps the eye plane in eye space already), and the unit's texture matrix on the chip (TEX_MATRIX), as its
+ * coordinates don't exist until the chip makes them. Otherwise generation stays the CPU's (DGL_TNL_TEXGEN=0: always). */
+#define M_TEX_GEN_MODE(u, c)  (0x3C0u + 0x10u * (uint32_t)(u) + 4u * (uint32_t)(c))
+#define M_TEX_GEN_COEFF(u, c) (0x600u + 0x40u * (uint32_t)(u) + 0x10u * (uint32_t)(c))
+#define M_TEX_MATRIX_ON(u)    (0x3E0u + 4u * (uint32_t)(u))
+#define M_TEX_MATRIX(u)       (0x540u + 0x40u * (uint32_t)(u))
+
+static void matrix_words(uint32_t *w, const float *m);
+
+static uint32_t gen_code(GLenum m)
+{
+    return m == GL_EYE_LINEAR ? 0x2400u : m == GL_OBJECT_LINEAR ? 0x2401u : m == GL_SPHERE_MAP ? 0x2402u : 0u;
+}
+
+static int texgen_ok(int u)
+{
+    static int on = -1;
+    GLenum m;
+    if (!dgl_gl.texgen_on[u])
+        return 1;
+    if (on < 0) {
+        const char *e = getenv("DGL_TNL_TEXGEN");
+        on = !(e && *e == '0');
+    }
+    m = dgl_gl.texgen[u][0].mode;
+    return on && dgl_gl.texgen_on[u] == 3u && dgl_gl.texgen[u][1].mode == m && gen_code(m) != 0;
+}
+
+/* GL's unit g generates on the chip (a textured unit with generation on). */
+static int generated(int g)
+{
+    return dgl_gl.texgen_on[g] && (g ? valid_tex1 != NULL : valid_tex != NULL);
+}
+
+static int sphere_used(void)
+{
+    return (generated(0) && dgl_gl.texgen[0][0].mode == GL_SPHERE_MAP) ||
+           (generated(1) && dgl_gl.texgen[1][0].mode == GL_SPHERE_MAP);
+}
+
+static void inverse_mv_state(void)
+{
+    const dgl_mat4 *mv = &dgl_gl.mv.stack[dgl_gl.mv.depth - 1];
+    dgl_mat4 inv;
+    uint32_t w[12];
+    int r;
+    if (dgl_mat_inverse(&inv, mv) == 0)         /* (singular: the identity, as the Radeon back end) */
+        for (r = 0; r < 16; r++)
+            inv.m[r] = (r % 5) == 0 ? 1.0f : 0.0f;
+    for (r = 0; r < 12; r++)                    /* (its first three columns, as Mesa sends m->inv) */
+        w[r] = fbits(inv.m[r]);
+    mcv(0x480, w, 12);
+}
+
+/* The chip's units' generation and texture matrices for an engine draw (gen: 1); or all off (the CPU's path). */
+static void texgen_state(int engine)
+{
+    int h;
+    for (h = 0; h < 2; h++) {
+        int g = swap_st ? 1 - h : h, c;
+        if (engine && generated(g) && !(swap_st && h == 1)) {
+            const float *tm = tex_matrix(g);
+            static const float ident[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+            uint32_t w[16];
+            for (c = 0; c < 2; c++) {
+                const dgl_texgen *t = &dgl_gl.texgen[g][c];
+                mc(M_TEX_GEN_MODE(h, c), gen_code(t->mode));
+                if (t->mode != GL_SPHERE_MAP) {
+                    const float *pl = t->mode == GL_OBJECT_LINEAR ? t->object : t->eye;
+                    uint32_t pw[4];
+                    int k;
+                    for (k = 0; k < 4; k++)
+                        pw[k] = fbits(pl[k]);
+                    mcv(M_TEX_GEN_COEFF(h, c), pw, 4);
+                }
+            }
+            mc(M_TEX_GEN_MODE(h, 2), 0), mc(M_TEX_GEN_MODE(h, 3), 0);
+            matrix_words(w, tm ? tm : ident);
+            mcv(M_TEX_MATRIX(h), w, 16);
+            mc(M_TEX_MATRIX_ON(h), 1);
+        } else {
+            for (c = 0; c < 4; c++)
+                mc(M_TEX_GEN_MODE(h, c), 0);
+            mc(M_TEX_MATRIX_ON(h), 0);
+        }
+    }
+}
+
 static int tnl_state_ok(GLenum mode)
 {
     if (mode == GL_POINTS || mode == GL_LINES || mode == GL_LINE_STRIP || mode == GL_LINE_LOOP)
         return 0;                               /* (lines and points: the CPU's path draws their widths) */
-    if (dgl_gl.lighting || dgl_gl.texgen_on[0] || dgl_gl.texgen_on[1] || dgl_gl.clip_enabled)
-        return 0;                               /* (stage 1; user clip planes: the chip has none) */
+    if ((dgl_gl.lighting && (dgl_gl.light_two_side || !light_ok())) || !texgen_ok(0) || !texgen_ok(1) ||
+        dgl_gl.clip_enabled)
+        return 0;                               /* (two-sided lighting and user clip planes: the chip has neither) */
     if ((dgl_gl.texture_cube[0] | dgl_gl.texture_cube[1]) || dgl_gl.polygon_mode != GL_FILL)
         return 0;
     return tex_matrix_ok(0) && tex_matrix_ok(1);
@@ -1225,14 +1532,18 @@ static void cpu_state(void)
         mc(M_FOG_COORD, 0);
     mc(M_CULL_ENABLE, 0);
     mc(M_SHADE_MODEL, 0x1D01);
+    mc(M_LIGHTING_ENABLE, 0);
+    texgen_state(0);
+    set_base2(offs_base, 0);                    /* (the normals' slot off) */
 }
 
 /* A draw's vertices vmin.. (nv of them) converted into 40-byte vertices at video memory offset at: 0 if one can't be
  * (coordinates past 1,024 lose their fraction in the chip's floats, the CPU's path taking whole periods off per
  * triangle, conformance t14; a position not finite, the CPU's path clipping it). */
-static int pack(uint32_t at, GLint vmin, int nv, const float *tm0, const float *tm1)
+static int pack(uint32_t at, uint32_t nat, GLint vmin, int nv, const float *tm0, const float *tm1)
 {
     cvert c[64];
+    float nr[64][3];
     dgl_vin v;
     int i, j = 0;
     for (i = 0; i < nv; i++) {
@@ -1254,9 +1565,15 @@ static int pack(uint32_t at, GLint vmin, int nv, const float *tm0, const float *
         else
             o->s = v.tex[0], o->t = v.tex[1], o->s1 = v.tex1[0], o->t1 = v.tex1[1];
         o->fog = 0;
+        if (nat)
+            nr[j][0] = v.nrm[0], nr[j][1] = v.nrm[1], nr[j][2] = v.nrm[2];
         if (++j == 64 || i + 1 == nv) {
             memcpy((void *)(tnt2_fb + at), c, (size_t)j * VSIZE);
             at += (uint32_t)j * VSIZE;
+            if (nat) {
+                memcpy((void *)(tnt2_fb + nat), nr, (size_t)j * NSIZE);
+                nat += (uint32_t)j * NSIZE;
+            }
             j = 0;
         }
     }
@@ -1271,11 +1588,11 @@ static int pack(uint32_t at, GLint vmin, int nv, const float *tm0, const float *
 #define VC_SLOTS 1024
 #define VC_HASH 2048
 typedef struct {
-    struct { const void *b, *ptr; unsigned serial, gen; GLsizei stride; GLenum type; GLint size, en; } a[4];
-    float cur[10], m0[16], m1[16];
-    int units, has_m0, has_m1, texr_used, swap;
+    struct { const void *b, *ptr; unsigned serial, gen; GLsizei stride; GLenum type; GLint size, en; } a[5];
+    float cur[13], m0[16], m1[16];
+    int units, has_m0, has_m1, texr_used, swap, lit;
 } vkey;
-static struct { vkey k; uint32_t off, nv; int live, next; } vc[VC_SLOTS];
+static struct { vkey k; uint32_t off, noff, nv; int live, next; } vc[VC_SLOTS];
 static int vc_head[VC_HASH];
 static uint32_t vc_block, vc_used, vc_bytes, heap_bytes;
 static int vc_mode = -1, vc_count;
@@ -1304,7 +1621,7 @@ static int vc_arr(vkey *k, int n, const dgl_array *a, int needed)
 
 /* The draw's key (units: bit 0 GL's unit 0 textured, bit 1 unit 1), or 0: not one to keep. Only what pack reads
  * goes in it (the Radeon's lesson: Echoes' sky and HUD's current values remade every untextured chunk). */
-static int vc_key(vkey *k, int units, const float *tm0, const float *tm1)
+static int vc_key(vkey *k, int units, int lit, const float *tm0, const float *tm1)
 {
     if (vc_mode < 0) {
         const char *e = getenv("DGL_TNL_VBO");
@@ -1314,8 +1631,11 @@ static int vc_key(vkey *k, int units, const float *tm0, const float *tm1)
         return 0;
     memset(k, 0, sizeof *k);
     if (!vc_arr(k, 0, &dgl_gl.va, 1) || !vc_arr(k, 1, &dgl_gl.ca, 1) || !vc_arr(k, 2, &dgl_gl.ta, units & 1) ||
-        !vc_arr(k, 3, &dgl_gl.ta1, units & 2))
+        !vc_arr(k, 3, &dgl_gl.ta1, units & 2) || !vc_arr(k, 4, &dgl_gl.na, lit))
         return 0;
+    if (lit && !dgl_gl.na.enabled)
+        memcpy(k->cur + 10, dgl_gl.cur_normal, 3 * sizeof(float));
+    k->lit = lit;
     if (!dgl_gl.ca.enabled)
         memcpy(k->cur, dgl_gl.cur_color, 4 * sizeof(float));
     if (units & 1) {
@@ -1339,15 +1659,17 @@ static int vc_key(vkey *k, int units, const float *tm0, const float *tm1)
 }
 
 /* The video memory offset of the draw's vertices 0..vmax, converted now if they aren't kept yet; 0: they can't be. */
-static uint32_t vc_get(const vkey *k, GLint vmax, const float *tm0, const float *tm1)
+static uint32_t vc_get(const vkey *k, GLint vmax, const float *tm0, const float *tm1, uint32_t *noff)
 {
-    uint32_t nv = (uint32_t)vmax + 1u, bytes = nv * VSIZE, off;
+    uint32_t nv = (uint32_t)vmax + 1u, vbytes = (nv * VSIZE + 63u) & ~63u,
+             bytes = vbytes + (k->lit ? (nv * NSIZE + 63u) & ~63u : 0u), off;
     unsigned h = vc_hash(k);
     int i, slot;
     for (i = vc_head[h] - 1; i >= 0; i = vc[i].next - 1)
         if (vc[i].live && !memcmp(&vc[i].k, k, sizeof *k)) {
             if (vc[i].nv >= nv) {
                 vc_hits++;
+                *noff = vc[i].noff;
                 return vc[i].off;
             }
             vc[i].live = 0;                     /* (kept for fewer vertices: made again, bigger) */
@@ -1374,11 +1696,12 @@ static uint32_t vc_get(const vkey *k, GLint vmax, const float *tm0, const float 
     }
     slot = vc_count;
     off = ((vc_block + 255u) & ~255u) + vc_used;
-    if (!pack(off, 0, (int)nv, tm0, tm1))
+    *noff = k->lit ? off + vbytes : 0u;
+    if (!pack(off, *noff, 0, (int)nv, tm0, tm1))
         return 0;
     vc_count++;
-    vc_used += (bytes + 63u) & ~63u;
-    vc[slot].k = *k, vc[slot].off = off, vc[slot].nv = nv, vc[slot].live = 1;
+    vc_used += bytes;
+    vc[slot].k = *k, vc[slot].off = off, vc[slot].noff = *noff, vc[slot].nv = nv, vc[slot].live = 1;
     vc[slot].next = vc_head[h], vc_head[h] = slot + 1;
     vc_made++;
     return off;
@@ -1389,8 +1712,8 @@ static int tb_tnl(GLenum mode, GLsizei count, const GLint *idx, GLint first)
     PROF_SCOPE(PROF_D_SETUP);
     const float *tm0, *tm1;
     GLint vmin, vmax, i;
-    uint32_t base, blk = 0, w[128];
-    int nv, k, n;
+    uint32_t base, blk = 0, nblk = 0, w[128];
+    int nv, k, n, lit;
     vkey key;
     if (tnl_on < 0) {
         const char *e = getenv("DGL_TNL");
@@ -1418,10 +1741,12 @@ static int tb_tnl(GLenum mode, GLsizei count, const GLint *idx, GLint first)
             return 0;
         }
     }
-    tm0 = tex_matrix(0), tm1 = tex_matrix(1);
+    tm0 = generated(0) ? NULL : tex_matrix(0), tm1 = generated(1) ? NULL : tex_matrix(1);
+    lit = dgl_gl.lighting != 0 || sphere_used();    /* (normals: lighting's, or a sphere map's) */
     flush();                                    /* (the CPU path's triangles first) */
-    if (vmax < 65536 && vc_key(&key, (valid_tex ? 1 : 0) | (valid_tex1 ? 2 : 0), tm0, tm1))
-        blk = vc_get(&key, vmax, tm0, tm1);
+    if (vmax < 65536 && vc_key(&key, (valid_tex && !generated(0) ? 1 : 0) | (valid_tex1 && !generated(1) ? 2 : 0),
+                               lit, tm0, tm1))
+        blk = vc_get(&key, vmax, tm0, tm1, &nblk);
     if (blk) {
         base = 0;                               /* (kept: the indices as they are, from vertex 0) */
         vmin = 0;
@@ -1431,7 +1756,7 @@ static int tb_tnl(GLenum mode, GLsizei count, const GLint *idx, GLint first)
         if (va_room((uint32_t)nv) != 0)
             return 0;
         base = va_n;
-        if (!pack(va_off + base * VSIZE, vmin, nv, tm0, tm1))
+        if (!pack(va_off + base * VSIZE, lit ? na_off + base * NSIZE : 0u, vmin, nv, tm0, tm1))
             return 0;
         va_n = va_first = base + (uint32_t)nv;
     }
@@ -1454,20 +1779,30 @@ static int tb_tnl(GLenum mode, GLsizei count, const GLint *idx, GLint first)
             }
         matrix_words(pw, vpm);
         mcv(M_PROJECTION, pw, 16);
-        if (fogging) {
+        if (fogging || lit || generated(0) || generated(1)) {
             matrix_words(pw, dgl_gl.mv.stack[dgl_gl.mv.depth - 1].m);
             mcv(M_MODELVIEW, pw, 16);
-            mc(M_FOG_COORD, 3);
         }
+        texgen_state(1);
+        if (sphere_used() && !dgl_gl.lighting) {
+            inverse_mv_state();                 /* (a sphere map's normals: their matrix and GL_NORMALIZE, t41) */
+            mc(M_NORMALIZE, (uint32_t)(dgl_gl.normalize || dgl_gl.rescale_normal));
+        }
+        if (fogging)
+            mc(M_FOG_COORD, 3);
         mc(M_CULL_ENABLE, (uint32_t)!!dgl_gl.cull_face);
         if (dgl_gl.cull_face) {
             mc(M_CULL_FACE, (uint32_t)dgl_gl.cull_mode);
             mc(M_FRONT_FACE, (uint32_t)dgl_gl.front_face);
         }
         mc(M_SHADE_MODEL, dgl_gl.shade_model == GL_FLAT ? 0x1D00u : 0x1D01u);
+        if (dgl_gl.lighting)
+            light_state();                      /* (specular into the primary colour: LIGHT_MODEL bit 1 clear) */
+        else
+            mc(M_LIGHTING_ENABLE, 0);
         eng = 1;
     }
-    set_base(blk ? blk : va_off);
+    set_base2(blk ? blk : va_off, lit ? (blk ? nblk : na_off) : 0u);
     m1(M_VTXBUF_VALIDATE, 0);
     m1(M_BEGIN_END, (uint32_t)mode + 1u);       /* (Celsius's primitives are GL's, plus one) */
     for (k = 0; k + 1 < count; k += 2 * n) {
