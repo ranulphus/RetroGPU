@@ -1805,19 +1805,32 @@ static int vc_key(vkey *k, int dwords, int stride, int pairs, int lit, const flo
         return 0;
     memset(k, 0, sizeof *k);
     if (!vc_arr(k, 0, &dgl_gl.va, 1) || !vc_arr(k, 1, &dgl_gl.ca, 1) || !vc_arr(k, 2, &dgl_gl.ta, pairs > 0) ||
-        !vc_arr(k, 3, &dgl_gl.ta1, pairs > 0) || !vc_arr(k, 4, &dgl_gl.na, lit))
+        !vc_arr(k, 3, &dgl_gl.ta1, pairs > 1) || !vc_arr(k, 4, &dgl_gl.na, lit))
         return 0;
-    memcpy(k->cur, dgl_gl.cur_color, 4 * sizeof(float));
-    memcpy(k->cur + 4, dgl_gl.cur_tex, 2 * sizeof(float));
-    memcpy(k->cur + 6, dgl_gl.cur_tex1, 2 * sizeof(float));
-    memcpy(k->cur + 8, dgl_gl.cur_normal, 3 * sizeof(float));
-    memcpy(k->cur + 11, dgl_gl.cur_texr, 2 * sizeof(float));
-    if (m0)
-        memcpy(k->m0, m0, sizeof k->m0), k->has_m0 = 1;
-    if (m1)
-        memcpy(k->m1, m1, sizeof k->m1), k->has_m1 = 1;
+    /* Only what the conversion reads (tnl_pack): a current value where its array is off and the draw uses it, a
+     * texture matrix where its unit's coordinates are written. Echoes' flyover keyed every current value: its sky
+     * and HUD's glTexCoord and glColor made a new entry for nearly every untextured chunk (vbo_made 5,257 -> 24,075). */
+    if (!dgl_gl.ca.enabled)
+        memcpy(k->cur, dgl_gl.cur_color, 4 * sizeof(float));
+    if (pairs > 0) {
+        if (!dgl_gl.ta.enabled)
+            memcpy(k->cur + 4, dgl_gl.cur_tex, 2 * sizeof(float));
+        if (m0)
+            memcpy(k->m0, m0, sizeof k->m0), k->has_m0 = 1;
+        if (dgl_gl.texr_used)
+            k->cur[11] = dgl_gl.cur_texr[0], k->texr_used = 1;
+    }
+    if (pairs > 1) {
+        if (!dgl_gl.ta1.enabled)
+            memcpy(k->cur + 6, dgl_gl.cur_tex1, 2 * sizeof(float));
+        if (m1)
+            memcpy(k->m1, m1, sizeof k->m1), k->has_m1 = 1;
+        if (dgl_gl.texr_used)
+            k->cur[12] = dgl_gl.cur_texr[1], k->texr_used = 1;
+    }
+    if (lit && !dgl_gl.na.enabled)
+        memcpy(k->cur + 8, dgl_gl.cur_normal, 3 * sizeof(float));
     k->dwords = dwords, k->stride = stride, k->pairs = pairs, k->lit = lit, k->swap = swap_st;
-    k->texr_used = dgl_gl.texr_used;
     return 1;
 }
 
