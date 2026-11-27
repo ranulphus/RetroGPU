@@ -226,7 +226,7 @@ static int open_screen(const rg_open *o, rg_opened *out)
     st.double_buffer = o->double_buffer != 0;
     st.depth_bits = o->depth_bits ? (bpp == 32 ? 24 : 16) : 0;
     graphics = 1;                               /* (about to leave text mode) */
-    if (vbe_set_mode(&st_mode, o->pitch_px, &pitch_px) != 0) {
+    if (vbe_set_mode_keep(&st_mode, o->pitch_px, &pitch_px) != 0) {     /* (the buffers cleared below) */
         rg_set_error("VBE mode %03x failed", st_mode.mode);
         return -1;                              /* (the caller closes: the screen goes back) */
     }

@@ -83,6 +83,8 @@ int  vbe_find_mode(int w, int h, int bpp, mga_vbe_mode *out);   /* (each mode's 
 extern void (*vbe_wait_hook)(void);
 int  vbe_enumerate(void (*cb)(const mga_vbe_mode *m, void *ctx), void *ctx);
 int  vbe_set_mode(const mga_vbe_mode *m, int pitch_px, int *actual_pitch_px);
+int  vbe_set_mode_keep(const mga_vbe_mode *m, int pitch_px, int *actual_pitch_px);  /* the BIOS clears nothing (D15):
+                                                                                     * the caller clears what it shows */
 int  vbe_set_display_start(uint32_t byte_offset, int pitch_bytes, int bpp);
 void vbe_set_text_mode(void);
 int  vbe_version(void);

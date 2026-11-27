@@ -218,14 +218,15 @@ int vbe_set_bank(unsigned bank)
     return vbe_call(&r);
 }
 
-int vbe_set_mode(const mga_vbe_mode *m, int pitch_px, int *actual_pitch_px)
+static int set_mode(const mga_vbe_mode *m, int pitch_px, int *actual_pitch_px, int keep)
 {
     sys_rmregs r;
     memset(&r, 0, sizeof r);
     r.eax = 0x4F02;
-    r.ebx = 0x4000u | m->mode;          /* linear framebuffer */
+    r.ebx = 0x4000u | m->mode | (keep ? 0x8000u : 0u);  /* linear framebuffer; D15: the memory not cleared */
     if (vbe_call(&r) < 0)
         return -1;
+    vbe_waited();
     *actual_pitch_px = m->pitch_bytes / (m->bpp / 8);
     if (pitch_px > 0) {
         memset(&r, 0, sizeof r);
@@ -236,6 +237,19 @@ int vbe_set_mode(const mga_vbe_mode *m, int pitch_px, int *actual_pitch_px)
             *actual_pitch_px = (int)((r.ebx & 0xFFFF) / (uint32_t)(m->bpp / 8));
     }
     return 0;
+}
+
+int vbe_set_mode(const mga_vbe_mode *m, int pitch_px, int *actual_pitch_px)
+{
+    return set_mode(m, pitch_px, actual_pitch_px, 0);
+}
+
+/* The mode set without the BIOS clearing the card's memory (4F02 D15): the caller clears what it shows. GLOS's gate
+ * 69: the emulated G450's BIOS cleared all 32 MB through the 64 KB window, bank by bank, ~8 s in one INT 10h under
+ * GLOS (its disassembly, 6185-619D), SDL's audio stream starved all that while. */
+int vbe_set_mode_keep(const mga_vbe_mode *m, int pitch_px, int *actual_pitch_px)
+{
+    return set_mode(m, pitch_px, actual_pitch_px, 1);
 }
 
 int vbe_set_display_start(uint32_t byte_offset, int pitch_bytes, int bpp)
