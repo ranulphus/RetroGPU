@@ -68,6 +68,11 @@ void tnt2_cursor_show(int on);
 void tnt2_cursor_move(int x, int y);
 int  tnt2_set_start(uint32_t byte_off);
 int  tnt2_vsync_wait(uint32_t timeout_us);
+/* Celsius, the NV1x's own 3D class (docs/nv10.md, Q3): set up after tnt2_3d_init (subchannel 7 then holds it) */
+int  tnt2_celsius_init(void);
+void tnt2_celsius_target(uint32_t colour, uint32_t zeta, int pitch_bytes, int w, int h, int bpp);
+void tnt2_celsius_tris(uint32_t vb, int n, int w, int h);   /* (DCEL0) {r,g,b,x,y} floats at vb, GL_TRIANGLES */
+void tnt2_methods(int sub, uint32_t mthd, const uint32_t *v, int n);
 int  tnt2_set_pitch(int pitch_bytes);   /* the display's row length (CR13/CR19), when the BIOS's 4F06 won't; -1 on
                                            * the NV1x, whose CRTC isn't written (CR1F/CR44 lock NV11s up) */
 void tnt2_set_ramp(const uint8_t ramp[256]);    /* the palette as a gamma ramp in direct colour (PRAMDAC 0x600) */

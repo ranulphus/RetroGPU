@@ -137,6 +137,8 @@ DJ_SRC_VPROBE := tests/virge/vprobe.c
 DJ_SRC_NPROBE := tests/tnt2/nprobe.c
 # NPRAMIN (the NV1x's Q1, docs/nv10.md: where the instance memory lands in video memory; three words marked and put back).
 DJ_SRC_NPRAMIN := tests/tnt2/npramin.c
+# DCEL0 (the NV1x's Q3: Celsius, 0x96, set up as Mesa's NV11 driver was captured doing on bench E; one triangle).
+DJ_SRC_DCEL0 := tests/tnt2/dcel0.c build/djgpp/libtnt2.a
 # NTWOD (T1: the first 2D, fills and copies, against sw2d.c).
 DJ_SRC_NTWOD := tests/tnt2/ntwod.c tests/hal/sw2d.c build/djgpp/libtnt2.a
 # NTRI0 (T2's bring-up: the 3D objects and one Gouraud triangle).
@@ -206,6 +208,7 @@ build/djgpp/CLOCKMON.EXE: tests/hal/clockmon.c
 build/djgpp/VPROBE.EXE: tests/virge/vprobe.c
 build/djgpp/NPROBE.EXE: tests/tnt2/nprobe.c
 build/djgpp/NPRAMIN.EXE: tests/tnt2/npramin.c
+build/djgpp/DCEL0.EXE: tests/tnt2/dcel0.c build/djgpp/libtnt2.a
 build/djgpp/NTWOD.EXE: tests/tnt2/ntwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libtnt2.a
 build/djgpp/NTWOD.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/NTRI0.EXE: tests/tnt2/ntri0.c build/djgpp/libtnt2.a
