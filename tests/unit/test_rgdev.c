@@ -2,6 +2,7 @@
  * by name, or the first device whose probe succeeds; the reasons given. */
 #include "unit.h"
 #include "rg/device.h"
+#include "mga/hal.h"                    /* (vbe_wait_hook) */
 #include <string.h>
 
 static int mga_ok, virge_ok, tnt2_ok, r128_ok, radeon_ok, soft_ok, probes;
@@ -22,7 +23,9 @@ const rg_device rg_mem_device = { .name = "mem", .flags = RG_DEV_BY_NAME, .probe
 static int probe_vbe(void) { probes++; return 0; }
 const rg_device rg_vbe_device = { .name = "vbe", .flags = RG_DEV_BY_NAME, .probe = probe_vbe };
 static const rg_device soft = { .name = "soft", .probe = probe_soft };
+void (*vbe_wait_hook)(void);           /* (the HAL's, in vbe.c, which this test doesn't link: rg_set_wait_hook sets it) */
 
+static void hook(void) { }
 static char logged[256];
 static void log_line(const char *line) { strncpy(logged, line, sizeof logged - 1); }
 
@@ -86,5 +89,11 @@ int unit_main(void)
     RG_ERR("DGL-WARP tris=%lu", 42ul);
     CHECK_STR(logged, "DGL-WARP tris=42");
     rg_set_log(NULL);
+
+    /* The wait hook DOS-GL hands the HAL's BIOS calls (dglSetWaitHook), and its removal. */
+    rg_set_wait_hook(hook);
+    CHECK(vbe_wait_hook == hook);
+    rg_set_wait_hook(NULL);
+    CHECK(vbe_wait_hook == NULL);
     return 0;
 }
