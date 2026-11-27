@@ -15,6 +15,7 @@ import os
 import queue
 import shutil
 import subprocess
+import time
 import sys
 import tempfile
 import threading
@@ -111,7 +112,16 @@ class Glos:
 
     def close(self):
         if self.follower:
+            # (the follow channel closed and the client gone before the master exits: GLOS's sshd kept a slot for
+            # good when a connection was reset with log bytes still queued for it, four such on bench C 2026-11-27
+            # left it refusing every connection; ROSS sent GLOS the fix)
             self.follower.terminate()
+            try:
+                self.follower.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.follower.kill()
+            self.follower = None
+            time.sleep(1.0)
         try:
             subprocess.run(["ssh", "-p", str(self.port)] + self.opts + ["-O", "exit", self.dest],
                            capture_output=True, timeout=30)

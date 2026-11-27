@@ -165,8 +165,12 @@ def check(test, card, pc=None):
             report["frames"][name] = {"ok": False, "reason": "missing"}
             ok = False
             continue
-        c = imgcmp.compare(rp, got, m.get("tol", 24), m.get("frac", 0.005), m.get("edge", True),
-                           m.get("box", False), os.path.join(out, name + ".diff.png"), m.get("ignore", ()))
+        try:
+            c = imgcmp.compare(rp, got, m.get("tol", 24), m.get("frac", 0.005), m.get("edge", True),
+                               m.get("box", False), os.path.join(out, name + ".diff.png"), m.get("ignore", ()))
+        except (AssertionError, IndexError, ValueError, OSError) as e:
+            # (a frame that can't be read, a fetch cut short on a slow PC: that test fails, the suite goes on)
+            c = {"ok": False, "reason": "unreadable: %s" % (e or type(e).__name__)}
         report["frames"][name] = c
         ok = ok and c["ok"]
     report["ok"] = ok
