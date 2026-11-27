@@ -43,6 +43,7 @@
 /* The CRTC: the display start (bytes, a multiple of 8), the pitch (pixels / 8), the cursor */
 #define R128_CRTC_OFFSET            0x0224
 #define R128_CRTC_OFFSET_CNTL       0x0228
+#define R128_CRTC_OFFSET_FLIP_CNTL  (1u << 16)  /* (the r128 DRM's, for its page flips: a start taken at the next line) */
 #define     R128_CRTC_GUI_TRIG_OFFSET (1u << 30)  /* (R) the last start written not yet shown */
 #define R128_CRTC_PITCH             0x022C
 #define R128_CUR_OFFSET             0x0260

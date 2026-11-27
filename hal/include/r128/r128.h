@@ -57,6 +57,9 @@ int  r128_vsync_wait(uint32_t timeout_us);
  * the last flip reached. 0, or -1 (no CCE, or a bad start). */
 int  r128_flip_queue(uint32_t byte_off, uint32_t seq, int wait);
 uint32_t r128_flip_seen(void);
+/* A start taken at the next scan line (on: CRTC_OFFSET_CNTL's FLIP_CNTL, as the Radeon's) instead of at the vertical
+ * blank: swaps without the retrace then tear rather than draw into the buffer still shown. Off before a mode set. */
+void r128_flip_at_line(int on);
 /* Gamma: in 16- and 32-bit modes the DAC looks each component up in its 256-entry palette (X.org's
  * R128LoadPalette: 565's red at index r5 * 8, green g6 * 4); one ramp for the three, 8-bit entries (DAC_8BIT_EN).
  * r128_ramp_off: the DAC as it was before the first ramp (for text mode). */

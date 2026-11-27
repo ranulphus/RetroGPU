@@ -242,6 +242,7 @@ int r128_set_mode(const r128_mode *m)
     sys_rmregs r;
     if (r128.mmio) {
         r128_sync(100000);
+        r128_flip_at_line(0);
         r128_cce_stop();                            /* (the caller starts it again for the new mode) */
     }
     memset(&r, 0, sizeof r);
@@ -259,6 +260,7 @@ void r128_text_mode(void)
     sys_rmregs r;
     if (r128.mmio) {
         r128_sync(100000);
+        r128_flip_at_line(0);
         r128_cce_stop();
     }
     memset(&r, 0, sizeof r);
@@ -289,6 +291,24 @@ int r128_flip_queue(uint32_t byte_off, uint32_t seq, int wait)
 }
 
 uint32_t r128_flip_seen(void) { return r128_rd(R128_GUI_SCRATCH_REG0); }
+
+/* (the Radeon's radeon_flip_at_line: the chip is the Radeon's ancestor and the r128 DRM sets the same bit for its own
+ * flips; without it a start waits for the vertical blank, and with no retrace wait the next frame drew into the buffer
+ * still on screen: Fifth Wheel on bench A, frames seen being painted, 2026-11-27) */
+static uint32_t flip_saved;
+static int flip_line;
+
+void r128_flip_at_line(int on)
+{
+    if (!r128.mmio || on == flip_line)
+        return;
+    if (on) {
+        flip_saved = r128_rd(R128_CRTC_OFFSET_CNTL);
+        r128_wr(R128_CRTC_OFFSET_CNTL, flip_saved | R128_CRTC_OFFSET_FLIP_CNTL);
+    } else
+        r128_wr(R128_CRTC_OFFSET_CNTL, flip_saved);
+    flip_line = on;
+}
 
 static uint32_t dac_saved;
 static int dac_changed;

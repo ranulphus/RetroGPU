@@ -208,6 +208,7 @@ static int sync(void)
 }
 
 static uint32_t flip_seq;                /* the last flip queued in the command stream */
+static int line_flips;                   /* (FLIP_CNTL set: swaps without the vertical sync) */
 
 static int swap(int vsync)
 {
@@ -215,6 +216,13 @@ static int swap(int vsync)
     if (!st.active || !st.double_buffer)
         return 0;
     show = st.front_is_a ? st.back_off : st.front_off;
+    /* Without the vertical sync a start is taken at the next scan line (FLIP_CNTL, as the Radeon's): changed with the
+     * engine idle. */
+    if (line_flips != !vsync) {
+        r128_sync(500000);
+        r128_flip_at_line(!vsync);
+        line_flips = !vsync;
+    }
     /* The CCE running: the flip in the command stream (r128_flip_queue); the CPU neither drains the engine nor waits
      * for the retrace. With the retrace, the engine stalled until the new buffer is shown, the next frame's drawing
      * reaching the old one only then, and one flip in flight (the one before shown first); without, the start taken
@@ -387,6 +395,7 @@ static int open_screen(const rg_open *o, rg_opened *out)
     r128_sync(500000);
     r128_set_start(st.front_off);
     flip_seq = r128_flip_seen();
+    line_flips = 0;
     memset(out, 0, sizeof *out);
     out->width = st.width;
     out->height = st.height;
