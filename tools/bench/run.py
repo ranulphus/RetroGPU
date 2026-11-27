@@ -35,6 +35,7 @@ capture-*.png, result.json; over ssh also stdout.txt, what the job printed).
 Statuses: PASS FAIL CRASH HANG TIMEOUT NOT-PICKED-UP.
 """
 import argparse
+import atexit
 import functools
 import http.server
 import json
@@ -255,6 +256,10 @@ def main():
     glos = None
     if a.transport != "poller" and pc.get("ssh"):
         glos = glosssh.Glos(pc["ssh"], pc.get("ssh_key") or os.environ.get("GLOS_KEY", "~/GLOS/tests/keys/client"))
+        # (its connection closed however this ends: a job that failed here before reaching the PC, its file names
+        # say, left its ControlMaster for ControlPersist's hour, and four such held the P3's SSH, which refused every
+        # other connection, 2026-11-26 and 11-27; close() twice is harmless)
+        atexit.register(glos.close)
         if not glos.up():
             glos.close()
             glos = None
