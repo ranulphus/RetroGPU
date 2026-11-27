@@ -92,6 +92,11 @@ static float guard_x = 1.0f, guard_y = 1.0f;
 #define M_VTXBUF_FMT(i)   (0xD04u + 8u * (uint32_t)(i))
 #define M_BEGIN_END       0x13FC
 #define M_BATCH           0x1400
+#define M_ELEMENT16       0xE00                 /* an array of 128: two 16-bit indices a word */
+#define M_ELEMENT32       0x1100                /* an array of 64: one index a word */
+#define M_MODELVIEW       0x400
+#define M_CULL_FACE       0x39C
+#define M_FRONT_FACE      0x3A0
 
 /* Texture words. */
 #define TF_DMA0      0x00000001u
@@ -999,10 +1004,15 @@ static void wrap_shift(cvert *v, int n)
 }
 
 /* A convex polygon's fan (clip space, inside the view volume) into the vertex area as triangles. */
+static int eng;                                 /* the chip's transform drew last: the CPU path's state owed */
+static void cpu_state(void);
+
 static void emit_fan(const dgl_cvtx *v, int n, const dgl_cvtx *prov)
 {
     cvert w[9 * 3], p[9];
     int i, k = 0, flat = dgl_gl.shade_model == GL_FLAT;
+    if (eng)
+        cpu_state();
     if (n > 9)
         n = 9;
     for (i = 0; i < n; i++)
@@ -1129,6 +1139,204 @@ static void tb_point(const dgl_cvtx *a)
     points_++;
 }
 
+/* ---- The chip's own transform (Q5): whole draws, object space -------------------------------------------------
+ * A draw from the arrays (or glBegin's, DGL_TNL_IMM) whose state the chip does: its vertices as GL gives them (object
+ * space, w as given: VTXBUF_FMT's homogeneous bit) into the vertex area, GL's own primitive with 16-bit indices, the
+ * projection viewport x P x MV (PROJECTION takes the object position: DCTNL), MODELVIEW for the eye distance fog
+ * needs (FOG_COORD 3: the eye plane's distance, DCTNL's fog identical to the CPU path's). The chip clips (DCTNL's near
+ * case) and culls by GL's winding. Stage 1: unlit, no texgen; texture matrices applied while the vertices are
+ * copied (affine ones; projective ones the CPU's path). DGL_TNL=0: every draw the CPU's path. */
+static int tnl_on = -1;
+static unsigned long tnl_draws_n, tnl_small_n, tnl_tris_n;
+
+static const float *tex_matrix(int unit)
+{
+    return unit ? (dgl_gl.tex1_identity ? NULL : dgl_gl.tex1.stack[dgl_gl.tex1.depth - 1].m)
+                : (dgl_gl.tex_identity ? NULL : dgl_gl.tex.stack[dgl_gl.tex.depth - 1].m);
+}
+
+static int tex_matrix_ok(int unit)
+{
+    const float *m = tex_matrix(unit);
+    return !m || (m[3] == 0.0f && m[7] == 0.0f && m[11] == 0.0f && m[15] != 0.0f);
+}
+
+static void tex_affine(const float *m, float st[2], float r)
+{
+    float s0 = st[0], t0 = st[1], iq = 1.0f / m[15];
+    st[0] = (m[0] * s0 + m[4] * t0 + m[8] * r + m[12]) * iq;
+    st[1] = (m[1] * s0 + m[5] * t0 + m[9] * r + m[13]) * iq;
+}
+
+static int tnl_state_ok(GLenum mode)
+{
+    if (mode == GL_POINTS || mode == GL_LINES || mode == GL_LINE_STRIP || mode == GL_LINE_LOOP)
+        return 0;                               /* (lines and points: the CPU's path draws their widths) */
+    if (dgl_gl.lighting || dgl_gl.texgen_on[0] || dgl_gl.texgen_on[1] || dgl_gl.clip_enabled)
+        return 0;                               /* (stage 1; user clip planes: the chip has none) */
+    if ((dgl_gl.texture_cube[0] | dgl_gl.texture_cube[1]) || dgl_gl.polygon_mode != GL_FILL)
+        return 0;
+    return tex_matrix_ok(0) && tex_matrix_ok(1);
+}
+
+/* GL's column-major matrix to the chip's sixteen words (row-major). */
+static void matrix_words(uint32_t *w, const float *m)
+{
+    int r, c;
+    for (r = 0; r < 4; r++)
+        for (c = 0; c < 4; c++)
+            w[r * 4 + c] = fbits(m[c * 4 + r]);
+}
+
+/* The CPU path's own state again after the chip's transform drew: the viewport-only projection, the vertex's fog
+ * value, no culling by the chip, smooth shading. */
+static void cpu_state(void)
+{
+    eng = 0;
+    viewport_state();
+    if (fogging)
+        mc(M_FOG_COORD, 0);
+    mc(M_CULL_ENABLE, 0);
+    mc(M_SHADE_MODEL, 0x1D01);
+}
+
+static int tb_tnl(GLenum mode, GLsizei count, const GLint *idx, GLint first)
+{
+    PROF_SCOPE(PROF_D_SETUP);
+    const float *tm0, *tm1;
+    GLint vmin, vmax, i;
+    uint32_t base, w[128];
+    int nv, k, n;
+    if (tnl_on < 0) {
+        const char *e = getenv("DGL_TNL");
+        tnl_on = !(e && *e == '0');
+    }
+    if (!tnl_on || count < 3 || nothing || !tnl_state_ok(mode))
+        return 0;
+    if (idx) {
+        vmin = vmax = idx[0];
+        for (i = 1; i < count; i++) {
+            if (idx[i] < vmin) vmin = idx[i];
+            if (idx[i] > vmax) vmax = idx[i];
+        }
+    } else
+        vmin = first, vmax = first + count - 1;
+    nv = vmax - vmin + 1;
+    {   /* (a few vertices: the CPU's path, as on the Radeon, DGL_TNL_MINV) */
+        static int minv = -1;
+        if (minv < 0) {
+            const char *e = getenv("DGL_TNL_MINV");
+            minv = e && *e ? atoi(e) : 8;
+        }
+        if (nv < minv) {
+            tnl_small_n++;
+            return 0;
+        }
+    }
+    if ((uint32_t)nv * VSIZE > VA_PART || (idx && nv > 4 * count))
+        return 0;                               /* (a huge or sparse range: the CPU's path) */
+    tm0 = tex_matrix(0), tm1 = tex_matrix(1);
+    flush();                                    /* (the CPU path's triangles first) */
+    if (va_room((uint32_t)nv) != 0)
+        return 0;
+    base = va_n;
+    {
+        cvert c[64];
+        dgl_vin v;
+        int j = 0;
+        uint32_t at = va_off + base * VSIZE;
+        for (i = 0; i < nv; i++) {
+            cvert *o = &c[j];
+            dgl_vertex_of(vmin + i, &v);
+            if (tm0)
+                tex_affine(tm0, v.tex, dgl_gl.texr_used ? v.texr[0] : 0.0f);
+            if (tm1)
+                tex_affine(tm1, v.tex1, dgl_gl.texr_used ? v.texr[1] : 0.0f);
+            if (v.tex[0] > 1024.0f || v.tex[0] < -1024.0f || v.tex[1] > 1024.0f || v.tex[1] < -1024.0f ||
+                v.tex1[0] > 1024.0f || v.tex1[0] < -1024.0f || v.tex1[1] > 1024.0f || v.tex1[1] < -1024.0f ||
+                !(v.pos[0] - v.pos[0] == 0.0f) || !(v.pos[1] - v.pos[1] == 0.0f) ||
+                !(v.pos[2] - v.pos[2] == 0.0f) || !(v.pos[3] - v.pos[3] == 0.0f)) {
+                /* (coordinates past 1,024 lose their fraction in the chip's floats: the CPU's path takes whole
+                 * periods off per triangle, conformance t14; a position not finite: the CPU's path clips it) */
+                va_n = va_first = base;
+                return 0;
+            }
+            o->x = v.pos[0], o->y = v.pos[1], o->z = v.pos[2], o->w = v.pos[3];
+            o->col = ub(v.col[3]) << 24 | ub(v.col[0]) << 16 | ub(v.col[1]) << 8 | ub(v.col[2]);
+            o->s = v.tex[0], o->t = v.tex[1], o->s1 = v.tex1[0], o->t1 = v.tex1[1], o->fog = 0;
+            if (++j == 64 || i + 1 == nv) {
+                memcpy((void *)(tnt2_fb + at), c, (size_t)j * VSIZE);
+                at += (uint32_t)j * VSIZE;
+                j = 0;
+            }
+        }
+    }
+    va_n = va_first = base + (uint32_t)nv;
+    /* The chip's state for its transform. */
+    {
+        float vps[16] = { 0 }, vpm[16];
+        uint32_t pw[16];
+        const float *mvp = dgl_mvp()->m;
+        int r, c2, q;
+        vps[0] = dgl_gl.viewport[2] * 0.5f, vps[5] = -dgl_gl.viewport[3] * 0.5f;
+        vps[10] = (rg_tnt2.depth_bits == 24 ? 16777215.0f : 65535.0f) *
+                  (float)(dgl_gl.depth_far - dgl_gl.depth_near) * 0.5f;
+        vps[15] = 1.0f;
+        for (c2 = 0; c2 < 4; c2++)              /* (vpm = vps x mvp, column-major) */
+            for (r = 0; r < 4; r++) {
+                float sum = 0;
+                for (q = 0; q < 4; q++)
+                    sum += vps[q * 4 + r] * mvp[c2 * 4 + q];
+                vpm[c2 * 4 + r] = sum;
+            }
+        matrix_words(pw, vpm);
+        mcv(M_PROJECTION, pw, 16);
+        if (fogging) {
+            matrix_words(pw, dgl_gl.mv.stack[dgl_gl.mv.depth - 1].m);
+            mcv(M_MODELVIEW, pw, 16);
+            mc(M_FOG_COORD, 3);
+        }
+        mc(M_CULL_ENABLE, (uint32_t)!!dgl_gl.cull_face);
+        if (dgl_gl.cull_face) {
+            mc(M_CULL_FACE, (uint32_t)dgl_gl.cull_mode);
+            mc(M_FRONT_FACE, (uint32_t)dgl_gl.front_face);
+        }
+        mc(M_SHADE_MODEL, dgl_gl.shade_model == GL_FLAT ? 0x1D00u : 0x1D01u);
+        eng = 1;
+    }
+    if (!va_formats)
+        va_formats_send();
+    m1(M_VTXBUF_VALIDATE, 0);
+    m1(M_BEGIN_END, (uint32_t)mode + 1u);       /* (Celsius's primitives are GL's, plus one) */
+    for (k = 0; k + 1 < count; k += 2 * n) {
+        n = (count - k) / 2;
+        if (n > 128)
+            n = 128;
+        for (i = 0; i < n; i++) {
+            uint32_t a = base + (uint32_t)((idx ? idx[k + 2 * i] : first + k + 2 * i) - vmin);
+            uint32_t b = base + (uint32_t)((idx ? idx[k + 2 * i + 1] : first + k + 2 * i + 1) - vmin);
+            w[i] = b << 16 | a;
+        }
+        tnt2_methods(S7, M_ELEMENT16, w, n);
+    }
+    if (count & 1)
+        m1(M_ELEMENT32, base + (uint32_t)((idx ? idx[count - 1] : first + count - 1) - vmin));
+    m1(M_BEGIN_END, 0);
+    {
+        uint32_t m = tnt2_mark();
+        va_mark[(va_n - 1u) * VSIZE / VA_PART] = m;
+        if (cur_t0) cur_t0->mark = m;
+        if (cur_t1) cur_t1->mark = m;
+    }
+    tnt2_kick_soon();
+    if (!tnl_draws_n)
+        DGL_WARN("DGL-NV10 the transform engine draws (DGL_TNL=0: the CPU transforms instead)");   /* (said once) */
+    tnl_draws_n++;
+    tnl_tris_n += (unsigned long)count / 3u;
+    dgl_prims.tris_in += (unsigned long)count / 3u;
+    return 1;
+}
+
 static int tb_fast(GLenum mode, GLsizei count, const GLint *idx, GLint first)
 {
     GLint ids[DGL_POLY_MAX];
@@ -1155,6 +1363,8 @@ static void install(void)
     dgl_sink.line = tb_line;
     dgl_sink.point = tb_point;
     dgl_sink.end = tb_end;
+    dgl_sink.tnl = tb_tnl;
+    eng = 0;
 }
 
 /* Clears by the 2D engine, in the scissor: colour, and the depth buffer (with the stencil's byte in Z24S8). */
@@ -1200,6 +1410,11 @@ static void caps(dgl_caps *c)
     c->sub_narrow = 1;
     c->max_texture_size = 2048;
     c->dot3 = 1;
+    if (tnl_on < 0) {
+        const char *e = getenv("DGL_TNL");
+        tnl_on = !(e && *e == '0');
+    }
+    c->hw_tnl = tnl_on;                         /* (GL_DGL_hw_tnl: games' presets read it) */
 }
 
 static void synced(void) { dgl_vram_sync_done(); }
