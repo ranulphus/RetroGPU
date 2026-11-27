@@ -150,6 +150,8 @@ DJ_SRC_DCPERF := tests/tnt2/dcperf.c build/djgpp/libtnt2.a
 DJ_SRC_DCFILL := tests/tnt2/dcfill.c build/djgpp/libtnt2.a
 # DCTEXC (the NV1x's Q4: Celsius's texture cache against texels the CPU rewrites).
 DJ_SRC_DCTEXC := tests/tnt2/dctexc.c build/djgpp/libtnt2.a
+# NREGS (the NV1x's Q4 speed: its set-up registers after the layer's set-up, to compare with nouveau's).
+DJ_SRC_NREGS := tests/tnt2/nregs.c build/djgpp/libtnt2.a
 # NTWOD (T1: the first 2D, fills and copies, against sw2d.c).
 DJ_SRC_NTWOD := tests/tnt2/ntwod.c tests/hal/sw2d.c build/djgpp/libtnt2.a
 # NTRI0 (T2's bring-up: the 3D objects and one Gouraud triangle).
@@ -226,6 +228,7 @@ build/djgpp/DCGUARD.EXE: tests/tnt2/dcguard.c build/djgpp/libtnt2.a
 build/djgpp/DCPERF.EXE: tests/tnt2/dcperf.c build/djgpp/libtnt2.a
 build/djgpp/DCFILL.EXE: tests/tnt2/dcfill.c build/djgpp/libtnt2.a
 build/djgpp/DCTEXC.EXE: tests/tnt2/dctexc.c build/djgpp/libtnt2.a
+build/djgpp/NREGS.EXE: tests/tnt2/nregs.c build/djgpp/libtnt2.a
 build/djgpp/NTWOD.EXE: tests/tnt2/ntwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libtnt2.a
 build/djgpp/NTWOD.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/NTRI0.EXE: tests/tnt2/ntri0.c build/djgpp/libtnt2.a
