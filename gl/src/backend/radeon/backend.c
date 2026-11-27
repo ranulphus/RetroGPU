@@ -1023,7 +1023,7 @@ static void fog_split(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *c, c
 
 MGA_HOT static void rb_triangle(const dgl_cvtx *a, const dgl_cvtx *b, const dgl_cvtx *c, const dgl_cvtx *prov)
 {
-    if (fogging)
+    if (fogging && dgl_gl.hint_fog != GL_FASTEST)   /* (GL_FASTEST: fog per vertex, as the engine draws it) */
         fog_split(a, b, c, prov, 0);
     else
         draw_triangle(a, b, c, prov);
@@ -1990,6 +1990,12 @@ static int tnl_fog_tris_fit(GLenum mode, GLsizei count, const GLint *idx, GLint 
 static int tnl_fog_fits(const float lo[3], const float hi[3], int w1, GLenum mode, GLsizei count, const GLint *idx,
                         GLint first)
 {
+    /* (glHint(GL_FOG_HINT, GL_FASTEST): the program takes fog per vertex, as OpenGL allows it and DirectX 7 cards
+     * draw it: every fogged draw to the engine, and the CPU's path no longer splits either, so both draw the same.
+     * Fifth Wheel's HIGH sent 64% of its fogged draws back under the per-triangle rule, its road triangles longer
+     * than the 10.8 m of depth its fog allows a tenth over. GL_DONT_CARE, the default, and GL_NICEST keep the rule.) */
+    if (dgl_gl.hint_fog == GL_FASTEST)
+        return 1;
     const float *m = dgl_gl.mv.stack[dgl_gl.mv.depth - 1].m;
     float zlo = 1e30f, zhi = -1e30f, dlo, dhi;
     int c;
