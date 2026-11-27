@@ -63,6 +63,12 @@ key). Each PC has a card, a serial device on the build host, an FTP port,
 an optional V4L2 capture device (and ffmpeg input options), an optional
 reset command, and the directory its games are installed in.
 
+`drive` (default `C`) is the drive holding a job's `TEST` and `OUT` folders. Set it where C: isn't
+ours: on bench G, GLOS runs natively beside the owner's Windows 98, which is C: and must never be
+written, so its entry says `drive = "D"`. run.py then writes `D:\TEST` and `D:\OUT`, rewrites
+`C:\TEST`, `C:\OUT` and a bare `C:` in RUN.BAT (callers' `--cmd` lines included), and refuses a job
+in which any other `C:` remains. Such a PC runs over ssh only; the poller's jobs use `C:\HX`.
+
 | PC | Card | Serial port (default) | Notes |
 |---|---|---|---|
 | bench-g100 | Productiva G100 | /dev/ttyS0 | milestone S |
