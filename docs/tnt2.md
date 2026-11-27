@@ -316,6 +316,27 @@ RetroGPU is MIT, so code is written from documentation and from MIT-licensed dri
 - **Profiles on the P3** (the `ow-prof` runtime's MGL-PROF): GTA about 14 fps, most of each frame outside our
   drawing (the game, its two pipeline LFB locks a frame, its texture calls); Screamer Rally's race about 38 fps.
 
+## The original Riva TNT (NV4) on the P3 (2026-11-27)
+
+- **The card:** `10de:0020` revision 04, 8 MB (`PMC_BOOT_0` `20044001`); the BIOS sets the core PLL to 90 MHz and the
+  memory PLL to 80 MHz (14.318 MHz crystal). The layer already knew the chip (`chip_name`, and the first TNT's own
+  object words in `tnt2_accel_init`); nothing was changed for it.
+- **The layer's tests:** NPROBE, NTWOD at 16 and 8 bits, RGDEV at the BIOS's pitch and at 1024 pixels, NTRI0, NTRI and
+  NTRI32 all pass. At 32 bits the two known test quirks the NV11 shows too: NTWOD's mono-32 (the colour expansion's
+  0xFF in the unused top byte) and RGDEV bpp=32's draw case (it builds 16-bit pixels).
+- **Glide:** conformance 26/27 (t22, gamma, as every real card); the GTA replay's 4 frames and Screamer Rally's 6
+  within 40 levels and 5% of the Voodoo's (GTA none beyond, Screamer Rally at most 0.24%), no traps.
+- **DOS-GL:** conformance 42/44. **t11 (scissor) and t35 (viewport) fail: the 3D clip's minimum edge is ignored.** In
+  t11 the triangle after a scissored 2D clear keeps the scissor's right and bottom edges but spills past its left and
+  top; the next triangle, with no 2D between, clips on all four. A probe (NCLIP, kept outside the tree) found the
+  user clip registers (`0x40053C`-`0x400548`) store in write order, not by address, and its triangles through 0x54
+  and 0x55 drew unclipped at both pitches although the registers read right; yet Glide's t09, a clip window with a
+  non-zero minimum, passes. **Cause open:** something the real paths do and the probe doesn't. It matters only when a
+  program's scissor or viewport doesn't start at the screen's corner.
+- **GLQuake** (QDOSDGL, demo1, `-fixedtime`, vsync off): 27.7 fps at 640x480 and 50.5 at 320x200 in two passes, 35.0
+  and 51.4 with `-mtex`; the TNT2 M64 on the same P3 had 73.7, 104.5, 77.4 and 96.9. Slower at 320x200 too, so not
+  the fill rate alone; not profiled (the 8 MB of video memory, textures evicted and loaded again, is a guess).
+
 ## How it fits RetroGPU
 
 As for the ViRGE: a **register layer** in `hal/` (the FIFO, the objects, 2D and 3D), a **device** on B1's interface
