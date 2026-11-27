@@ -168,7 +168,7 @@ static void warn_once(int k, const char *what)
 
 /* ---- Methods, with the values sent kept so only changes go out ------------- */
 
-#define SH_N (0x700 / 4)                        /* state methods below 0x700 */
+#define SH_N (0xC00 / 4)                        /* state methods below 0xC00 (the lights' end at 0xBFF) */
 static uint32_t sh[SH_N];
 static unsigned char sh_ok[SH_N];
 
@@ -194,6 +194,10 @@ static void mcv(uint32_t mthd, const uint32_t *v, int n)
 {
     uint32_t i0 = mthd >> 2;
     int i, same = 1;
+    if (i0 + (uint32_t)n > SH_N) {              /* (beyond the cache: sent as it is) */
+        tnt2_methods(S7, mthd, v, n);
+        return;
+    }
     for (i = 0; i < n; i++)
         if (!sh_ok[i0 + (uint32_t)i] || sh[i0 + (uint32_t)i] != v[i])
             same = 0;
@@ -391,7 +395,8 @@ static uint32_t va_block, va_off;               /* its heap block and its 256-al
 static uint32_t va_n;                           /* vertices written so far (the next one's index) */
 static uint32_t va_first;                       /* the first vertex not yet drawn */
 static uint32_t va_mark[VA_PARTS];              /* the stream after the last draw from each quarter */
-static int va_formats;                          /* VTXBUF_FMT and VTXBUF_OFFSET sent for this area */
+static int va_formats;                          /* VTXBUF_FMT sent */
+static uint32_t offs_base;                      /* where VTXBUF_OFFSET points: the vertex area, or a kept draw's */
 
 static int va_get(void)
 {
@@ -418,14 +423,27 @@ static void va_formats_send(void)
         VSIZE << 8 | 2u << 4 | 2u,                      /* texture 1: s t */
         0x0002u, 0x0002u,                               /* (normal, weight: off) */
         VSIZE << 8 | 1u << 4 | 2u };                    /* fog */
-    static const uint32_t at[8] = { 0, 16, 0, 20, 28, 0, 0, 36 };
     int i;
     for (i = 0; i < 8; i++)
         m1(M_VTXBUF_FMT(i), fmt[i]);
-    for (i = 0; i < 8; i++)
-        if (fmt[i] & 0xF0u)
-            m1(M_VTXBUF_OFFSET(i), va_off + at[i]);
     va_formats = 1;
+    offs_base = 0;
+}
+
+/* VTXBUF_OFFSET at a block of the 40-byte vertices (the vertex area's, or a kept draw's), where it isn't already. */
+static void set_base(uint32_t base)
+{
+    static const uint32_t at[8] = { 0, 16, 0, 20, 28, 0, 0, 36 };
+    static const unsigned char used[8] = { 1, 1, 0, 1, 1, 0, 0, 1 };
+    int i;
+    if (!va_formats)
+        va_formats_send();
+    if (offs_base == base)
+        return;
+    for (i = 0; i < 8; i++)
+        if (used[i])
+            m1(M_VTXBUF_OFFSET(i), base + at[i]);
+    offs_base = base;
 }
 
 /* The vertices written since the last flush drawn: one triangle list. */
@@ -434,8 +452,7 @@ static void flush(void)
     uint32_t first = va_first, n = va_n - va_first;
     if (!n)
         return;
-    if (!va_formats)
-        va_formats_send();
+    set_base(va_off);
     /* (before every draw: the chip's vertex fetch keeps video memory's lines, and a draw's first vertices often share
      * a line with the last draw's end, fetched before the CPU wrote them: conformance t16/t18 drew triangles from
      * stale vertices without it. DCPERF: a thousand of them cost 45 us) */
@@ -487,6 +504,7 @@ static const dgl_texture *valid_tex, *valid_tex1;
 static int shift_s[2], shift_t[2];
 static int nothing;                             /* the scissor leaves no pixels */
 static int hw_unit_of[2];                       /* GL's unit to the chip's (unit 1 alone goes to the chip's 0) */
+static int swap_st;                             /* ... and then its coordinates go in the vertex's first pair */
 
 /* 0..1 to a byte (the TNT2 back end's, no FLDCW). */
 static uint32_t ub(float v)
@@ -840,11 +858,17 @@ static void validate(void)
     hw_unit_of[0] = 0, hw_unit_of[1] = 1;
     cur_t0 = cur_t1 = NULL;
     if (t1 && !t) {
+        int k;
         hw_unit_of[1] = 0;
         cur_t0 = (ctex *)(x[0] = tex_unit(t1, 1, 0));
         env[0] = dgl_tex_env(1);
         mc(M_TEX_ENABLE(1), 0);
+        swap_st = 1;                            /* (its coordinates, and their whole-period shifts, in pair 0) */
+        shift_s[0] = shift_t[0] = 0;            /* (GL's unit 0 untextured) */
+        k = shift_s[0], shift_s[0] = shift_s[1], shift_s[1] = k;
+        k = shift_t[0], shift_t[0] = shift_t[1], shift_t[1] = k;
     } else {
+        swap_st = 0;
         cur_t0 = (ctex *)(x[0] = tex_unit(t, 0, 0));
         cur_t1 = (ctex *)(x[1] = tex_unit(t1, 1, 1));
         env[0] = dgl_tex_env(0), env[1] = dgl_tex_env(1);
@@ -973,7 +997,10 @@ static void vert(cvert *o, const dgl_cvtx *c, const dgl_cvtx *colour)
 {
     o->x = c->x, o->y = c->y, o->z = c->z, o->w = c->w;
     o->col = colour_of(colour);
-    o->s = c->s, o->t = c->t, o->s1 = c->s1, o->t1 = c->t1;
+    if (swap_st)
+        o->s = c->s1, o->t = c->t1, o->s1 = c->s, o->t1 = c->t;
+    else
+        o->s = c->s, o->t = c->t, o->s1 = c->s1, o->t1 = c->t1;
     o->fog = c->eye_d;
 }
 
@@ -1147,7 +1174,7 @@ static void tb_point(const dgl_cvtx *a)
  * case) and culls by GL's winding. Stage 1: unlit, no texgen; texture matrices applied while the vertices are
  * copied (affine ones; projective ones the CPU's path). DGL_TNL=0: every draw the CPU's path. */
 static int tnl_on = -1;
-static unsigned long tnl_draws_n, tnl_small_n, tnl_tris_n;
+static unsigned long tnl_draws_n, tnl_small_n, tnl_tris_n, tnl_fogged_n;
 
 static const float *tex_matrix(int unit)
 {
@@ -1200,13 +1227,171 @@ static void cpu_state(void)
     mc(M_SHADE_MODEL, 0x1D01);
 }
 
+/* A draw's vertices vmin.. (nv of them) converted into 40-byte vertices at video memory offset at: 0 if one can't be
+ * (coordinates past 1,024 lose their fraction in the chip's floats, the CPU's path taking whole periods off per
+ * triangle, conformance t14; a position not finite, the CPU's path clipping it). */
+static int pack(uint32_t at, GLint vmin, int nv, const float *tm0, const float *tm1)
+{
+    cvert c[64];
+    dgl_vin v;
+    int i, j = 0;
+    for (i = 0; i < nv; i++) {
+        cvert *o = &c[j];
+        dgl_vertex_of(vmin + i, &v);
+        if (tm0)
+            tex_affine(tm0, v.tex, dgl_gl.texr_used ? v.texr[0] : 0.0f);
+        if (tm1)
+            tex_affine(tm1, v.tex1, dgl_gl.texr_used ? v.texr[1] : 0.0f);
+        if (v.tex[0] > 1024.0f || v.tex[0] < -1024.0f || v.tex[1] > 1024.0f || v.tex[1] < -1024.0f ||
+            v.tex1[0] > 1024.0f || v.tex1[0] < -1024.0f || v.tex1[1] > 1024.0f || v.tex1[1] < -1024.0f ||
+            !(v.pos[0] - v.pos[0] == 0.0f) || !(v.pos[1] - v.pos[1] == 0.0f) ||
+            !(v.pos[2] - v.pos[2] == 0.0f) || !(v.pos[3] - v.pos[3] == 0.0f))
+            return 0;
+        o->x = v.pos[0], o->y = v.pos[1], o->z = v.pos[2], o->w = v.pos[3];
+        o->col = ub(v.col[3]) << 24 | ub(v.col[0]) << 16 | ub(v.col[1]) << 8 | ub(v.col[2]);
+        if (swap_st)
+            o->s = v.tex1[0], o->t = v.tex1[1], o->s1 = v.tex[0], o->t1 = v.tex[1];
+        else
+            o->s = v.tex[0], o->t = v.tex[1], o->s1 = v.tex1[0], o->t1 = v.tex1[1];
+        o->fog = 0;
+        if (++j == 64 || i + 1 == nv) {
+            memcpy((void *)(tnt2_fb + at), c, (size_t)j * VSIZE);
+            at += (uint32_t)j * VSIZE;
+            j = 0;
+        }
+    }
+    return 1;
+}
+
+/* ---- Buffer objects' vertices kept in video memory (the Radeon back end's X3b cache, this card's vertices) -------
+ * A draw from the arrays whose every array it reads is in a GL_STATIC_DRAW buffer: its vertices 0..its highest
+ * index converted once into a cache area and drawn from there, indices only, while nothing they came from changed
+ * (the buffers' generations, the arrays' layout, the current values standing for arrays that are off, the texture
+ * matrices applied while converting). DGL_TNL_VBO=0: every draw converted. */
+#define VC_SLOTS 1024
+#define VC_HASH 2048
+typedef struct {
+    struct { const void *b, *ptr; unsigned serial, gen; GLsizei stride; GLenum type; GLint size, en; } a[4];
+    float cur[10], m0[16], m1[16];
+    int units, has_m0, has_m1, texr_used, swap;
+} vkey;
+static struct { vkey k; uint32_t off, nv; int live, next; } vc[VC_SLOTS];
+static int vc_head[VC_HASH];
+static uint32_t vc_block, vc_used, vc_bytes, heap_bytes;
+static int vc_mode = -1, vc_count;
+static unsigned long vc_hits, vc_made;
+
+static unsigned vc_hash(const vkey *k)
+{
+    const unsigned char *q = (const unsigned char *)k->a;
+    uint32_t h = 2166136261u;
+    size_t i;
+    for (i = 0; i < sizeof k->a; i++)
+        h = (h ^ q[i]) * 16777619u;
+    return (h ^ (uint32_t)k->units * 31u) & (VC_HASH - 1);
+}
+
+static int vc_arr(vkey *k, int n, const dgl_array *a, int needed)
+{
+    if (!a->enabled || !needed)
+        return 1;
+    if (!a->buf || a->buf->usage != GL_STATIC_DRAW_ARB || a->buf->mapped)
+        return 0;
+    k->a[n].b = a->buf, k->a[n].ptr = a->ptr, k->a[n].serial = a->buf->serial, k->a[n].gen = a->buf->gen;
+    k->a[n].stride = a->stride, k->a[n].type = a->type, k->a[n].size = a->size, k->a[n].en = 1;
+    return 1;
+}
+
+/* The draw's key (units: bit 0 GL's unit 0 textured, bit 1 unit 1), or 0: not one to keep. Only what pack reads
+ * goes in it (the Radeon's lesson: Echoes' sky and HUD's current values remade every untextured chunk). */
+static int vc_key(vkey *k, int units, const float *tm0, const float *tm1)
+{
+    if (vc_mode < 0) {
+        const char *e = getenv("DGL_TNL_VBO");
+        vc_mode = !(e && *e == '0');
+    }
+    if (!vc_mode || !dgl_draw_from_arrays() || !dgl_gl.va.enabled || !dgl_gl.va.buf)
+        return 0;
+    memset(k, 0, sizeof *k);
+    if (!vc_arr(k, 0, &dgl_gl.va, 1) || !vc_arr(k, 1, &dgl_gl.ca, 1) || !vc_arr(k, 2, &dgl_gl.ta, units & 1) ||
+        !vc_arr(k, 3, &dgl_gl.ta1, units & 2))
+        return 0;
+    if (!dgl_gl.ca.enabled)
+        memcpy(k->cur, dgl_gl.cur_color, 4 * sizeof(float));
+    if (units & 1) {
+        if (!dgl_gl.ta.enabled)
+            memcpy(k->cur + 4, dgl_gl.cur_tex, 2 * sizeof(float));
+        if (tm0)
+            memcpy(k->m0, tm0, sizeof k->m0), k->has_m0 = 1;
+        if (dgl_gl.texr_used)
+            k->cur[8] = dgl_gl.cur_texr[0], k->texr_used = 1;
+    }
+    if (units & 2) {
+        if (!dgl_gl.ta1.enabled)
+            memcpy(k->cur + 6, dgl_gl.cur_tex1, 2 * sizeof(float));
+        if (tm1)
+            memcpy(k->m1, tm1, sizeof k->m1), k->has_m1 = 1;
+        if (dgl_gl.texr_used)
+            k->cur[9] = dgl_gl.cur_texr[1], k->texr_used = 1;
+    }
+    k->units = units, k->swap = swap_st;
+    return 1;
+}
+
+/* The video memory offset of the draw's vertices 0..vmax, converted now if they aren't kept yet; 0: they can't be. */
+static uint32_t vc_get(const vkey *k, GLint vmax, const float *tm0, const float *tm1)
+{
+    uint32_t nv = (uint32_t)vmax + 1u, bytes = nv * VSIZE, off;
+    unsigned h = vc_hash(k);
+    int i, slot;
+    for (i = vc_head[h] - 1; i >= 0; i = vc[i].next - 1)
+        if (vc[i].live && !memcmp(&vc[i].k, k, sizeof *k)) {
+            if (vc[i].nv >= nv) {
+                vc_hits++;
+                return vc[i].off;
+            }
+            vc[i].live = 0;                     /* (kept for fewer vertices: made again, bigger) */
+            break;
+        }
+    if (!vc_block) {
+        uint32_t want = heap_bytes >= (48u << 20) ? 16u << 20 : heap_bytes >= (24u << 20) ? 8u << 20 : 4u << 20;
+        for (vc_bytes = want; vc_bytes > (4u << 20); vc_bytes >>= 1)
+            if (dgl_vram_alloc(vc_bytes + 256u, &vc_block) == 0)
+                break;
+        if (vc_bytes == (4u << 20) && room(vc_bytes + 256u, &vc_block, NULL) != 0) {
+            vc_block = 0, vc_mode = 0;
+            return 0;
+        }
+    }
+    if (bytes > vc_bytes / 4u)
+        return 0;
+    if (vc_used + bytes > vc_bytes || vc_count == VC_SLOTS) {
+        flush();                                /* (full: everything kept goes, once the chip has drawn from it) */
+        if (tnt2_sync(1000000) != 0)
+            return 0;
+        memset(vc_head, 0, sizeof vc_head);
+        vc_used = 0, vc_count = 0;
+    }
+    slot = vc_count;
+    off = ((vc_block + 255u) & ~255u) + vc_used;
+    if (!pack(off, 0, (int)nv, tm0, tm1))
+        return 0;
+    vc_count++;
+    vc_used += (bytes + 63u) & ~63u;
+    vc[slot].k = *k, vc[slot].off = off, vc[slot].nv = nv, vc[slot].live = 1;
+    vc[slot].next = vc_head[h], vc_head[h] = slot + 1;
+    vc_made++;
+    return off;
+}
+
 static int tb_tnl(GLenum mode, GLsizei count, const GLint *idx, GLint first)
 {
     PROF_SCOPE(PROF_D_SETUP);
     const float *tm0, *tm1;
     GLint vmin, vmax, i;
-    uint32_t base, w[128];
+    uint32_t base, blk = 0, w[128];
     int nv, k, n;
+    vkey key;
     if (tnl_on < 0) {
         const char *e = getenv("DGL_TNL");
         tnl_on = !(e && *e == '0');
@@ -1233,45 +1418,23 @@ static int tb_tnl(GLenum mode, GLsizei count, const GLint *idx, GLint first)
             return 0;
         }
     }
-    if ((uint32_t)nv * VSIZE > VA_PART || (idx && nv > 4 * count))
-        return 0;                               /* (a huge or sparse range: the CPU's path) */
     tm0 = tex_matrix(0), tm1 = tex_matrix(1);
     flush();                                    /* (the CPU path's triangles first) */
-    if (va_room((uint32_t)nv) != 0)
-        return 0;
-    base = va_n;
-    {
-        cvert c[64];
-        dgl_vin v;
-        int j = 0;
-        uint32_t at = va_off + base * VSIZE;
-        for (i = 0; i < nv; i++) {
-            cvert *o = &c[j];
-            dgl_vertex_of(vmin + i, &v);
-            if (tm0)
-                tex_affine(tm0, v.tex, dgl_gl.texr_used ? v.texr[0] : 0.0f);
-            if (tm1)
-                tex_affine(tm1, v.tex1, dgl_gl.texr_used ? v.texr[1] : 0.0f);
-            if (v.tex[0] > 1024.0f || v.tex[0] < -1024.0f || v.tex[1] > 1024.0f || v.tex[1] < -1024.0f ||
-                v.tex1[0] > 1024.0f || v.tex1[0] < -1024.0f || v.tex1[1] > 1024.0f || v.tex1[1] < -1024.0f ||
-                !(v.pos[0] - v.pos[0] == 0.0f) || !(v.pos[1] - v.pos[1] == 0.0f) ||
-                !(v.pos[2] - v.pos[2] == 0.0f) || !(v.pos[3] - v.pos[3] == 0.0f)) {
-                /* (coordinates past 1,024 lose their fraction in the chip's floats: the CPU's path takes whole
-                 * periods off per triangle, conformance t14; a position not finite: the CPU's path clips it) */
-                va_n = va_first = base;
-                return 0;
-            }
-            o->x = v.pos[0], o->y = v.pos[1], o->z = v.pos[2], o->w = v.pos[3];
-            o->col = ub(v.col[3]) << 24 | ub(v.col[0]) << 16 | ub(v.col[1]) << 8 | ub(v.col[2]);
-            o->s = v.tex[0], o->t = v.tex[1], o->s1 = v.tex1[0], o->t1 = v.tex1[1], o->fog = 0;
-            if (++j == 64 || i + 1 == nv) {
-                memcpy((void *)(tnt2_fb + at), c, (size_t)j * VSIZE);
-                at += (uint32_t)j * VSIZE;
-                j = 0;
-            }
-        }
+    if (vmax < 65536 && vc_key(&key, (valid_tex ? 1 : 0) | (valid_tex1 ? 2 : 0), tm0, tm1))
+        blk = vc_get(&key, vmax, tm0, tm1);
+    if (blk) {
+        base = 0;                               /* (kept: the indices as they are, from vertex 0) */
+        vmin = 0;
+    } else {
+        if ((uint32_t)nv * VSIZE > VA_PART || (idx && nv > 4 * count))
+            return 0;                           /* (a huge or sparse range: the CPU's path) */
+        if (va_room((uint32_t)nv) != 0)
+            return 0;
+        base = va_n;
+        if (!pack(va_off + base * VSIZE, vmin, nv, tm0, tm1))
+            return 0;
+        va_n = va_first = base + (uint32_t)nv;
     }
-    va_n = va_first = base + (uint32_t)nv;
     /* The chip's state for its transform. */
     {
         float vps[16] = { 0 }, vpm[16];
@@ -1304,8 +1467,7 @@ static int tb_tnl(GLenum mode, GLsizei count, const GLint *idx, GLint first)
         mc(M_SHADE_MODEL, dgl_gl.shade_model == GL_FLAT ? 0x1D00u : 0x1D01u);
         eng = 1;
     }
-    if (!va_formats)
-        va_formats_send();
+    set_base(blk ? blk : va_off);
     m1(M_VTXBUF_VALIDATE, 0);
     m1(M_BEGIN_END, (uint32_t)mode + 1u);       /* (Celsius's primitives are GL's, plus one) */
     for (k = 0; k + 1 < count; k += 2 * n) {
@@ -1324,14 +1486,15 @@ static int tb_tnl(GLenum mode, GLsizei count, const GLint *idx, GLint first)
     m1(M_BEGIN_END, 0);
     {
         uint32_t m = tnt2_mark();
-        va_mark[(va_n - 1u) * VSIZE / VA_PART] = m;
+        if (!blk)
+            va_mark[(va_n - 1u) * VSIZE / VA_PART] = m;
         if (cur_t0) cur_t0->mark = m;
         if (cur_t1) cur_t1->mark = m;
     }
     tnt2_kick_soon();
     if (!tnl_draws_n)
         DGL_WARN("DGL-NV10 the transform engine draws (DGL_TNL=0: the CPU transforms instead)");   /* (said once) */
-    tnl_draws_n++;
+    tnl_draws_n++, tnl_fogged_n += fogging != 0;
     tnl_tris_n += (unsigned long)count / 3u;
     dgl_prims.tris_in += (unsigned long)count / 3u;
     return 1;
@@ -1474,13 +1637,22 @@ static void tex_reset(uint32_t start, uint32_t end)
         }
     cur_t0 = cur_t1 = NULL;
     dgl_vram_init(start, end);
+    heap_bytes = end - start;
+    vc_block = 0, vc_used = 0, vc_count = 0;    /* (the kept vertices went with the heap) */
+    memset(vc_head, 0, sizeof vc_head);
     va_off = 0;                                 /* (the vertex area: from the new heap at the next draw) */
 }
 
 static void stats(dgl_be_stats *s)
 {
     memset(s, 0, sizeof *s);
-    s->tris_offloaded = tris;
+    s->tris_offloaded = tris + (uint32_t)tnl_tris_n;
+    s->tris_tnl = (uint32_t)tnl_tris_n;
+    s->tnl_draws = (uint32_t)tnl_draws_n;
+    s->tnl_fogged = (uint32_t)tnl_fogged_n;
+    s->tnl_small_cpu = (uint32_t)tnl_small_n;
+    s->tnl_vbo_hits = (uint32_t)vc_hits;
+    s->tnl_vbo_made = (uint32_t)vc_made;
     s->mem_used = dgl_vram_used();
 }
 
