@@ -18,6 +18,7 @@
 #include "rg/tnt2_dev.h"
 #include "tnt2/tnt2.h"
 #include "tnt2/words.h"
+#include "cel.h"
 #include "mga/sys.h"
 #include "mga/fp.h"
 #include <string.h>
@@ -120,6 +121,8 @@ static FxBool win_open(int w, int h, GrColorFormat_t color_format, GrOriginLocat
     mg.aux_off = mg.has_aux ? rg_tnt2.z_off : 0;
     mg.heap_off = op.mem_start;
     mg.heap_end = op.mem_end;
+    if (tnt2.arch == 10)                        /* (the NV1x: triangles on Celsius, its vertex area off the heap) */
+        mg.heap_end = cel_open(mg.heap_off, mg.heap_end);
     tex_heap_init(mg.heap_off, mg.heap_end);
     tex_reset();
     mg.front = 0, mg.back = 1;
@@ -136,27 +139,35 @@ static FxBool win_open(int w, int h, GrColorFormat_t color_format, GrOriginLocat
     mg_gamma_apply();
     mg.fogcol_valid = 0;
     mg_hooks_install();
-    mg_line("MGL-WINOPEN %dx%d mode=tnt2 bpp=16 pitch=%d buffers=%d aux=%d z16 vram=%lu heap=%lu", w, h,
-            mg.pitch_px, mg.nbuffers, mg.has_aux, (unsigned long)op.vram_bytes,
+    mg_line("MGL-WINOPEN %dx%d mode=tnt2 bpp=16 pitch=%d buffers=%d aux=%d z16 3d=%s vram=%lu heap=%lu", w, h,
+            mg.pitch_px, mg.nbuffers, mg.has_aux, tnt2.arch == 10 ? "celsius" : "0x55", (unsigned long)op.vram_bytes,
             (unsigned long)(mg.heap_end - mg.heap_off));
     return FXTRUE;
 }
 
 static void win_close(void)
 {
+    if (tnt2.arch == 10)
+        cel_close();
     sync_said("close");
     tnt2_ramp_off();
     rg_tnt2_device.close();
     mg.open = 0;
     sys_unhook_faults();
     sys_unhook_exit();
-    mg_line("MGL-WINCLOSE frames=%u sync_timeouts=%u traps=%u vsync_waits=%lu avg_kcycles=%lu failed=%lu under_100k=%lu",
-            mg.frame, sync_timeouts, tnt2_traps(), vs_waits, vs_waits ? vs_cyc / vs_waits / 1000ul : 0ul, vs_fails, vs_short);
+    mg_line("MGL-WINCLOSE frames=%u sync_timeouts=%u traps=%u vsync_waits=%lu avg_kcycles=%lu failed=%lu under_100k=%lu "
+            "draws=%u", mg.frame, sync_timeouts, tnt2_traps(), vs_waits, vs_waits ? vs_cyc / vs_waits / 1000ul : 0ul,
+            vs_fails, vs_short, tnt2.arch == 10 ? cel_draws() : 0u);
 }
 
 static void fault(void) { tnt2_ramp_off(); rg_tnt2_device.close(); }
 static void exit_restore(void) { tnt2_sync(500000); tnt2_ramp_off(); rg_tnt2_device.close(); }
-static void sync(void) { sync_said("sync"); }
+static void sync(void)
+{
+    if (tnt2.arch == 10)
+        cel_flush();
+    sync_said("sync");
+}
 static int busy(void) { return !tnt2_idle(); }
 static int in_vblank(void) { return (sys_inb(0x3DA) & 0x08) != 0; }
 static unsigned vcount(void) { return 0; }       /* (the NV5's raster position: not read yet) */
@@ -167,6 +178,12 @@ static void set_ramp(const uint8_t ramp[256]) { tnt2_set_ramp(ramp); }
 
 static void validate(void)
 {
+    if (tnt2.arch == 10) {
+        if (mg.dirty & (MG_DIRTY_TARGET | MG_DIRTY_CLIP))
+            cel_target();
+        mg.dirty = 0;
+        return;
+    }
     if (mg.dirty & MG_DIRTY_TARGET)
         tnt2_3d_target(mg_buffer_offset(mg.render_buffer), mg.aux_off, mg.pitch_px * 2, 16, mg.rw, mg.rh);
     if (mg.dirty & (MG_DIRTY_TARGET | MG_DIRTY_CLIP)) {
@@ -182,6 +199,8 @@ static void validate(void)
 
 static void clear(int x0, int y0, int x1, int y1, GrColor_t color, FxU16 depth)
 {
+    if (tnt2.arch == 10)
+        cel_flush();                            /* (the batched triangles before the 2D engine's fill) */
     if (mg.st.color_mask_rgb)
         fill16(mg_buffer_offset(mg.render_buffer), x0, y0, x1 - x0, y1 - y0, mg_argb_to_565(mg_color_to_argb(color)));
     if (mg.has_aux && mg.st.depth_mask && mg.st.depth_mode != GR_DEPTHBUFFER_DISABLE)
@@ -191,6 +210,8 @@ static void clear(int x0, int y0, int x1, int y1, GrColor_t color, FxU16 depth)
 static void swap(int swap_interval)
 {
     int i;
+    if (tnt2.arch == 10)
+        cel_flush();
     sync_said("swap");
     /* The start first, then the retrace: the TNT2 takes its display start at the retrace's start, so a start
      * written after the wait (the Matrox order) showed one frame late, and the game drew a whole frame into the
@@ -757,6 +778,12 @@ static void tri_one(const GrVertex *a, const GrVertex *b, const GrVertex *c, GrL
     vertex(&v[0], a, ax, ay, wmode, fog, 1);
     vertex(&v[1], b, bx, by, wmode, fog, 1);
     vertex(&v[2], c, cx, cy, wmode, fog, 1);
+    if (tnt2.arch == 10) {
+        cel_draw(a, b, c, v, lod, wmode, depth, fog);
+        mg_stats.tris++;
+        mg_stats.tri_drawn++;
+        return;
+    }
     /* (every triangle through the combiner: per pixel, so a product of two iterated values (a lerp by iterated
      * alpha) is exact too, where evaluating at the vertices is not; untextured, the white texel) */
     draw_textured(a, b, c, v, blend, control, fogc, lod);
@@ -770,9 +797,18 @@ static void tex_write(uint32_t org, const uint16_t *texels, int hw_w, int hw_h)
 {
     const void *lv[1];
     lv[0] = texels;
+    if (tnt2.arch == 10)
+        cel_flush();
     tnt2_tex_load(org, 2, log2i(hw_w), log2i(hw_h), 1, lv);
-    tnt2_3d_tex_written();
+    if (tnt2.arch == 10)
+        cel_tex_written();
+    else
+        tnt2_3d_tex_written();
 }
+
+/* (for celsius.c, the NV1x's half) */
+int tnt2be_uses_texture(void) { return uses_texture(); }
+void tnt2be_st_of(const GrVertex *v, double *s, double *t) { st_of(v, s, t); }
 
 const mg_backend mg_tnt2_backend = {
     "tnt2", probe, win_open, win_close, fault, exit_restore, sync, busy, in_vblank, vcount, set_ramp, validate,

@@ -631,6 +631,9 @@ static int ramp_on;
 void tnt2_set_ramp(const uint8_t ramp[256])
 {
     int i, shift;
+    /* (never on the NV1x: its safety rules forbid writing the DAC, docs/nv10.md; no gamma there) */
+    if (tnt2.arch == 10)
+        return;
     if (!ramp_on) {
         ramp_general = tnt2_regs[0x680600 / 4];
         ramp_on = 1;
