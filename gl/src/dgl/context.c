@@ -188,6 +188,8 @@ static void open_args(rg_open *o, const DGLConfig *c)
     o->present_lag = present_lag || (e && *e == '1');
     /* DGL_TEXHEAP_KB caps the texture heap (tests of eviction, or a smaller
      * card's memory on a bigger one). */
+    e = getenv("DGL_TRIPLE");                           /* (vsync off: three buffers where there's room; 0 two) */
+    o->triple = !(e && *e == '0');
     e = getenv("DGL_TEXHEAP_KB");
     o->heap_kb = e && *e ? (uint32_t)strtoul(e, NULL, 10) : 0;
     e = getenv("DGL_GLOS_HINTS");                       /* (or dglGlosHints before dglInit) */

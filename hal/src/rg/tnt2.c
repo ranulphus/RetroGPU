@@ -9,6 +9,7 @@
  * after the BIOS's mode set. A swap shows the hidden buffer by the display start (PCRTC), in the vertical blank when
  * vsync is on. No GLOS window (B3's software path shows a window's pixels for cards other than Matrox ones). */
 #include "rg/device.h"
+#include "rg/tribuf.h"
 #include "rg/tnt2_dev.h"
 #include "tnt2/tnt2.h"
 #include "mga/hal.h"
@@ -119,10 +120,19 @@ static int list_modes(rg_mode *out, int max)
 
 /* ---- Buffers and showing ------------------------------------------------- */
 
+/* Triple buffering (rg/tribuf.h) for swaps without the vertical sync: the chip takes a start only in the blank
+ * (NSPLIT); the third buffer where the card has more than 4 MB and half the texture memory stays (DGL_TRIPLE=0: none);
+ * a smaller card's swap without the sync waits for the retrace instead (the owner's choice, 2026-11-27). */
+static rg_tribuf tri;
+static uint32_t third_off;
+static void tri_set(uint32_t off) { (void)tnt2_set_start(off); }
+
 uint32_t rg_tnt2_color_off(int front)
 {
     if (!st.double_buffer)
         return st.front_off;
+    if (tri.on)
+        return front ? rg_tri_front(&tri) : rg_tri_draw(&tri);
     return st.front_is_a == !!front ? st.front_off : st.back_off;
 }
 
@@ -153,16 +163,31 @@ static int sync(void)
 
 static int swap(int vsync)
 {
-    uint32_t show;
+    uint32_t show, t0;
     if (!st.active || !st.double_buffer)
         return 0;
-    show = st.front_is_a ? st.back_off : st.front_off;
     tnt2_kick();
+    if (tri.on) {
+        if (!vsync) {
+            (void)rg_tri_flip(&tri);            /* (it writes the start itself, then reads the line) */
+            return RG_SWAP_TARGET;
+        }
+        tnt2_set_start(rg_tri_flip_wait(&tri)); /* (then the retrace, as below) */
+        t0 = sys_time_us();
+        if (st_hooks.wait)
+            st_hooks.wait();
+        tnt2_vsync_wait(50000);
+        retrace_us += sys_time_us() - t0;
+        return RG_SWAP_TARGET;
+    }
+    if (!vsync && tnt2.fb_size <= (4u << 20))
+        vsync = 1;                              /* (no third buffer: no swap that draws into the shown one) */
+    show = st.front_is_a ? st.back_off : st.front_off;
     /* The start before the retrace: the chip takes it at the retrace's start, so one written after the wait
      * showed a frame late while the next frame was drawn into the buffer on screen (seen with Glide's games). */
     tnt2_set_start(show);
     if (vsync) {
-        uint32_t t0 = sys_time_us();
+        t0 = sys_time_us();
         if (st_hooks.wait)
             st_hooks.wait();
         tnt2_vsync_wait(50000);
@@ -252,8 +277,17 @@ static int open_screen(const rg_open *o, rg_opened *out)
     colour = (uint32_t)st.pitch_bytes * (uint32_t)st.height;
     st.front_off = 0;
     st.back_off = st.double_buffer ? ALIGN4K(colour) : 0;
-    st.z_off = st.depth_bits ? ALIGN4K((st.double_buffer ? st.back_off : 0) + colour) : 0;
-    st.heap_off = ALIGN4K(st.depth_bits ? st.z_off + colour : (st.double_buffer ? st.back_off : 0) + colour);
+    tri.on = 0, third_off = 0;
+    if (st.double_buffer && o->triple && tnt2.fb_size > (4u << 20)) {
+        /* (a third buffer where half the texture memory stays) */
+        uint32_t end2 = ALIGN4K(ALIGN4K(st.back_off + colour) + (st.depth_bits ? colour : 0));
+        uint32_t end3 = ALIGN4K(end2 + colour);
+        if (end3 < tnt2.fb_usable && 2u * (tnt2.fb_usable - end3) >= tnt2.fb_usable - end2)
+            third_off = ALIGN4K(st.back_off + colour);
+    }
+    st.z_off = st.depth_bits ? ALIGN4K((third_off ? third_off : st.double_buffer ? st.back_off : 0) + colour) : 0;
+    st.heap_off = ALIGN4K(st.depth_bits ? st.z_off + colour
+                                        : (third_off ? third_off : st.double_buffer ? st.back_off : 0) + colour);
     if (st.heap_off > tnt2.fb_usable) {
         rg_set_error("%dx%dx%d with these buffers needs %lu bytes of VRAM; %lu are usable", st.width, st.height, bpp,
                      (unsigned long)st.heap_off, (unsigned long)tnt2.fb_usable);
@@ -266,8 +300,8 @@ static int open_screen(const rg_open *o, rg_opened *out)
     /* Everything clear: both colour buffers black, depth at its farthest (all ones: Z24S8's top three bytes are
      * its Z); then the first buffer shown. */
     st.front_is_a = 1;
-    for (i = 0; i < (st.double_buffer ? 2 : 1); i++) {
-        s.off = i ? st.back_off : st.front_off;
+    for (i = 0; i < (third_off ? 3 : st.double_buffer ? 2 : 1); i++) {
+        s.off = i == 2 ? third_off : i ? st.back_off : st.front_off;
         s.pitch_bytes = st.pitch_bytes, s.bpp = st.bpp, s.width = st.width, s.height = st.height;
         target(&s);
         tnt2_fill(0, 0, st.width, st.height, 0);
@@ -279,6 +313,9 @@ static int open_screen(const rg_open *o, rg_opened *out)
     }
     tnt2_sync(500000);
     tnt2_set_start(st.front_off);
+    if (third_off)
+        (void)rg_tri_init(&tri, st.front_off, st.back_off, third_off, st.height, tnt2_raster_line,
+                          tri_set);
     memset(out, 0, sizeof *out);
     out->width = st.width;
     out->height = st.height;
@@ -300,6 +337,11 @@ static void close_dev(void)
     if (!graphics)
         return;
     graphics = 0;
+    if (third_off)                              /* (always said: RG_INFO is compiled out of release builds) */
+        RG_ERR("DGL-TRIPLE %s frame_us=%lu lines=%d top_waits=%u overtaken=%u late=%u",
+               tri.on ? "on" : "off (the line didn't move)", (unsigned long)tri.frame_us, tri.lines,
+               tri.waits, tri.overtaken, tri.late);
+    tri.on = 0, third_off = 0;
     if (mapped)
         tnt2_sync(100000);
     vbe_set_text_mode();

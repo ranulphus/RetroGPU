@@ -69,6 +69,7 @@ void tnt2_cursor_show(int on);
 void tnt2_cursor_move(int x, int y);
 int  tnt2_set_start(uint32_t byte_off);
 int  tnt2_vsync_wait(uint32_t timeout_us);
+uint32_t tnt2_raster_line(void);                /* the raster line (PCRTC 0x600808 bits 10:0) */
 /* Celsius, the NV1x's own 3D class (docs/nv10.md, Q3): set up after tnt2_3d_init (subchannel 7 then holds it) */
 int  tnt2_celsius_init(void);
 void tnt2_celsius_target(uint32_t colour, uint32_t zeta, int pitch_bytes, int w, int h, int bpp);

@@ -672,6 +672,10 @@ int tnt2_set_start(uint32_t byte_off)
     return 0;
 }
 
+/* The raster line (PCRTC 0x600808, nouveau's NV_PCRTC_RASTER, bits 10:0), read only. NRASTER on bench G's TNT2,
+ * 2026-11-27: lines 0..524 in 640x480, a wrap every 16.7 ms, 0x3DA's retrace at lines 490-492. */
+uint32_t tnt2_raster_line(void) { return tnt2_regs[0x600808 / 4] & 0x7FFu; }
+
 int tnt2_vsync_wait(uint32_t timeout_us)
 {
     uint32_t t0 = sys_time_us();

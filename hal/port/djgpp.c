@@ -94,6 +94,7 @@ void sys_dos_free(void *p)
  * 71 minutes, a false timeout. So the clock stands still until uclock()
  * passes its last reading; sys_time_backs counts the steps back. */
 uint32_t sys_time_backs;
+uint32_t sys_time_held;
 
 uint32_t sys_time_us(void)
 {
@@ -109,6 +110,7 @@ uint32_t sys_time_us(void)
         behind = 0;
     }
     last = t;
+    sys_time_held = (uint32_t)behind;
     return (uint32_t)((unsigned long long)t * 1000000ull / UCLOCKS_PER_SEC);
 }
 

@@ -299,7 +299,8 @@ static void parse_args(int argc, char **argv)
     int i;
     hx_args.frames = 60;
     hx_args.capture = -1;
-    hx_args.out = "C:\\OUT";
+    /* (HX_OUT: tools/bench/run.py's, on a PC whose drive for TEST and OUT isn't C:, as bench G's D:) */
+    hx_args.out = getenv("HX_OUT") && *getenv("HX_OUT") ? getenv("HX_OUT") : "C:\\OUT";
     for (i = 1; i < argc; i++) {
         const char *a = argv[i];
         if (!strcmp(a, "--frames") && i + 1 < argc) hx_args.frames = atoi(argv[++i]);

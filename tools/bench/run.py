@@ -202,6 +202,9 @@ def build_job(a, pc, cfg, job, token, jd, upload=True):
     addr = pc.get("address", host["address"])
     run = ["C:", "CD \\TEST", "IF NOT EXIST C:\\OUT\\NUL MD C:\\OUT",
            "ECHO Y| DEL C:\\OUT\\*.* > NUL", "SET HX_CAPWAIT=%d" % a.capwait]
+    if drive_of(pc) != "C":
+        # (the hx shim's frames and files: C:\OUT unless HX_OUT says otherwise; programs' own paths are theirs)
+        run += ["SET HX_OUT=%s:\\OUT" % drive_of(pc)]
     for spec in a.set:
         name, _, value = spec.partition("=")
         if "=" not in value:

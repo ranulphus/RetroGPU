@@ -109,7 +109,25 @@ dglShutdown();
     and read FIFOSTATUS counts there as waits (its queue is 64K entries
     deep, so the CPU polls only once the engine is far behind). Building
     again without `PROF=1` returns to the library without timers.
-  - `DGL_VSYNC=0` or `1` overrides the program's choice of swap on retrace.
+  - `DGL_VSYNC=0` or `1` overrides the program's choice of swap on retrace. Without the retrace, what a swap does
+    depends on when the card takes a new display start (watched on the cards with a red/blue split test, MSPLIT and
+    NSPLIT, 2026-11-27):
+    - **Matrox G100-G550: at once** (MSPLIT on bench A's G400). The frame may tear; nothing is drawn into the frame on
+      screen.
+    - **Rage 128 and Radeon:** the start is set to be taken at the next line, so the same as the Matrox, as on Windows.
+    - **NVIDIA, TNT to Quadro2: only in the next blank** (NSPLIT on bench E's Quadro2), so two buffers drew the next
+      frame into the one still shown. **Triple buffering** takes the next frame into a third buffer instead, and
+      nothing waits for the retrace. Which buffer is on screen comes from the raster line (PCRTC 0x600808), read only.
+      A start is written only in the visible area: a swap in the last 16 lines before the blank waits for the next
+      frame's top, at most about 2 ms (up to 8% at 300-600 fps, about 1% at game rates). The third buffer costs one
+      colour buffer of video memory and is made only where the card has more than 4 MB and at least half the texture
+      memory stays; elsewhere the swap waits for the retrace. `DGL_TRIPLE=0` keeps two buffers. At exit a
+      `DGL-TRIPLE on frame_us= lines= top_waits= overtaken= late=` line gives the frame measured at open, the swaps
+      that waited for the top, the frames never shown (drawn faster than the screen) and the starts written late
+      (the program held up mid-swap: that swap waited up to two frames to be certain). The bookkeeping is checked
+      against a simulated chip in `tests/unit/test_tribuf.c`.
+    - **ViRGE/DX (4 MB): waits for the retrace**, whether or not vsync is asked for, until a split test on bench C
+      says when it takes a start.
   - `DGL_WARP=0` sets every triangle up on the CPU on a G200, G400 or G450, which otherwise use the chip's WARP
     setup engine with vertices by bus-master DMA (RetroGPU's `docs/g400-warp.md`, `docs/g200-warp.md`). At exit a
     `DGL-WARP tris= failures= kicks= ring= resets= timeouts= seqs=` line counts its triangles, failures (each one

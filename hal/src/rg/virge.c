@@ -156,7 +156,10 @@ static int swap(int vsync)
     if (!st.active || !st.double_buffer)
         return 0;
     show = st.front_is_a ? st.back_off : st.front_off;
-    if (vsync) {
+    /* A swap without the retrace waits for it too on a card of 4 MB or less (all ViRGE/DXs): no room for a third
+     * buffer, and if the chip takes a start only in the blank, as the NV chips do, the next frame would be drawn into
+     * the one on screen (the owner's choice, 2026-11-27, until a split test on bench C says when the ViRGE takes it). */
+    if (vsync || virge.vram_bytes <= (4u << 20)) {
         uint32_t t0 = sys_time_us();
         if (st.hooks.wait)
             st.hooks.wait();

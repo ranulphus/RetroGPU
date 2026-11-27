@@ -20,7 +20,7 @@ HAL_COMMON := hal/src/debug/serial.c hal/src/debug/regtrace.c hal/src/pci.c hal/
 # Other vendors' cards in Glide's Open Watcom build (the device log; the Riva TNT2's and the ViRGE/DX's devices and
 # layers: Glide's back ends in glide/src/backend/tnt2 and virge); rg/device.c's list and the Matrox and memory devices
 # stay DJGPP's.
-HAL_OW_RG  := hal/src/rg/log.c hal/src/rg/tnt2.c hal/src/tnt2/tnt2.c \
+HAL_OW_RG  := hal/src/rg/log.c hal/src/rg/tnt2.c hal/src/rg/tribuf.c hal/src/tnt2/tnt2.c \
               hal/src/rg/virge.c hal/src/virge/chip.c hal/src/virge/engine2d.c hal/src/virge/cursor.c hal/src/virge/tri.c \
               hal/src/rg/r128.c hal/src/r128/chip.c hal/src/r128/engine2d.c hal/src/r128/cursor.c hal/src/r128/cce.c \
               hal/src/r128/tri.c hal/src/r128/cce_ucode.c \
@@ -98,6 +98,7 @@ DJ_SRC_ROMDUMP := tests/hal/romdump.c
 DJ_SRC_VRAMBUS := tests/hal/vrambus.c
 DJ_SRC_FOGPROBE := tests/hal/fogprobe.c
 DJ_SRC_CLOCKMON := tests/hal/clockmon.c
+DJ_SRC_MSPLIT := tests/hal/msplit.c
 # The S3 ViRGE/DX (docs/virge.md): its register layer as a library of its own (hal/src/virge, not part of the
 # Matrox HAL's), VPROBE (PCI, IDs, the BIOS's modes, the linear window) and VTWOD (its 2D against sw2d.c).
 VIRGE_SRCS := hal/src/virge/chip.c hal/src/virge/engine2d.c hal/src/virge/cursor.c hal/src/virge/tri.c
@@ -125,7 +126,7 @@ build/djgpp/libtnt2.a: $(TNT2_SRCS:%.c=build/djgpp/%.o)
 # Matrox one on the HAL, the ViRGE/DX's on its layer and the memory one (gl/docs/b2.md); RGDEV drives them through
 # the table alone.
 RG_SRCS := hal/src/rg/device.c hal/src/rg/log.c hal/src/rg/glos.c hal/src/rg/mga.c hal/src/rg/mga_glos.c hal/src/rg/virge.c hal/src/rg/mem.c \
-            hal/src/rg/vbe_soft.c hal/src/rg/tnt2.c hal/src/rg/r128.c hal/src/rg/radeon.c
+            hal/src/rg/vbe_soft.c hal/src/rg/tnt2.c hal/src/rg/r128.c hal/src/rg/radeon.c hal/src/rg/tribuf.c
 $(RG_SRCS:%.c=build/djgpp/%.o): DJ_CFLAGS += -I$(GLOS)/include
 build/djgpp/librg.a: $(RG_SRCS:%.c=build/djgpp/%.o)
 	@rm -f $@
@@ -158,6 +159,9 @@ DJ_SRC_DCTNL := tests/tnt2/dctnl.c build/djgpp/libtnt2.a
 DJ_SRC_NTWOD := tests/tnt2/ntwod.c tests/hal/sw2d.c build/djgpp/libtnt2.a
 # NTRI0 (T2's bring-up: the 3D objects and one Gouraud triangle).
 DJ_SRC_NTRI0 := tests/tnt2/ntri0.c build/djgpp/libtnt2.a
+# NRASTER: the raster line (PCRTC 0x600808) for triple buffering (rg/tribuf.h); reads only.
+DJ_SRC_NRASTER := tests/tnt2/nraster.c build/djgpp/libtnt2.a
+DJ_SRC_NSPLIT := tests/tnt2/nsplit.c build/djgpp/libtnt2.a
 # NTRI (T2: VTRI's scenes against OpenGL's rules on the TNT2).
 DJ_SRC_NTRI := tests/tnt2/ntri.c build/djgpp/libtnt2.a
 DJ_SRC_NTRI32 := tests/tnt2/ntri32.c build/djgpp/libtnt2.a
@@ -220,6 +224,7 @@ build/djgpp/ROMDUMP.EXE: tests/hal/romdump.c
 build/djgpp/VRAMBUS.EXE: tests/hal/vrambus.c
 build/djgpp/FOGPROBE.EXE: tests/hal/fogprobe.c
 build/djgpp/CLOCKMON.EXE: tests/hal/clockmon.c
+build/djgpp/MSPLIT.EXE: tests/hal/msplit.c
 build/djgpp/VPROBE.EXE: tests/virge/vprobe.c
 build/djgpp/NPROBE.EXE: tests/tnt2/nprobe.c
 build/djgpp/NPRAMIN.EXE: tests/tnt2/npramin.c
@@ -235,6 +240,8 @@ build/djgpp/DCTNL.EXE: tests/tnt2/dctnl.c build/djgpp/libtnt2.a
 build/djgpp/NTWOD.EXE: tests/tnt2/ntwod.c tests/hal/sw2d.c tests/hal/sw2d.h build/djgpp/libtnt2.a
 build/djgpp/NTWOD.EXE: DJ_CFLAGS += -Itests/hal
 build/djgpp/NTRI0.EXE: tests/tnt2/ntri0.c build/djgpp/libtnt2.a
+build/djgpp/NRASTER.EXE: tests/tnt2/nraster.c build/djgpp/libtnt2.a
+build/djgpp/NSPLIT.EXE: tests/tnt2/nsplit.c build/djgpp/libtnt2.a
 build/djgpp/NTRI.EXE: tests/tnt2/ntri.c build/djgpp/libtnt2.a
 build/djgpp/NTRI32.EXE: tests/tnt2/ntri32.c build/djgpp/libtnt2.a
 build/djgpp/NSHOW.EXE: tests/tnt2/nshow.c build/djgpp/libtnt2.a

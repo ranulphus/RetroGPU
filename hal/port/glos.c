@@ -39,6 +39,7 @@ uint32_t sys_time_us(void)
     return timer_ticks() * 15625u / 16u;        /* (976.5625 us a tick) */
 }
 uint32_t sys_time_backs;                /* (never moves: the kernel's tick doesn't go back) */
+uint32_t sys_time_held;                 /* (never: as sys_time_backs) */
 
 /* An ISA cycle a microsecond, near enough: the delays the HAL asks for
    (an engine reset's 20 us) are minimums. */
