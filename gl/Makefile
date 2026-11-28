@@ -231,7 +231,8 @@ build/host/test_gl_h_abi: tests/unit/test_gl_h_abi.c include/GL/gl.h include/GL/
 	$(Q)$(HOST_CC) $(HOST_CFLAGS) -Ithird_party/classicube -o $@ $<
 # Unit tests: tests/unit/test_<name>.c + UNIT_<name> sources, host gcc.
 GL_SRCS := $(wildcard src/gl/*.c)
-UNIT_TESTS := matrix clip assembly texconv vram lists buffer
+UNIT_TESTS := matrix clip assembly texconv texstore vram lists buffer
+UNIT_texstore := src/gl/texstore.c src/gl/texconv.c src/backend/mga/texconv.c
 UNIT_lists := src/gl/lists.c src/gl/vertex.c src/gl/buffer.c src/gl/matrix.c src/gl/state.c src/gl/raster.c src/gl/light.c src/gl/texgen.c
 UNIT_buffer := src/gl/buffer.c src/gl/vertex.c src/gl/matrix.c src/gl/state.c src/gl/raster.c src/backend/mga/combine.c src/gl/light.c src/gl/texgen.c
 UNIT_texconv := src/gl/texconv.c src/backend/mga/texconv.c

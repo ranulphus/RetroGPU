@@ -79,6 +79,28 @@ static void warn_once(int k, const char *what)
 
 static int log2_of(int v) { int l = 0; while ((1 << l) < v) l++; return l; }
 
+/* Plain RGB and luminance at eight bits a component: asked for by size, or unsized on a 32-bit screen (GL leaves an
+ * unsized format's precision to us: the screen's, as the era's drivers did; the owner, 2026-11-27); else RGB565. */
+static int at_8bits(GLint f)
+{
+    switch (f) {
+    case GL_RGB8: case GL_RGB10: case GL_RGB12: case GL_RGB16:
+        return 1;
+    case 3: case GL_RGB: case 1: case GL_LUMINANCE: case GL_COMPRESSED_RGB_ARB: case GL_COMPRESSED_RGB_S3TC_DXT1_EXT:
+        return rg_tnt2.bpp == 32;
+    default:
+        return 0;                       /* (few bits asked for) */
+    }
+}
+
+/* GL's copy of a plain RGB level held as the chip will draw it (texstore.c): RGB565 rounded as the layer's
+ * conversion rounds (tnt2_tex_load_rgba8), or three bytes. */
+static int tex_store(int ifc, GLint ifmt)
+{
+    (void)ifc;
+    return at_8bits(ifmt) ? DGL_ST_RGB8 : DGL_ST_RGB565R;
+}
+
 /* The chip's format for GL's internal format class (and its ifmt's size, where GL asked for few bits). */
 static uint32_t chip_format(const dgl_level *l, int *cpp, int *has_alpha)
 {
@@ -89,7 +111,7 @@ static uint32_t chip_format(const dgl_level *l, int *cpp, int *has_alpha)
     case DGL_IF_RGB:
     case DGL_IF_LUMINANCE:
         *has_alpha = 0;
-        if (l->ifmt == GL_RGB8 || l->ifmt == GL_RGB10 || l->ifmt == GL_RGB12 || l->ifmt == GL_RGB16) {
+        if (at_8bits(l->ifmt)) {
             *cpp = 4;
             return F_A8R8G8B8;
         }
@@ -157,7 +179,7 @@ static ttex *prepare(dgl_texture *t)
         x->stamp = ++stamp;
         return x;
     }
-    if (!l0->rgba && !l0->idx)
+    if (!DGL_LEVEL_DEFINED(l0))
         return NULL;
     lw = log2_of(l0->w), lh = log2_of(l0->h);
     if ((1 << lw) != l0->w || (1 << lh) != l0->h || lw > 11 || lh > 11)
@@ -170,7 +192,7 @@ static ttex *prepare(dgl_texture *t)
     for (n = 1; n < DGL_MAX_LEVELS && n <= t->max_level; n++) {
         const dgl_level *l = &t->level[n];
         int w = l0->w >> n ? l0->w >> n : 1, h = l0->h >> n ? l0->h >> n : 1;
-        if (!(pal ? l->idx != NULL : l->rgba != NULL) || l->w != w || l->h != h)
+        if (!(pal ? l->idx != NULL : DGL_LEVEL_TEXELS(l)) || l->w != w || l->h != h)
             break;
         if (w == 1 && h == 1) {
             n++;
@@ -213,7 +235,7 @@ static ttex *prepare(dgl_texture *t)
         for (i = 0; i < n; i++) {
             const dgl_level *l = &t->level[i];
             expanded[i] = NULL;
-            src[i] = l->rgba;
+            src[i] = dgl_level_rgba(l, i);  /* (its copy, or expanded from its smaller form: texstore.c) */
             if (pal) {
                 int k;
                 if (!(expanded[i] = (unsigned char *)malloc((size_t)l->w * l->h * 4)))
@@ -232,6 +254,7 @@ static ttex *prepare(dgl_texture *t)
         x->code = code, x->lw = lw, x->lh = lh;
         for (i = 0; i < n; i++)
             free(expanded[i]);
+        dgl_level_rgba_done();
     }
     x->format = F_DMA_A | F_ORIGIN | fmt | (uint32_t)lh << 20 | (uint32_t)lw << 16;
     x->levels = n;
@@ -1031,7 +1054,8 @@ static int tex_sub(dgl_texture *t, int level, int x, int y, int w, int h)
 {
     ttex *tx = (ttex *)t->be;
     const dgl_level *l = &t->level[level];
-    if (!tx || level != 0 || tx->levels != 1 || tx->pal || !l->rgba || t->dirty || l->w != (1 << tx->lw) ||
+    const unsigned char *rgba;
+    if (!tx || level != 0 || tx->levels != 1 || tx->pal || !DGL_LEVEL_TEXELS(l) || t->dirty || l->w != (1 << tx->lw) ||
         l->h != (1 << tx->lh) || x < 0 || y < 0 || x + w > l->w || y + h > l->h)
         return 0;
     {
@@ -1040,7 +1064,10 @@ static int tex_sub(dgl_texture *t, int level, int x, int y, int w, int h)
         if (r != 0)
             return 0;
     }
-    tnt2_tex_sub_rgba8(tx->off, tx->code, tx->lw, tx->lh, x, y, w, h, l->rgba, l->w);
+    if (!(rgba = dgl_level_rgba_rect(l, 0, x, y, w, h)))
+        return 0;
+    tnt2_tex_sub_rgba8(tx->off, tx->code, tx->lw, tx->lh, x, y, w, h, rgba, l->w);
+    dgl_level_rgba_done();
     tnt2_3d_tex_written();
     dgl_texc.sub_fast++;
     return 1;
@@ -1092,6 +1119,7 @@ const dgl_backend dgl_tnt2_backend = {
     .tex_free = tex_free,
     .tex_info = tex_info,
     .tex_reset = tex_reset,
+    .tex_store = tex_store,
     .tex_change = NULL,
     .stats = stats,
 };

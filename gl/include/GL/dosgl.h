@@ -12,13 +12,19 @@ extern "C" {
 
 typedef struct {
     int width, height;      /* any enumerated mode; 0 = 640x480 */
-    int color_bits;         /* 16 (0 = 16); 8 or 32 where the device draws them (the software renderer) */
-    int depth_bits;         /* 0 or 16 */
+    int color_bits;         /* 16 (0 = 16); 32 where the card draws it (dglEnumModes lists each size at each depth:
+                               TNT to Quadro2, Rage 128, Radeon, the software renderer; not yet the Matrox, never the
+                               ViRGE); 8 (the software renderer) */
+    int depth_bits;         /* 0, 16, or 24 (32-bit colour on the cards above: DGLMode.max_depth_bits) */
     int refresh_hz;         /* 0 = BIOS default; VBE 3.0 only */
     int double_buffer;      /* nonzero for double buffering */
     int vsync;              /* nonzero to sync swaps to retrace */
     int scale_filter;       /* scaled modes: 0 = default (nearest), 1 nearest, 2 bilinear (v1.2) */
     int stencil_bits;       /* 0 or 8: where the device has a stencil buffer (the software renderer's); else 0 */
+    /* v1.9: what a card can't draw is given as the closest it can (32-bit colour as 16, a 24-bit depth buffer as 16,
+       a stencil as none), said in a DGL-WARN line; glGetIntegerv's GL_RED_BITS, GL_DEPTH_BITS and GL_STENCIL_BITS
+       give what it got. exact nonzero: dglInit fails instead (dglGetErrorString says what the card has). */
+    int exact;
 } DGLConfig;
 
 typedef struct {
@@ -60,16 +66,20 @@ typedef struct {
 /* The API's version: 0x0103 is 1.3 (DOS-GL 0.3), which added dglSetWaitHook;
    0x0104 the window on a GLOS desktop and dglGetGlosWindow; 0x0105
    dglSetPresentLag; 0x0106 dglGlosHints; 0x0107 a GLOS window on any desktop; 0x0108 DGL_GLOS_FULL
-   (the software renderer's where the Matrox engine can't draw one: B3). */
-#define DGL_API_VERSION 0x0108
+   (the software renderer's where the Matrox engine can't draw one: B3); 0x0109 DGLConfig.exact and the best
+   fit (what a card can't draw given as its closest), 24-bit depth reported by GL_DEPTH_BITS. */
+#define DGL_API_VERSION 0x0109
 
 /* The library's version string, e.g. "DOS-GL 0.3 (<build>)". */
 const char *dglVersion(void);
 
 /* Enumeration: callable before dglInit, after device discovery. Returns the
    number of usable modes and fills up to max_modes entries, smallest first:
-   the BIOS's 16-bit modes and (v1.2) 320x200, 320x240, 400x300, 512x384 and
-   640x512 shown scaled or zoomed in a larger one. */
+   the BIOS's modes at each colour depth the card draws (16; 32 on the cards
+   DGLConfig.color_bits names) and (v1.2) 320x200, 320x240, 400x300, 512x384
+   and 640x512 shown scaled or zoomed in a larger one. A menu lists them; a
+   program given a size and depth on its command line asks dglInit for them
+   and gets the closest (DGLConfig.exact). */
 int  dglEnumModes(DGLMode *modes, int max_modes);
 
 int  dglInit(const DGLConfig *cfg);     /* 0 on success */

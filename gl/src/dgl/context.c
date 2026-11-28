@@ -234,6 +234,59 @@ static int opened(const DGLConfig *c, const rg_opened *op)
     return 0;
 }
 
+/* The best fit (the owner, 2026-11-27): a colour depth the card doesn't draw at that size is given as 16 bits (the
+ * device would refuse it: the Matrox cards until their 32-bit path, the ViRGE), said in a DGL-WARN line; exact: an
+ * error naming what it draws instead. (Sizes: the device's own rules, scaled where the BIOS lacks one.) */
+static int fit_colour(rg_open *o, int exact)
+{
+    rg_mode m[64];
+    int want = o->color_bits ? o->color_bits : 16, n, i, has_depth = 0, size_any = 0, size_at = 0;
+    if (want == 16)
+        return 0;
+    n = dgl_dev->modes(m, 64);
+    for (i = 0; i < n && i < 64; i++) {
+        if (m[i].color_bits == want)
+            has_depth = 1;
+        if (m[i].width == o->width && m[i].height == o->height) {
+            size_any = 1;
+            if (m[i].color_bits == want)
+                size_at = 1;
+        }
+    }
+    if (has_depth && (size_at || !size_any))
+        return 0;
+    if (exact) {
+        dgl_set_error("%dx%d at %d bits: this card draws %s", o->width, o->height, want,
+                      has_depth ? "that depth only at other sizes" : "16 bits");
+        return -1;
+    }
+    /* (a 24-bit depth buffer goes with 32-bit colour on every card that has one: 16 bits with 16) */
+    DGL_WARN("DGL-WARN asked %dx%dx%d%s: given %dx%dx16%s (the card's closest)", o->width, o->height, want,
+             o->depth_bits > 16 ? " Z24" : "", o->width, o->height, o->depth_bits > 16 ? " Z16" : "");
+    o->color_bits = 16;
+    if (o->depth_bits > 16)
+        o->depth_bits = 16;
+    return 0;
+}
+
+/* ... and a depth buffer or stencil shallower than asked (a 24-bit depth buffer at 16-bit colour, none where it
+ * didn't fit, no stencil), said; exact: the device closed again and an error. */
+static int fit_depth(const rg_open *o, const rg_opened *op, int exact)
+{
+    if (!((o->depth_bits && op->depth_bits < o->depth_bits) || op->stencil_bits < o->stencil_bits))
+        return 0;
+    if (exact) {
+        dgl_teardown();
+        dgl_set_error("depth %d, stencil %d: this card gives depth %d, stencil %d at %dx%dx%d", o->depth_bits,
+                      o->stencil_bits, op->depth_bits, op->stencil_bits, op->width, op->height,
+                      op->color_bits ? op->color_bits : 16);
+        return -1;
+    }
+    DGL_WARN("DGL-WARN asked depth %d stencil %d: given depth %d stencil %d (the card's closest)", o->depth_bits,
+             o->stencil_bits, op->depth_bits, op->stencil_bits);
+    return 0;
+}
+
 int dglInit(const DGLConfig *cfg)
 {
     static const DGLConfig zero;
@@ -265,6 +318,13 @@ int dglInit(const DGLConfig *cfg)
         memset(&dgl_ctx, 0, sizeof dgl_ctx);
         open_args(&o, &c);
         r = wd->open_glos(&o, &op);
+        if (r < 0 && o.color_bits && o.color_bits != 16 && !c.exact) {
+            /* (the best fit: a window of a depth the device refuses, at 16 bits) */
+            DGL_WARN("DGL-WARN asked a %dx%dx%d window: given %dx%dx16 (the card's closest)", o.width, o.height,
+                     o.color_bits, o.width, o.height);
+            o.color_bits = 16;
+            r = wd->open_glos(&o, &op);
+        }
         if (r < 0) {
             dgl_set_error("%s", rg_error());
             return -1;
@@ -274,6 +334,8 @@ int dglInit(const DGLConfig *cfg)
             dgl_be = backend_for(wd);
             dgl_crash_install();
             memset(&stats, 0, sizeof stats);
+            if (fit_depth(&o, &op, c.exact) != 0)
+                return -1;
             return opened(&c, &op);
         }
         /* (1: GLOS won't have it as an app: the screen, as on DOS) */
@@ -292,6 +354,8 @@ int dglInit(const DGLConfig *cfg)
     memset(&dgl_ctx, 0, sizeof dgl_ctx);
     memset(&stats, 0, sizeof stats);
     open_args(&o, &c);
+    if (fit_colour(&o, c.exact) != 0)
+        return -1;
     dgl_crash_install();
     if (dgl_dev->open(&o, &op) != 0) {
         char why[160];
@@ -300,6 +364,8 @@ int dglInit(const DGLConfig *cfg)
         dgl_set_error("%s", why);
         return -1;
     }
+    if (fit_depth(&o, &op, c.exact) != 0)
+        return -1;
     return opened(&c, &op);
 }
 
@@ -366,6 +432,8 @@ void dgl_note_exit(void)
         return;
     exit_pending = 0;
     dgl_regcrc("exit");
+    if (stats_on)
+        dgl_tex_mem_report();
     DGL_ERR("DGL-EXIT frames=%lu", stats.swaps);
 }
 

@@ -68,6 +68,14 @@ static void prof_micro(void)
 
 #endif
 
+/* GL's copies of plain RGB levels as RGB565, rounded as dgl_pack_texel rounds: every RGB texture is drawn TW16 here
+ * (texstore.c). */
+static int tex_store(int ifc, GLint ifmt)
+{
+    (void)ifc, (void)ifmt;
+    return DGL_ST_RGB565R;
+}
+
 const dgl_backend dgl_mga_backend = {
     .name = "mga",
     .dev = &rg_mga_device,
@@ -79,6 +87,7 @@ const dgl_backend dgl_mga_backend = {
     .tex_free = dgl_mga_tex_free,
     .tex_info = dgl_mga_tex_info,
     .tex_reset = dgl_mga_tex_reset,
+    .tex_store = tex_store,
     .stats = stats,
 #ifdef MGA_PROF
     .prof_micro = prof_micro,

@@ -62,8 +62,8 @@ void APIENTRY glGetTexImage(GLenum target, GLint level, GLenum format, GLenum ty
         unsigned char *p = row;
         for (x = 0; x < L->w; x++, p += bpp) {
             size_t i = (size_t)y * L->w + x;
-            const unsigned char *s = L->idx ? dgl_palette_texel(pal, L->idx[i]) : L->rgba + i * 4;
-            unsigned char c[4];
+            unsigned char e[4], c[4];
+            const unsigned char *s = L->idx ? dgl_palette_texel(pal, L->idx[i]) : dgl_level_span(L, i, 1, e);
             unsigned l;
             base(L->ifc, s, c);
             switch (format) {

@@ -61,6 +61,9 @@ typedef struct dgl_backend {
     void (*tex_change)(dgl_texture *t);     /* GL's copy of its levels is about to change (glTexImage2D,
                                        glTexSubImage2D): drawing kept that samples it is done first (the
                                        software back end's tiles); NULL: nothing reads GL's copy later */
+    int  (*tex_store)(int ifc, GLint ifmt); /* how GL's copy of a plain RGB level may be held (texstore.c):
+                                       DGL_ST_RGB565T or R (as this back end quantises it), DGL_ST_RGB8 (drawn at
+                                       eight bits), or DGL_ST_RGBA8 (every level as RGBA8: also NULL) */
 
     /* Diagnostics */
     void (*stats)(dgl_be_stats *s);

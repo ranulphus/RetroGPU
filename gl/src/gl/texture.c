@@ -176,11 +176,65 @@ static dgl_texture *nth(int i)
 int dgl_texture_count(void) { return ALL_TEXTURES; }
 dgl_texture *dgl_texture_nth(int i) { return nth(i); }
 
+/* The shadow copies' bytes now and at most, and the levels loaded (DGL-TEXMEM). */
+static unsigned long shadow_now, shadow_peak, shadow_loads, cls_now[8], cls_peak[8];
+static unsigned long level_bytes(const dgl_level *L)
+{
+    return L->rgba ? (unsigned long)L->w * L->h * 4u
+         : L->px ? (unsigned long)L->w * L->h * (unsigned)dgl_st_bytes(L->st)
+         : L->idx ? (unsigned long)L->w * L->h : 0;
+}
+static int level_class(const dgl_level *L) { return L->idx ? DGL_IF_INDEX : L->ifc >= 0 && L->ifc < 8 ? L->ifc : 0; }
+static void shadow_sub(const dgl_level *L)
+{
+    shadow_now -= level_bytes(L);
+    cls_now[level_class(L)] -= level_bytes(L);
+}
+static void shadow_add(const dgl_level *L)
+{
+    shadow_now += level_bytes(L);
+    cls_now[level_class(L)] += level_bytes(L);
+    if (shadow_now > shadow_peak)
+        shadow_peak = shadow_now, memcpy(cls_peak, cls_now, sizeof cls_peak);
+}
+
+/* DGL-TEXMEM (at exit, DGL_STATS): the shadow copies' bytes by internal format class, all textures and faces. */
+void dgl_tex_mem_report(void)
+{
+    static const char *const cls[] = { "rgba", "rgb", "rgb5a1", "l", "la", "a", "i", "idx" };
+    unsigned long kb[8] = { 0 }, comp = 0, levels = 0, total = 0;
+    int i, f, l, c;
+    for (i = 0; i < ALL_TEXTURES; i++) {
+        dgl_texture *t = nth(i);
+        if (!t)
+            continue;
+        for (f = 0; f < (t->faces ? 6 : 1); f++)
+            for (l = 0; l < DGL_MAX_LEVELS; l++) {
+                const dgl_level *L = f ? &t->faces[f - 1][l] : &t->level[l];
+                unsigned long b = level_bytes(L);
+                if (!b)
+                    continue;
+                c = L->idx ? DGL_IF_INDEX : L->ifc;
+                kb[c >= 0 && c < 8 ? c : 0] += b;
+                total += b, levels++;
+                comp += (unsigned long)L->comp_size;
+            }
+    }
+    DGL_ERR("DGL-TEXMEM levels=%lu kb=%lu peak_kb=%lu loads=%lu %s=%lu %s=%lu %s=%lu %s=%lu %s=%lu %s=%lu %s=%lu %s=%lu "
+            "comp_kb=%lu", levels, total >> 10, shadow_peak >> 10, shadow_loads, cls[0], kb[0] >> 10, cls[1], kb[1] >> 10, cls[2], kb[2] >> 10, cls[3], kb[3] >> 10, cls[4],
+            kb[4] >> 10, cls[5], kb[5] >> 10, cls[6], kb[6] >> 10, cls[7], kb[7] >> 10, comp >> 10);
+    DGL_ERR("DGL-TEXMEM at the peak: %s=%lu %s=%lu %s=%lu %s=%lu %s=%lu %s=%lu %s=%lu %s=%lu (kb)", cls[0],
+            cls_peak[0] >> 10, cls[1], cls_peak[1] >> 10, cls[2], cls_peak[2] >> 10, cls[3], cls_peak[3] >> 10, cls[4],
+            cls_peak[4] >> 10, cls[5], cls_peak[5] >> 10, cls[6], cls_peak[6] >> 10, cls[7], cls_peak[7] >> 10);
+}
+
 static void free_levels(dgl_level *L)
 {
     int l;
     for (l = 0; l < DGL_MAX_LEVELS; l++) {
+        shadow_sub(&L[l]);
         free(L[l].rgba);
+        free(L[l].px);
         free(L[l].idx);
         free(L[l].comp);
     }
@@ -815,10 +869,13 @@ void APIENTRY glTexImage2D(GLenum target, GLint level, GLint internalformat, GLs
     }
     if (dgl_be->tex_change)
         dgl_be->tex_change(t);
+    shadow_sub(L);
     free(L->rgba);
+    free(L->px);
     free(L->idx);
     free(L->comp);
-    L->rgba = L->idx = L->comp = NULL;
+    L->rgba = L->px = L->idx = L->comp = NULL;
+    L->st = DGL_ST_RGBA8;
     L->comp_size = 0;
     if (ifc == DGL_IF_INDEX)
         L->idx = (unsigned char *)calloc((size_t)w * h, 1);
@@ -831,11 +888,15 @@ void APIENTRY glTexImage2D(GLenum target, GLint level, GLint internalformat, GLs
     if (L->idx) {
         if (pixels)
             unpack_idx(pixels, w, h, L->idx, w);
-    } else if (pixels) {
-        unpack(format, pixels, w, h, L->rgba, w * 4, ifc);
     } else {
-        dgl_apply_ifmt(ifc, L->rgba, (long)w * h);   /* undefined texels: at least the right class */
+        if (pixels)
+            unpack(format, pixels, w, h, L->rgba, w * 4, ifc);
+        else
+            dgl_apply_ifmt(ifc, L->rgba, (long)w * h);   /* undefined texels: at least the right class */
+        dgl_level_compact(L);                       /* (held as the back end allows: texstore.c) */
     }
+    shadow_add(L);
+    shadow_loads++;
     t->dirty = 1;
     dgl_gl.dirty |= DGL_DIRTY_TEXTURE;
     FT_END();
@@ -865,7 +926,15 @@ void APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint x, GLint y, GLsi
             free(L->comp);
             L->comp = NULL;
             L->comp_size = 0;
+            shadow_sub(L);
+            if (dgl_level_uncompact(L) != 0) {
+                shadow_add(L);
+                dgl_gl_error(GL_OUT_OF_MEMORY);
+                return;
+            }
             unpack(format, pixels, w, h, L->rgba + ((size_t)y * L->w + x) * 4, L->w * 4, L->ifc);
+            dgl_level_compact(L);
+            shadow_add(L);
             t->dirty = 1;
             dgl_gl.dirty |= DGL_DIRTY_TEXTURE;
             FT_END();
@@ -893,14 +962,33 @@ void APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint x, GLint y, GLsi
         dgl_caps caps;
         size_t n = (size_t)w * (size_t)h;
         dgl_get_caps(&caps);
-        if (caps.sub_narrow && !L->idx && n > tmp_n && n <= 262144) {
+        if ((caps.sub_narrow || L->px) && !L->idx && n > tmp_n && n <= 262144) {
             uint32_t *p = (uint32_t *)realloc(tmp, n * 4);
             if (p)
                 tmp = p, tmp_n = n;
         }
         if (L->idx)
             unpack_idx(pixels, w, h, L->idx + (size_t)y * L->w + x, L->w);
-        else if (caps.sub_narrow && n && n <= tmp_n && !t->dirty) {
+        else if (L->px && n) {
+            /* (a level held smaller: the texels unpacked, then into its form, narrowed as below) */
+            unsigned char *buf = n <= tmp_n ? (unsigned char *)tmp : (unsigned char *)malloc(n * 4);
+            int box[4];
+            if (!buf) {
+                dgl_gl_error(GL_OUT_OF_MEMORY);
+                return;
+            }
+            unpack(format, pixels, w, h, buf, w * 4, L->ifc);
+            shadow_sub(L);
+            dgl_level_store_rows(L, buf, x, y, w, h, caps.sub_narrow && !t->dirty, box);
+            shadow_add(L);
+            if (buf != (unsigned char *)tmp)
+                free(buf);
+            if (box[2] < box[0]) {
+                FT_END();
+                return;                         /* (every texel as it was) */
+            }
+            x = box[0], y = box[1], w = box[2] - box[0] + 1, h = box[3] - box[1] + 1;
+        } else if (caps.sub_narrow && n && n <= tmp_n && !t->dirty) {
             unpack(format, pixels, w, h, (unsigned char *)tmp, w * 4, L->ifc);
             narrow_rect(L, tmp, &x, &y, &w, &h);
             if (!w) {

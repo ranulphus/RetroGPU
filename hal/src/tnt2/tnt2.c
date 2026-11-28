@@ -1308,13 +1308,31 @@ static void swizzle_tables(int lw, int lh)
     }
 }
 
+/* RGBA8 components to 4, 5 and 6 bits, rounded to the nearest as DOS-GL's Matrox back end rounds them
+ * (dgl_pack_texel's (v * (2^b - 1) + 127) / 255). Truncated before: every texture and lightmap a little darker,
+ * twice over in GLQuake's texture times lightmap (2026-11-27). */
+static uint8_t q4[256], q5[256], q6[256];
+
+static void q_tables(void)
+{
+    static int ready;
+    unsigned v;
+    if (ready)
+        return;
+    for (v = 0; v < 256; v++)
+        q4[v] = (uint8_t)((v * 15 + 127) / 255), q5[v] = (uint8_t)((v * 31 + 127) / 255),
+        q6[v] = (uint8_t)((v * 63 + 127) / 255);
+    ready = 1;
+}
+
 /* As tnt2_tex_load, from RGBA8 levels (r, g, b, a bytes), converted to the chip's format on the way in one pass:
- * TNT2_TEX_A8R8G8B8, _R5G6B5, _A1R5G5B5 (alpha from its top bit), _A4R4G4B4. */
+ * TNT2_TEX_A8R8G8B8, _R5G6B5, _A1R5G5B5 (alpha from its top bit), _A4R4G4B4, rounded (q_tables). */
 uint32_t tnt2_tex_load_rgba8(uint32_t off, int fmt, int log2w, int log2h, int levels, const uint8_t *const *rgba)
 {
     static uint8_t *tmp;
     static uint32_t tmp_bytes;
     int cpp = fmt == TNT2_TEX_A8R8G8B8 ? 4 : 2, n, x, y, i;
+    q_tables();
     for (n = 0; n < levels; n++) {
         int lw = log2w > n ? log2w - n : 0, lh = log2h > n ? log2h - n : 0, w = 1 << lw, h = 1 << lh;
         uint32_t bytes = (uint32_t)(w * h * cpp);
@@ -1343,13 +1361,13 @@ uint32_t tnt2_tex_load_rgba8(uint32_t off, int fmt, int log2w, int log2h, int le
                 uint32_t sy = sw_y[y];
                 if (fmt == TNT2_TEX_R5G6B5)
                     for (x = 0; x < w; x++, s += 4)
-                        t16[sw_x[x] | sy] = (uint16_t)((s[0] >> 3) << 11 | (s[1] >> 2) << 5 | (s[2] >> 3));
+                        t16[sw_x[x] | sy] = (uint16_t)(q5[s[0]] << 11 | q6[s[1]] << 5 | q5[s[2]]);
                 else if (fmt == TNT2_TEX_A1R5G5B5)
                     for (x = 0; x < w; x++, s += 4)
-                        t16[sw_x[x] | sy] = (uint16_t)((s[3] >> 7) << 15 | (s[0] >> 3) << 10 | (s[1] >> 3) << 5 | (s[2] >> 3));
+                        t16[sw_x[x] | sy] = (uint16_t)((s[3] >> 7) << 15 | q5[s[0]] << 10 | q5[s[1]] << 5 | q5[s[2]]);
                 else
                     for (x = 0; x < w; x++, s += 4)
-                        t16[sw_x[x] | sy] = (uint16_t)((s[3] >> 4) << 12 | (s[0] >> 4) << 8 | (s[1] >> 4) << 4 | (s[2] >> 4));
+                        t16[sw_x[x] | sy] = (uint16_t)(q4[s[3]] << 12 | q4[s[0]] << 8 | q4[s[1]] << 4 | q4[s[2]]);
             }
         }
         d32 = (volatile uint32_t *)(tnt2_fb + off);
@@ -1370,9 +1388,9 @@ uint32_t tnt2_tex_load_rgba8(uint32_t off, int fmt, int log2w, int log2h, int le
  * a side texel by texel. The engine done with the texture first: the caller's fence (tnt2_mark_wait). */
 static uint32_t texel16(int fmt, const uint8_t *s)
 {
-    return fmt == TNT2_TEX_R5G6B5 ? (uint32_t)((s[0] >> 3) << 11 | (s[1] >> 2) << 5 | (s[2] >> 3))
-         : fmt == TNT2_TEX_A1R5G5B5 ? (uint32_t)((s[3] >> 7) << 15 | (s[0] >> 3) << 10 | (s[1] >> 3) << 5 | (s[2] >> 3))
-         : (uint32_t)((s[3] >> 4) << 12 | (s[0] >> 4) << 8 | (s[1] >> 4) << 4 | (s[2] >> 4));
+    return fmt == TNT2_TEX_R5G6B5 ? (uint32_t)(q5[s[0]] << 11 | q6[s[1]] << 5 | q5[s[2]])
+         : fmt == TNT2_TEX_A1R5G5B5 ? (uint32_t)((s[3] >> 7) << 15 | q5[s[0]] << 10 | q5[s[1]] << 5 | q5[s[2]])
+         : (uint32_t)(q4[s[3]] << 12 | q4[s[0]] << 8 | q4[s[1]] << 4 | q4[s[2]]);
 }
 
 void tnt2_tex_sub_rgba8(uint32_t off, int fmt, int log2w, int log2h, int x0, int y0, int w, int h,
@@ -1382,6 +1400,7 @@ void tnt2_tex_sub_rgba8(uint32_t off, int fmt, int log2w, int log2h, int x0, int
     static const uint8_t bx[16] = { 0, 1, 0, 1, 2, 3, 2, 3, 0, 1, 0, 1, 2, 3, 2, 3 };
     static const uint8_t by[16] = { 0, 0, 1, 1, 0, 0, 1, 1, 2, 2, 3, 3, 2, 2, 3, 3 };
     int x, y, i;
+    q_tables();
     swizzle_tables(log2w, log2h);
     if (log2w < 2 || log2h < 2) {
         for (y = y0; y < y0 + h; y++) {
@@ -1406,11 +1425,11 @@ void tnt2_tex_sub_rgba8(uint32_t off, int fmt, int log2w, int log2h, int x0, int
             BODY                                                                                \
         }
 #define TNT2_Q(i) (s + (by[i] * stride + bx[i]) * 4)
-#define TNT2_565(q) ((uint32_t)((q)[0] >> 3) << 11 | (uint32_t)((q)[1] >> 2) << 5 | (uint32_t)((q)[2] >> 3))
-#define TNT2_1555(q) ((uint32_t)((q)[3] >> 7) << 15 | (uint32_t)((q)[0] >> 3) << 10 | (uint32_t)((q)[1] >> 3) << 5 | \
-                      (uint32_t)((q)[2] >> 3))
-#define TNT2_4444(q) ((uint32_t)((q)[3] >> 4) << 12 | (uint32_t)((q)[0] >> 4) << 8 | (uint32_t)((q)[1] >> 4) << 4 | \
-                      (uint32_t)((q)[2] >> 4))
+#define TNT2_565(q) ((uint32_t)q5[(q)[0]] << 11 | (uint32_t)q6[(q)[1]] << 5 | (uint32_t)q5[(q)[2]])
+#define TNT2_1555(q) ((uint32_t)((q)[3] >> 7) << 15 | (uint32_t)q5[(q)[0]] << 10 | (uint32_t)q5[(q)[1]] << 5 | \
+                      (uint32_t)q5[(q)[2]])
+#define TNT2_4444(q) ((uint32_t)q4[(q)[3]] << 12 | (uint32_t)q4[(q)[0]] << 8 | (uint32_t)q4[(q)[1]] << 4 | \
+                      (uint32_t)q4[(q)[2]])
 #define TNT2_PAIRS(CONV)                                                                        \
     {                                                                                           \
         volatile uint32_t *d = (volatile uint32_t *)(tnt2_fb + off + t * 2);                    \

@@ -20,16 +20,34 @@ int      dgl_format_bytes(GLenum format);
 /* texture.c */
 #define DGL_MAX_LEVELS 12
 
+/* How a level's shadow copy holds its texels (texstore.c): RGBA8; RGB in 3 bytes; RGB565 quantised as the back end
+ * quantises it, truncating (the NV layer's) or rounding (the Matrox's); one byte (luminance, alpha, intensity, grey
+ * RGB); luminance and alpha. Every form but RGBA8 lives in px, read through dgl_level_span / dgl_level_rgba. */
+enum { DGL_ST_RGBA8, DGL_ST_RGB8, DGL_ST_RGB565T, DGL_ST_RGB565R, DGL_ST_X8, DGL_ST_XA8 };
+
 typedef struct {
     int      w, h;                 /* as uploaded */
     int      ifc;                  /* internal format class, DGL_IF_* */
     GLint    ifmt;                 /* the internal format as given */
-    unsigned char *rgba;           /* shadow copy, RGBA8, already reduced to the class */
+    unsigned char *rgba;           /* shadow copy, RGBA8, already reduced to the class (DGL_ST_RGBA8) */
+    unsigned char *px;             /* ... or held smaller (st), rgba NULL */
+    int      st;                   /* DGL_ST_* */
     unsigned char *idx;            /* DGL_IF_INDEX instead: the colour indices */
     unsigned char *comp;           /* glCompressedTexImage2DARB's blocks as given (texcomp.c), or NULL */
     int      comp_size;
 } dgl_level;
-#define DGL_LEVEL_DEFINED(L) ((L)->rgba || (L)->idx)
+#define DGL_LEVEL_TEXELS(L)  ((L)->rgba || (L)->px)          /* (colour texels, as opposed to indices) */
+#define DGL_LEVEL_DEFINED(L) ((L)->rgba || (L)->px || (L)->idx)
+
+/* texstore.c */
+int  dgl_st_bytes(int st);                                  /* bytes a texel */
+void dgl_level_compact(dgl_level *L);   /* RGBA8 into the form the back end allows (dgl_backend.tex_store) */
+void dgl_level_store_rows(dgl_level *L, const unsigned char *rgba, int x, int y, int w, int h, int narrow, int *box);
+const unsigned char *dgl_level_span(const dgl_level *L, size_t i, long n, unsigned char *buf);
+const unsigned char *dgl_level_rgba(const dgl_level *L, int slot);
+const unsigned char *dgl_level_rgba_rect(const dgl_level *L, int slot, int x, int y, int w, int h);
+void dgl_level_rgba_done(void);
+int  dgl_level_uncompact(dgl_level *L);  /* back to RGBA8 (0, or -1 out of memory) */
 
 /* A colour table (palette.c): 256 entries at most, reduced to its internal
  * format; gen changes with every load. */
@@ -61,6 +79,7 @@ typedef struct dgl_texture {
 #define DGL_FACE_LEVEL(t, f, l) ((f) ? &(t)->faces[(f) - 1][l] : &(t)->level[l])
 /* Every texture object, in the table's order (texture.c). */
 int dgl_texture_count(void);
+void dgl_tex_mem_report(void);          /* DGL-TEXMEM: the shadow copies' bytes by class */
 dgl_texture *dgl_texture_nth(int i);    /* NULL for an empty place */
 
 /* Engine syncs (texture.c): everything drawn (the device's sync). */

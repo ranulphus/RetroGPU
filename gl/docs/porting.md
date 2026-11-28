@@ -26,9 +26,33 @@ dglSwapBuffers();
 dglShutdown();
 ```
 
-- `dglEnumModes` lists, smallest first, the 16-bit modes the card's BIOS
-  offers and (v1.2) 320x200, 320x240, 400x300, 512x384 and 640x512,
+- `dglEnumModes` lists, smallest first, the modes the card's BIOS offers
+  at each colour depth the card draws (`color_bits` 16; 32 on the TNT to
+  Quadro2, Rage 128 and Radeon, not yet the Matrox; `max_depth_bits` 24 at
+  32 bits) and (v1.2) 320x200, 320x240, 400x300, 512x384 and 640x512,
   which the BIOSes lack. See "Resolutions" below.
+- **A program chooses its own display settings** (the owner, 2026-11-27): a
+  menu lists `dglEnumModes`; a size and depth from a command line go to
+  `dglInit` as asked. What the card can't draw comes as its closest (v1.9:
+  32-bit colour as 16 and Z24 as Z16 on a Matrox until its 32-bit path or on
+  the ViRGE, a depth buffer or stencil it lacks as what it has), in one
+  `DGL-WARN asked ...: given ...` line; `glGetIntegerv` with `GL_RED_BITS`,
+  `GL_DEPTH_BITS` and `GL_STENCIL_BITS` gives what the context got.
+  `DGLConfig.exact` makes `dglInit` fail instead, its error naming what the
+  card draws. Our ports pass their own settings: GLQuake's and Quake 2's
+  `-bpp` (Quake 2's `vid_glbpp`), Half-Life's `-bpp 32` (its renderer's
+  sizes), and SDL programs' GL sizes (`docs/sdl.md`). An unsized texture
+  format (`GL_RGB`, `GL_LUMINANCE`) is drawn at the screen's depth: RGB565
+  on a 16-bit screen, eight bits a component on a 32-bit one (TNT to
+  Quadro2; the Matrox once it draws 32).
+- **Texture copies.** DOS-GL keeps each texture level in system memory (the
+  back ends load from it, and again after an eviction). On the Matrox, TNT
+  to Quadro2 cards a copy is held as the card draws it: plain RGB as RGB565
+  rounded as the card rounds (each upload gives the same texels), one byte
+  for luminance, alpha, intensity and grey RGB, two for luminance-alpha,
+  three for RGB drawn at eight bits; elsewhere RGBA8 (`src/gl/texstore.c`).
+  GLQuake's demo1 peaked at 18.7 MB of copies, 9.3 MB so; `DGL_STATS` prints
+  a `DGL-TEXMEM` line at exit (the copies now and at their peak, by class).
 - A crash (#GP, #PF, #UD, divide error), `exit()` or Ctrl-Break resets the
   engine and restores text mode.
 - DOS-GL maps the card with near pointers (`__djgpp_nearptr_enable`). A
@@ -58,7 +82,7 @@ dglShutdown();
   takes the software renderer full-screen through the VBE BIOS (1.2 or
   later): any card, 8, 16 or 32 bits a pixel, with each swap copied to the
   screen. It is much slower than a Matrox card's engine. `DGL_COLOR_BITS=n`
-  overrides the context's depth, and `DGL_VBE_BANKED=1` copies through the
+  overrides the context's depth (on any card: a test's or a user's override of the program's choice), and `DGL_VBE_BANKED=1` copies through the
   banked window even where there is a linear framebuffer.
 - `dglSetWaitHook(fn, arg)` (0.3, `DGL_API_VERSION` 0x0103) runs `fn(arg)`
   about once a millisecond while `dglSwapBuffers` waits for the drawing

@@ -46,17 +46,30 @@ SDL_DestroyWindow(w);
 
 - The window's size picks the mode: any of DOS-GL's, including 320x200,
   320x240, 400x300, 512x384 and 640x512, which it draws scaled (or zoomed)
-  into a larger BIOS mode. `SDL_GetFullscreenDisplayModes` lists them as
-  RGB565 modes; the ones only DOS-GL has are for OpenGL windows (a
-  software window asking for one gets an error). A size DOS-GL lacks is
-  rounded up to the smallest of its modes that holds it.
+  into a larger BIOS mode. `SDL_GetFullscreenDisplayModes` lists each size
+  at each colour depth DOS-GL draws it: RGB565, and XRGB8888 on the cards
+  with 32-bit colour (TNT to Quadro2, Rage 128, Radeon; not yet the
+  Matrox); the ones only DOS-GL has are for OpenGL windows (a software
+  window asking for one gets an error). A size DOS-GL lacks is rounded up
+  to the smallest of its modes that holds it.
+- The colour depth (patch 0013) is the program's GL sizes:
+  `SDL_GL_BUFFER_SIZE` where it set one, else the colour sizes (not a
+  fullscreen mode's format: SDL lists deeper modes first, so the closest
+  mode to a size is its 32-bit one). SDL's defaults on DOS are DOS-GL's own 16-bit
+  (`SDL_GL_RED_SIZE` 5, green 6, blue 5, alpha 0), so a program that sets
+  none keeps 16-bit colour; eight bits a component (or any alpha) asks for
+  32. `SDL_GL_DEPTH_SIZE` above 16 asks for a 24-bit depth buffer,
+  `SDL_GL_STENCIL_SIZE` for a stencil. What the card can't draw comes as
+  its closest (32-bit colour as 16, Z24 as Z16), a `DGL-WARN` line naming
+  it, and `SDL_GL_GetAttribute` reads what was given; the hint
+  `SDL_DOS_GL_EXACT=1` makes context creation fail instead.
 - One OpenGL window and one context at a time. The size is fixed for the
   context's life: to change resolution, destroy the context and window
   and create them again (textures and display lists go with the context).
 - `SDL_GL_SetSwapInterval(0)` turns vsync off (DOS-GL's default is on).
 - `SDL_GL_GetProcAddress` returns every GL 1.1 function and DOS-GL's
-  extensions. The limits are DOS-GL's (`docs/porting.md`): RGB565, no GL
-  lighting, no stencil, power-of-two textures.
+  extensions. The limits are DOS-GL's (`docs/porting.md`): the colour
+  depths above, power-of-two textures.
 - SDL's OpenGL `SDL_Renderer` is not built (it needs GL functions DOS-GL
   lacks); `SDL_Renderer` on DOS stays software, in software windows.
 - DOS-GL's environment switches (`DGL_STATS`, `DGL_SNAP`, `DGL_EXIT_AFTER`,

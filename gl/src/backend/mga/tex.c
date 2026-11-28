@@ -98,10 +98,11 @@ static int alloc_vram(const dgl_texture *self, uint32_t size, uint32_t *off)
     }
 }
 
-/* Texel i of a level as RGBA8: its shadow, or its index looked up in pal. */
+/* Texel i of a level as RGBA8: its shadow (texstore.c), or its index looked up in pal. */
 static const unsigned char *texel(const dgl_level *L, const dgl_palette *pal, size_t i)
 {
-    return L->idx ? dgl_palette_texel(pal, L->idx[i]) : L->rgba + i * 4;
+    static unsigned char e[4];
+    return L->idx ? dgl_palette_texel(pal, L->idx[i]) : dgl_level_span(L, i, 1, e);
 }
 
 /* The alpha class of n texels of a level from texel i. */
@@ -111,8 +112,19 @@ static int texels_class(const dgl_level *L, const dgl_palette *pal, size_t i, lo
     long k;
     if (!L->idx && (L->ifc == DGL_IF_RGB || L->ifc == DGL_IF_LUMINANCE))
         return DGL_ALPHA_OPAQUE;                 /* (dgl_apply_ifmt made every alpha 1) */
-    if (!L->idx)
-        return dgl_alpha_class(L->rgba + i * 4, n);
+    if (!L->idx) {
+        static unsigned char e[512 * 4];
+        while (n > 0) {
+            long m = n > 512 ? 512 : n;
+            int c = dgl_alpha_class(dgl_level_span(L, i, m, e), m);
+            if (c == DGL_ALPHA_GRADIENT)
+                return c;
+            if (c == DGL_ALPHA_BINARY)
+                cls = c;
+            i += (size_t)m, n -= m;
+        }
+        return cls;
+    }
     for (k = 0; k < n; k++) {
         unsigned a = dgl_palette_texel(pal, L->idx[i + (size_t)k])[3];
         if (a == 255)
@@ -135,12 +147,13 @@ static void pack_span(const dgl_texture *t, int hwfmt, const dgl_level *L, const
                       int n, uint32_t *row, int at)
 {
     static uint16_t px[2048];
+    static unsigned char e[2048 * 4];
     int i;
     if (hwfmt == DGL_TW8)
         for (i = 0; i < n; i++)
             row[(at + i) >> 2] |= (uint32_t)L->idx[src + i] << (((at + i) & 3) * 8);
     else if (!L->idx && n <= 2048) {
-        dgl_pack_row(hwfmt, MT(t)->grey, L->rgba + src * 4, n, px);     /* (a row at once, by table) */
+        dgl_pack_row(hwfmt, MT(t)->grey, dgl_level_span(L, src, n, e), n, px);  /* (a row at once, by table) */
         for (i = 0; i < n; i++)
             row[(at + i) >> 1] |= (uint32_t)px[i] << (((at + i) & 1) * 16);
     } else

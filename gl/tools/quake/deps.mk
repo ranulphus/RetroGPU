@@ -2,6 +2,6 @@
 # DJGPP ports qdos (NetQuake, GLQuake-derived) and q2dos, each with a DOS-GL
 # backend, pinned by commit. tools/quake/build.sh reads these lines.
 QDOS_URL     := https://github.com/ranulphus/qdos-dosgl
-QDOS_COMMIT  := fa04ad594a986395afafea05aaa72b1c0ad48bab
+QDOS_COMMIT  := 220a669e80f0158644399a15875a356eaa2a4f20
 Q2DOS_URL    := https://github.com/ranulphus/q2dos-dosgl
-Q2DOS_COMMIT := 24d2ed6ba74236aee6233afb8c9dd50e2da19274
+Q2DOS_COMMIT := 4b4b1217ab3ae9ac3f2996cd7844bae272b5086c

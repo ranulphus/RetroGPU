@@ -1,0 +1,183 @@
+diff --git a/src/video/SDL_video.c b/src/video/SDL_video.c
+index af724cc..bd4289e 100644
+--- a/src/video/SDL_video.c
++++ b/src/video/SDL_video.c
+@@ -4993,10 +4993,19 @@ void SDL_GL_ResetAttributes(void)
+     _this->egl_contextattrib_callback = NULL;
+     _this->egl_attrib_callback_userdata = NULL;
+ 
++#ifdef SDL_VIDEO_OPENGL_DOSGL
++    // DOS-GL's own default, 16-bit colour (RGB565): a program that sets no sizes keeps it, one that asks for eight
++    // bits a component gets 32-bit colour where the card draws it (as elsewhere the desktop's depth is the default)
++    _this->gl_config.red_size = 5;
++    _this->gl_config.green_size = 6;
++    _this->gl_config.blue_size = 5;
++    _this->gl_config.alpha_size = 0;
++#else
+     _this->gl_config.red_size = 8;
+     _this->gl_config.green_size = 8;
+     _this->gl_config.blue_size = 8;
+     _this->gl_config.alpha_size = 8;
++#endif
+     _this->gl_config.buffer_size = 0;
+     _this->gl_config.depth_size = 16;
+     _this->gl_config.stencil_size = 0;
+diff --git a/src/video/dos/SDL_dosopengl.c b/src/video/dos/SDL_dosopengl.c
+index 1bb3dc0..c5a5de7 100644
+--- a/src/video/dos/SDL_dosopengl.c
++++ b/src/video/dos/SDL_dosopengl.c
+@@ -40,16 +40,22 @@
+ static DGLMode dosgl_modes[MAX_DOSGL_MODES];
+ static int num_dosgl_modes;
+ 
+-static bool IsDOSGLSize(int w, int h)
++// A size DOS-GL draws at that colour depth (dglEnumModes lists each size at each depth the card draws).
++static bool IsDOSGLMode(int w, int h, int bits)
+ {
+     for (int i = 0; i < num_dosgl_modes; i++) {
+-        if (dosgl_modes[i].width == w && dosgl_modes[i].height == h) {
++        if (dosgl_modes[i].width == w && dosgl_modes[i].height == h && dosgl_modes[i].color_bits == bits) {
+             return true;
+         }
+     }
+     return false;
+ }
+ 
++static SDL_PixelFormat DOSGLFormat(int bits)
++{
++    return bits == 32 ? SDL_PIXELFORMAT_XRGB8888 : SDL_PIXELFORMAT_RGB565;
++}
++
+ #if defined(DGL_API_VERSION) && DGL_API_VERSION >= 0x0103
+ static void DOSVESA_GL_WaitHook(void *arg);
+ #endif
+@@ -67,10 +73,14 @@ void DOSVESA_GL_AddDisplayModes(SDL_VideoDevice *device, SDL_VideoDisplay *displ
+         num_dosgl_modes = 0; // no DOS-GL card: OpenGL windows will fail to get a context
+     }
+ 
+-    // Sizes the BIOS already has in 16-bit colour are listed from VBE; SDL
+-    // refuses the duplicates. The rest (320x200, 320x240, 400x300, ...)
+-    // exist only for OpenGL windows.
++    // Each size at each depth DOS-GL draws it (16-bit RGB565; 32-bit XRGB8888
++    // on the cards that have it). Sizes the BIOS already has at that depth are
++    // listed from VBE; SDL refuses the duplicates. The rest (320x200,
++    // 320x240, 400x300, ...) exist only for OpenGL windows.
+     for (int i = 0; i < num_dosgl_modes; i++) {
++        if (dosgl_modes[i].color_bits != 16 && dosgl_modes[i].color_bits != 32) {
++            continue;
++        }
+         SDL_DisplayModeData *internal = (SDL_DisplayModeData *)SDL_calloc(1, sizeof(*internal));
+         if (!internal) {
+             continue;
+@@ -78,12 +88,12 @@ void DOSVESA_GL_AddDisplayModes(SDL_VideoDevice *device, SDL_VideoDisplay *displ
+         internal->mode_id = DOSGL_MODE_SENTINEL;
+         internal->w = (Uint16)dosgl_modes[i].width;
+         internal->h = (Uint16)dosgl_modes[i].height;
+-        internal->bpp = 16;
++        internal->bpp = (Uint8)dosgl_modes[i].color_bits;
+         internal->num_planes = 1;
+ 
+         SDL_DisplayMode mode;
+         SDL_zero(mode);
+-        mode.format = SDL_PIXELFORMAT_RGB565;
++        mode.format = DOSGLFormat(dosgl_modes[i].color_bits);
+         mode.w = dosgl_modes[i].width;
+         mode.h = dosgl_modes[i].height;
+         mode.pixel_density = 1.0f;
+@@ -126,15 +136,15 @@ SDL_DisplayMode *DOSVESA_GL_SoftwareMode(SDL_VideoDisplay *display, SDL_DisplayM
+     return best ? best : largest;
+ }
+ 
+-// The display's 16-bit mode for an OpenGL window of about w x h: that size
+-// if DOS-GL has it, else the smallest DOS-GL size that holds it, else the
+-// largest.
+-static SDL_DisplayMode *ChooseGLMode(SDL_VideoDisplay *display, int w, int h)
++// The display's mode at colour depth bits for an OpenGL window of about w x
++// h: that size if DOS-GL has it, else the smallest DOS-GL size that holds it,
++// else the largest.
++static SDL_DisplayMode *ChooseGLMode(SDL_VideoDisplay *display, int w, int h, int bits)
+ {
+     SDL_DisplayMode *best = NULL, *largest = NULL;
+     for (int i = 0; i < display->num_fullscreen_modes; i++) {
+         SDL_DisplayMode *m = &display->fullscreen_modes[i];
+-        if (m->format != SDL_PIXELFORMAT_RGB565 || !IsDOSGLSize(m->w, m->h)) {
++        if (m->format != DOSGLFormat(bits) || !IsDOSGLMode(m->w, m->h, bits)) {
+             continue;
+         }
+         if (m->w == w && m->h == h) {
+@@ -150,6 +160,20 @@ static SDL_DisplayMode *ChooseGLMode(SDL_VideoDisplay *display, int w, int h)
+     return best ? best : largest;
+ }
+ 
++// The colour depth the program wants, from its GL sizes: SDL_GL_BUFFER_SIZE where it set one (PrBoom-plus's
++// gl_colorbuffer_bits), else the red, green, blue and alpha sizes (more than RGB565's bits, or any alpha, is 32-bit
++// colour). Not a fullscreen mode's format: SDL lists deeper modes first, so the closest mode to a size is its
++// 32-bit one whatever the program asked for.
++static int WantedColourBits(SDL_VideoDevice *device, SDL_Window *window)
++{
++    (void)window;
++    if (device->gl_config.buffer_size > 0) {
++        return device->gl_config.buffer_size > 16 ? 32 : 16;
++    }
++    return (device->gl_config.red_size > 5 || device->gl_config.green_size > 6 || device->gl_config.blue_size > 5 ||
++            device->gl_config.alpha_size > 0) ? 32 : 16;
++}
++
+ bool DOSVESA_GL_CreateWindow(SDL_VideoDevice *device, SDL_Window *window)
+ {
+     SDL_VideoData *data = device->internal;
+@@ -164,9 +188,21 @@ bool DOSVESA_GL_CreateWindow(SDL_VideoDevice *device, SDL_Window *window)
+         w = window->requested_fullscreen_mode.w;
+         h = window->requested_fullscreen_mode.h;
+     }
+-    mode = display ? ChooseGLMode(display, w, h) : NULL;
++    // At the depth the program wants where DOS-GL draws that size at it, else at 16 bits: DOS-GL is still asked
++    // for the depth wanted at context creation, so it says the closest it gave (or, with SDL_DOS_GL_EXACT, fails).
++    data->gl_color_bits = WantedColourBits(device, window);
++    mode = display ? ChooseGLMode(display, w, h, data->gl_color_bits) : NULL;
++    if (mode && (mode->w != w || mode->h != h) && data->gl_color_bits != 16) {
++        SDL_DisplayMode *m16 = ChooseGLMode(display, w, h, 16);
++        if (m16 && m16->w == w && m16->h == h) {
++            mode = m16;                 // (that size, at the closest depth)
++        }
++    }
++    if (!mode && display) {
++        mode = ChooseGLMode(display, w, h, 16);
++    }
+     if (!mode) {
+-        return SDL_SetError("DOS-GL: no OpenGL mode (no Matrox G200/G400/G450?)");
++        return SDL_SetError("DOS-GL: no OpenGL mode (no card DOS-GL draws on?)");
+     }
+ 
+     // The mode is DOS-GL's to set, at context creation: SDL only records it,
+@@ -252,10 +288,16 @@ SDL_GLContext DOSVESA_GL_CreateContext(SDL_VideoDevice *device, SDL_Window *wind
+     SDL_zero(cfg);
+     cfg.width = window->w;
+     cfg.height = window->h;
+-    cfg.color_bits = 16;
+-    cfg.depth_bits = device->gl_config.depth_size > 0 ? 16 : 0;
++    cfg.color_bits = data->gl_color_bits ? data->gl_color_bits : 16;
++    cfg.depth_bits = device->gl_config.depth_size > 16 ? 24 : device->gl_config.depth_size > 0 ? 16 : 0;
+     cfg.double_buffer = device->gl_config.double_buffer ? 1 : 0;
+     cfg.vsync = data->gl_swap_interval != 0;
++#if defined(DGL_API_VERSION) && DGL_API_VERSION >= 0x0109
++    // What the card can't draw comes as its closest (a DGL-WARN line names it; SDL_GL_GetAttribute reads what was
++    // given); SDL_DOS_GL_EXACT=1 makes it an error instead.
++    cfg.stencil_bits = device->gl_config.stencil_size > 0 ? 8 : 0;
++    cfg.exact = SDL_GetHintBoolean("SDL_DOS_GL_EXACT", false) ? 1 : 0;
++#endif
+ #if defined(DGL_API_VERSION) && DGL_API_VERSION >= 0x0103
+     // The wait hook before DOS-GL's first BIOS calls: under GLOS each costs ~9 times a DOS call, and a start-up's
+     // mode list and mode set ran ~8 s with the audio thread never given a turn (GLOS's stream starved).
+diff --git a/src/video/dos/SDL_dosvideo.h b/src/video/dos/SDL_dosvideo.h
+index 5b4a01d..853e0ff 100644
+--- a/src/video/dos/SDL_dosvideo.h
++++ b/src/video/dos/SDL_dosvideo.h
+@@ -86,6 +86,7 @@ struct SDL_VideoData
+     bool gl_owns_screen;    // DOS-GL sets and restores modes: no VBE mode sets until VideoQuit
+     bool gl_context_active; // dglInit done, dglShutdown not yet
+     int gl_swap_interval;   // 1: swaps wait for the retrace (DOS-GL's default)
++    int gl_color_bits;      // the colour depth the program asked for (16 or 32): DOS-GL gives it or its closest
+ #endif
+ };
+ 
